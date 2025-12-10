@@ -23,7 +23,7 @@ class PaperSubmissionGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("Efficient Reasoning Models 论文提交系统")
+        self.root.title("Awesome 论文提交界面")
         self.root.geometry("1200x800")
         
         # 设置图标和主题
@@ -65,7 +65,7 @@ class PaperSubmissionGUI:
         # 标题
         title_label = ttk.Label(
             main_frame, 
-            text="🎓 Efficient Reasoning Models 论文提交系统",
+            text="🎓 Awesome 论文提交界面",
             font=("Arial", 16, "bold")
         )
         title_label.grid(row=0, column=0, columnspan=3, pady=(0, 20))

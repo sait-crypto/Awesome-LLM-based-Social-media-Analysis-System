@@ -127,13 +127,20 @@ class UpdateProcessor:
         # 更新结果
         result['success'] = True
         result['new_papers'] = len(added_papers)
-        result['conflicts'] = [
-            {
-                'new': asdict(new_paper),
+        # Normalize conflicts into a list of dicts; db_manager may return either
+        # a list of (new_paper, existing_paper) tuples or a list of Paper objects.
+        conflicts_list = []
+        for item in conflict_papers:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                new_paper, existing_paper = item
+            else:
+                new_paper = item
+                existing_paper = None
+            conflicts_list.append({
+                'new': asdict(new_paper) if new_paper else None,
                 'existing': asdict(existing_paper) if existing_paper else None
-            }
-            for new_paper, existing_paper in conflict_papers
-        ]
+            })
+        result['conflicts'] = conflicts_list
         
         # 清空更新文件（如果更新成功）
         if added_papers and not conflict_papers:

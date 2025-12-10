@@ -40,6 +40,9 @@
 
 | Title & Authors | Analogy Summary | Summary | Pipeline | Links |
 |:--| :----: | :---: | :---: | :---: |
+|[TamperTok: Forensics\-driven tokenized](https://ieeexplore.ieee.org/document/10246420/) <br> 123 |123||||[Paper](https://ieeexplore.ieee.org/document/10246420/)|
+|[222333](https://ojs.aaai.org/index.php/ICWSM/article/view/35807) <br> 331 |123||||[Paper](https://ojs.aaai.org/index.php/ICWSM/article/view/35807)|
+|[3321](https://dl.acm.org/doi/10.1145/3746027.3754828) <br> 23 |2||||[Paper](https://dl.acm.org/doi/10.1145/3746027.3754828)|
 |[222333](https://ojs.aaai.org/index.php/ICWSM/article/view/35807) <br> 331 |123||||[Paper](https://ojs.aaai.org/index.php/ICWSM/article/view/35807)|
 |[3321](https://dl.acm.org/doi/10.1145/3746027.3754828) <br> 23 |2||||[Paper](https://dl.acm.org/doi/10.1145/3746027.3754828)|
 |[3321](https://dl.acm.org/doi/10.1145/3746027.3754828) <br> 23 |2||||[Paper](https://dl.acm.org/doi/10.1145/3746027.3754828)|
@@ -55,6 +58,7 @@
 
 | Title & Authors | Analogy Summary | Summary | Pipeline | Links |
 |:--| :----: | :---: | :---: | :---: |
+|[123](https://dl.acm.org/doi/10.1145/3746027.3754828) <br> 321 |123||||[Paper](https://dl.acm.org/doi/10.1145/3746027.3754828)|
 |[123](https://dl.acm.org/doi/10.1145/3746027.3754828) <br> 321 |123||||[Paper](https://dl.acm.org/doi/10.1145/3746027.3754828)|
 |[123](https://dl.acm.org/doi/10.1145/3746027.3754828) <br> 321 |123||||[Paper](https://dl.acm.org/doi/10.1145/3746027.3754828)|
 |[123](https://dl.acm.org/doi/10.1145/3746027.3754828) <br> 321 |123||||[Paper](https://dl.acm.org/doi/10.1145/3746027.3754828)|
