@@ -265,17 +265,8 @@ class ReadmeGenerator:
 
 ### Quick Links
   - [Make Long CoT Short](#Make-Long-CoT-Short)
-    - [SFT-based Methods](#SFT-based-Methods)
-    - [RL-based Methods](#RL-based-Methods)
-    - [Prompt-driven Methods](#Prompt-driven-Methods)
-    - [Latent Reasoning](#Latent-Reasoning)
   - [Build SLM with Strong Reasoning Ability](#Build-SLM-with-Strong-Reasoning-Ability)
-    - [Distillation](#Distillation)
-    - [Quantization and Pruning](#Quantization-and-Pruning)
-    - [RL+SLM Methods](#rlslm-methods)
   - [Let Decoding More Efficient](#Let-Decoding-More-Efficient)
-    - [Efficient TTS](#Efficient-TTS)
-    - [Other Optimal Methods](#Other-Optimal-Methods)
   - [Efficient Multimodal Reasoning](#efficient-agentic-reasoning)
   - [Efficient Agentic Reasoning](#Efficient-Agentic-Reasoning)
   - [Evaluation and Benchmarks](#Evaluation-and-Benchmarks)
