@@ -130,6 +130,8 @@ class Paper:
     
     def is_similar_to(self, other: 'Paper') -> bool:
         """检查是否与另一篇论文相似（DOI或标题相同）"""
+        self.title=str(self.title).strip()
+        other.title=str(other.title).strip()
         if self.doi and other.doi and self.doi == other.doi:
             return True
         if self.title and other.title and self.title.lower() == other.title.lower():
