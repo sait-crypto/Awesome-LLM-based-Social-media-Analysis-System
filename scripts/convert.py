@@ -6,22 +6,23 @@ import sys
 from pathlib import Path
 
 # 添加项目根目录到Python路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../'))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from scripts.core.config_loader import config_loader
-from scripts.core.database_manager import DatabaseManager
-from scripts.core.database_model import Paper
+from core.database_manager import DatabaseManager
+from core.database_model import Paper
 from scripts.utils import truncate_text, format_authors, create_hyperlink, escape_markdown
 import pandas as pd
 from typing import Dict, List
+
+from scripts.core.config_loader import get_config_instance
 
 
 class ReadmeGenerator:
     """README生成器"""
     
     def __init__(self):
-        self.config = config_loader
-        self.settings = config_loader.settings
+        self.config = get_config_instance()
+        self.settings = get_config_instance().settings
         self.db_manager = DatabaseManager()
         self.max_title_length = int(self.settings['readme'].get('max_title_length', 100))
         self.max_authors_length = int(self.settings['readme'].get('max_authors_length', 150))
@@ -30,6 +31,9 @@ class ReadmeGenerator:
         """生成README的论文表格部分"""
         # 加载数据库
         df = self.db_manager.load_database()
+        # 在生成 README 之前，确保所有字段在 "[翻译]" 之前截断
+        if df is not None and not df.empty:
+            df = self._truncate_translation_suffix(df)
         papers = self.db_manager.get_papers_from_dataframe(df)
         
         # 按分类分组
@@ -159,23 +163,23 @@ class ReadmeGenerator:
         
         if paper.summary_motivation:
             motivation = paper.summary_motivation.strip()
-            fields.append(f"{paper.summary_motivation}: {escape_markdown(motivation)}")
+            fields.append(f"{self.config.get_tag_field('summary_motivation', 'display_name')}: {escape_markdown(motivation)}")
         
         if paper.summary_innovation:
             innovation = paper.summary_innovation.strip()
-            fields.append(f"{paper.summary_innovation}: {escape_markdown(innovation)}")
+            fields.append(f"{self.config.get_tag_field('summary_innovation', 'display_name')}: {escape_markdown(innovation)}")
         
         if paper.summary_method:
             method = paper.summary_method.strip()
-            fields.append(f"{paper.summary_method}: {escape_markdown(method)}")
+            fields.append(f"{self.config.get_tag_field('summary_method', 'display_name')}: {escape_markdown(method)}")
         
         if paper.summary_conclusion:
             conclusion = paper.summary_conclusion.strip()
-            fields.append(f"{paper.summary_conclusion}: {escape_markdown(conclusion)}")
+            fields.append(f"{self.config.get_tag_field('summary_conclusion', 'display_name')}: {escape_markdown(conclusion)}")
         
         if paper.summary_limitation:
             limitation = paper.summary_limitation.strip()
-            fields.append(f"{paper.summary_limitation}: {escape_markdown(limitation)}")
+            fields.append(f"{self.config.get_tag_field('summary_limitation', 'display_name')}: {escape_markdown(limitation)}")
         
         if not fields:
             return ""
@@ -286,6 +290,37 @@ class ReadmeGenerator:
         except Exception as e:
             print(f"写入README文件失败: {e}")
             return False
+    
+    def _truncate_translation_suffix(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        对 DataFrame 中的文本字段进行处理：若单元格包含 "[翻译]" 字符串，
+        则截取该字符串之前的内容并去除末尾空白，避免 README 中出现翻译分隔及之后内容。
+        仅对字符串/对象列生效，保留其它类型不变。
+        """
+        df = df.copy()
+
+        def _truncate_val(v):
+            import pandas as _pd
+            if _pd.isna(v):
+                return ""
+            try:
+                s = str(v)
+                if "[翻译]" in s:
+                    return s.split("[翻译]")[0].rstrip()
+                return s
+            except Exception:
+                return str(v)
+
+        for col in df.columns:
+            try:
+                # 仅对字符串列或 object 列应用
+                if df[col].dtype == object or pd.api.types.is_string_dtype(df[col]):
+                    df[col] = df[col].apply(_truncate_val)
+            except Exception:
+                # 如果某列处理失败，跳过该列以保证生成流程不中断
+                continue
+
+        return df
 
 
 def main():

@@ -9,16 +9,16 @@ from typing import Dict, List, Optional, Any
 import time
 from dataclasses import asdict
 
-from .core.config_loader import config_loader
-from .core.database_model import Paper
+from scripts.core.config_loader import get_config_instance
+from scripts.core.database_model import Paper
 
 
 class AIGenerator:
     """AI内容生成器"""
     
     def __init__(self):
-        self.config = config_loader
-        self.settings = config_loader.settings
+        self.config = get_config_instance()
+        self.settings = get_config_instance().settings
         # 兼容配置项为 bool 或 str 的情况；确保得到布尔值
         enable_val = self.settings['ai'].get('enable_ai_generation', True)
         try:
@@ -98,9 +98,12 @@ class AIGenerator:
 1. 用一句话概括方法的核心
 2. 适当使用比喻或类比
 3. 保持学术性但易懂
-4. 长度控制在30-50字
+4. 长度控制在35字以内
 5. 提示词中前面标有[AI generated]的字段表示由AI生成，未经人类审核，请谨慎参考
-6. 生成中英双语，先英文再中文，中文部分用括号括起来
+6. 不能出现'|'字符
+7.生成中英双语，先英文再中文，使用"[翻译]"字符串分割
+
+"
 示例：
 推测决策：边等边猜，猜对血赚，猜错不亏
 群体智慧：决策小组模式
@@ -134,9 +137,12 @@ class AIGenerator:
         # 准备论文信息
         preprompt = f"""
 我在为综述写作收集论文，你需要朝着可供综述直接引用的方向，生成精悍的具体内容
-你只是总结分工的一部分，直接给出所要求内容，不要添加任何多余信息，它们由其他人生成
-提示词中前面标有[AI generated]的字段表示由AI生成，未经人类审核，请谨慎参考
-生成中英双语，先英文再中文，中文部分用括号括起来
+要求：
+1. 你只是总结分工的一部分，直接给出所要求内容，不要添加任何多余信息，它们由其他人生成
+2. 提示词中前面标有[AI generated]的字段表示由AI生成，未经人类审核，请谨慎参考
+3. 不能出现'|'字符
+4. 生成中英双语，先英文再中文，使用"[翻译]"字符串分割
+
 
 示例：
 以往研究没有考虑到假新闻存在一个形成过程（如果要求你给出动机）
@@ -167,7 +173,7 @@ class AIGenerator:
         # 1. 目标/动机
         motivation_prompt = f"""{preprompt}
 
-你的分工：请总结并直接给出这篇论文的研究目标或动机（40字以内）："""
+你的分工：请总结并直接给出这篇论文的研究目标或动机（35字以内）："""
         if  field == 'summary_motivation':
             motivation = self._call_api(motivation_prompt, max_tokens=80)
             if motivation:
@@ -176,7 +182,7 @@ class AIGenerator:
         # 2. 创新点
         innovation_prompt = f"""{preprompt}
 
-你的分工：请总结并直接给出这篇论文的主要创新点，即该论文有什么值得我引用到综述里的（40字以内）："""
+你的分工：请总结并直接给出这篇论文的主要创新点，即该论文有什么值得我引用到综述里的（35字以内）："""
         if field == 'summary_innovation':
             innovation = self._call_api(innovation_prompt, max_tokens=80)
             if innovation:
@@ -185,7 +191,7 @@ class AIGenerator:
         # 3. 方法精炼
         method_prompt = f"""{preprompt}
 
-你的分工：请精炼总结并直接给出这篇论文的核心方法（40字以内）："""
+你的分工：请精炼总结并直接给出这篇论文的核心方法（35字以内）："""
         if field == 'summary_method':
             method = self._call_api(method_prompt, max_tokens=80)
             if method:
@@ -194,7 +200,7 @@ class AIGenerator:
         # 4. 简要结论
         conclusion_prompt = f"""{preprompt}
 
-你的分工：请总结并直接给出这篇论文的主要结论或贡献（40字以内）："""
+你的分工：请总结并直接给出这篇论文的主要结论或贡献（35字以内）："""
         if field == 'summary_conclusion':
             conclusion = self._call_api(conclusion_prompt, max_tokens=80)
             if conclusion:
@@ -203,7 +209,7 @@ class AIGenerator:
         # 5. 重要局限/展望
         limitation_prompt = f"""{preprompt}
 
-你的分工：请总结并直接指出这篇论文的重要局限性或未来工作展望（50字以内）："""
+你的分工：请总结并直接指出这篇论文的重要局限性或未来工作展望（35字以内）："""
         if field == 'summary_limitation':
             limitation = self._call_api(limitation_prompt, max_tokens=80)
             if limitation:
@@ -275,7 +281,7 @@ class AIGenerator:
                 enhanced_paper.title_translation = translation
         
         # 2. 生成类比总结（如果为空）
-        if not enhanced_paper.analogy_summary or "[discord]" in str(enhanced_paper.analogy_summary):
+        if not enhanced_paper.analogy_summary or "[Deprecated]" in str(enhanced_paper.analogy_summary):
             summary = self.generate_analogy_summary(
                 enhanced_paper
             )

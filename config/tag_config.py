@@ -256,7 +256,7 @@ TAGS_CONFIG = {
             "immutable": False,
             "required": False,              
         },
-        # ==================== 数据库内部控制标签，一般不公开 ====================
+        # ==================== 数据库内部控制标签，不供提交时手动填写 ====================
         {
             "variable": "show_in_readme",
             "order": 18,
@@ -287,9 +287,22 @@ TAGS_CONFIG = {
             "variable": "notes",
             "order": 20,
             "table_name": "notes",
-            "display_name": "备注",
+            "display_name": "notes",
             "description": "其他备注信息",
             "type": "text",
+            "validation": None,
+            "show_in_readme": False,
+            "enabled": True,
+            "immutable": False,
+            "required": False,              
+        },
+        {
+            "variable": "submission_time",
+            "order": 21,
+            "table_name": "submission time",
+            "display_name": "submission time",
+            "description": "论文提交时间",
+            "type": "string",
             "validation": None,
             "show_in_readme": False,
             "enabled": True,

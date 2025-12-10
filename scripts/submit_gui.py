@@ -13,9 +13,19 @@ from datetime import datetime
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../'))
 
-from scripts.core.config_loader import config_loader
+from scripts.core.config_loader import get_config_instance
 from scripts.core.database_model import Paper
-from scripts.utils import read_json_file, write_json_file, get_current_timestamp, validate_url, validate_doi, clean_doi
+from scripts.utils import (
+    read_json_file, 
+    write_json_file, 
+    write_excel_file,
+    get_current_timestamp, 
+    validate_url, 
+    validate_doi, 
+    clean_doi,
+    normalize_dataframe_columns, 
+    normalize_json_papers
+)
 
 
 class PaperSubmissionGUI:
@@ -30,8 +40,8 @@ class PaperSubmissionGUI:
         self.root.tk.call('tk', 'scaling', 1.5)
         
         # 加载配置
-        self.config = config_loader
-        self.settings = config_loader.settings
+        self.config = get_config_instance()
+        self.settings = get_config_instance().settings
         
         # 论文列表
         self.papers = []  # 存储Paper对象
@@ -371,7 +381,6 @@ class PaperSubmissionGUI:
         self.status_var.set(message)
         self.root.update_idletasks()
     
-    # ...existing code...
     def load_existing_updates(self):
         """加载现有的更新文件"""
         if os.path.exists(self.update_json_path):
@@ -405,7 +414,6 @@ class PaperSubmissionGUI:
                     self.update_status(f"已加载 {len(self.papers)} 篇论文")
             except Exception as e:
                 messagebox.showerror("错误", f"加载更新文件失败: {e}")
-# ...existing code...
     
     def update_paper_list(self):
         """更新论文列表"""
@@ -642,7 +650,7 @@ class PaperSubmissionGUI:
         # 验证所有论文
         invalid_papers = []
         for i, paper in enumerate(self.papers):
-            errors = paper.is_valid(self.config)
+            errors = paper.is_valid()
             if errors:
                 invalid_papers.append((i+1, paper.title[:50], errors[:2]))
         
@@ -655,25 +663,36 @@ class PaperSubmissionGUI:
             messagebox.showerror("错误", error_msg)
             return
         
-        # 准备数据
+        # 准备数据（variable-keyed）
         papers_data = [paper.to_dict() for paper in self.papers]
+        # 先用config规范 JSON 内容（只保留 active tags，并规范 category）
+        normalized_json = normalize_json_papers(papers_data, self.config)
         data = {
-            'papers': papers_data,
-            'submission_time': get_current_timestamp(),
-            'total_papers': len(papers_data)
+            "papers": normalized_json,
+            "meta": {
+                "generated_at": get_current_timestamp()
+            }
         }
+        try:
+            write_json_file(self.update_json_path, data)
+        except Exception as e:
+            messagebox.showerror("错误", f"保存JSON失败: {e}")
+            return
         
-        # 保存到JSON文件
-        if write_json_file(self.update_json_path, data):
-            messagebox.showinfo("成功", f"已保存 {len(self.papers)} 篇论文到更新文件")
-        # 保存到JSON文件（并弹窗显示实际路径）
-        saved = write_json_file(self.update_json_path, data)
-        if saved:
-            msg = f"已保存 {len(self.papers)} 篇论文到更新文件\n文件路径：{self.update_json_path}"
-            print(msg)
-            messagebox.showinfo("成功", msg)
-        else:
-            messagebox.showerror("错误", "保存文件失败")
+        # 写 Excel：先生成 DataFrame，再规范列顺序并写入
+        from scripts.core.database_manager import DatabaseManager
+        dbm = DatabaseManager()
+        df = dbm.get_dataframe_from_papers(self.papers)
+        # normalize before write
+        df = normalize_dataframe_columns(df, self.config)
+        try:
+            write_excel_file(self.update_excel_path, df)
+        except Exception as e:
+            messagebox.showerror("错误", f"保存Excel失败: {e}")
+            return
+        
+        messagebox.showinfo("成功", "所有论文已保存到更新文件")
+        self.update_status(f"已保存 {len(self.papers)} 篇论文到更新文件")
     
     def submit_pr(self):
         """提交PR（模拟）"""

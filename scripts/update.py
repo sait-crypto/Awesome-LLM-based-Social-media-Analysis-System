@@ -1,21 +1,22 @@
 """
 项目入口2：将更新文件（excel和json）的内容更新到核心excel
-!!!!!注意：运行该脚本前请关闭核心excel文件，以免写入冲突，它不会提醒的!!!!!
+!!!!!注意：运行该脚本前请关闭核心excel文件，以免写入冲突，它不会提醒的，只会默默处理完并尝试写入!!!!!
 """
 import os
 import sys
+import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from dataclasses import asdict
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../'))
 
-from scripts.core.config_loader import config_loader
+from scripts.core.config_loader import get_config_instance
 from scripts.core.database_manager import DatabaseManager
-from scripts.core.database_model import Paper
+from scripts.core.database_model import Paper, is_duplicate_paper
 from scripts.ai_generator import AIGenerator
-from scripts.utils import read_json_file, read_excel_file, get_current_timestamp, write_json_file
+from scripts.utils import read_json_file, read_excel_file, get_current_timestamp, write_json_file, write_excel_file, normalize_dataframe_columns, normalize_json_papers
 import pandas as pd
 
 
@@ -23,8 +24,8 @@ class UpdateProcessor:
     """更新处理器"""
     
     def __init__(self):
-        self.config = config_loader
-        self.settings = config_loader.settings
+        self.config = get_config_instance()
+        self.settings = get_config_instance().settings
         self.db_manager = DatabaseManager()
         self.ai_generator = AIGenerator()
         
@@ -50,6 +51,7 @@ class UpdateProcessor:
             'errors': [],
             'ai_generated': 0
         }
+        conflict_resolution_strategy = self.settings['database'].get('conflict_resolution', conflict_resolution)
         
         # 检查更新文件是否存在
         excel_exists = os.path.exists(self.update_excel_path)
@@ -63,17 +65,28 @@ class UpdateProcessor:
         new_papers = []
         
         if excel_exists:
-            excel_papers = self._load_papers_from_excel()
-            new_papers.extend(excel_papers)
-            print(f"从Excel文件加载了 {len(excel_papers)} 篇论文")
+            try:
+                excel_papers = self._load_papers_from_excel()
+                new_papers.extend(excel_papers)
+                print(f"Excel文件中有 {len(excel_papers)} 个论文条目")
+            except Exception as e:
+                error_msg = f"加载Excel文件失败: {e}"
+                result['errors'].append(error_msg)
+                print(f"错误: {error_msg}")
         
         if json_exists:
-            json_papers = self._load_papers_from_json()
-            new_papers.extend(json_papers)
-            print(f"从JSON文件加载了 {len(json_papers)} 篇论文")
+            try:
+                json_papers = self._load_papers_from_json()
+                new_papers.extend(json_papers)
+                print(f"JSON文件中有 {len(json_papers)} 个论文条目")
+            except Exception as e:
+                error_msg = f"加载JSON文件失败: {e}"
+                result['errors'].append(error_msg)
+                print(f"错误: {error_msg}")
         
         if not new_papers:
-            result['errors'].append("更新文件中没有有效的论文数据")
+            if not result['errors']:  # 如果没有错误但也没有论文
+                result['errors'].append("更新文件中没有有效的论文数据")
             return result
         
         # 去重（基于DOI和标题）
@@ -89,27 +102,14 @@ class UpdateProcessor:
             if not paper.contributor:
                 paper.contributor = self.default_contributor
         
-        # 使用AI生成缺失内容
-        if self.ai_generator.is_available():
-            print("使用AI生成缺失内容...")
-            unique_papers = self.ai_generator.batch_enhance_papers(unique_papers)
-            result['ai_generated'] = len([p for p in unique_papers if any(
-                getattr(p, field, "").startswith("[AI generated]") 
-                for field in ['title_translation', 'analogy_summary', 
-                            'summary_motivation', 'summary_innovation',
-                            'summary_method', 'summary_conclusion', 
-                            'summary_limitation']
-            )])
-            print(f"AI生成了 {result['ai_generated']} 篇论文的内容")
-        
         # 验证论文数据
         valid_papers = []
         for paper in unique_papers:
-            errors = paper.is_valid(self.config)
+            errors = paper.is_valid()
             if errors:
                 error_msg = f"论文验证失败: {paper.title[:50]}... - {', '.join(errors[:3])}"
                 result['errors'].append(error_msg)
-                print(f"错误: {error_msg}")
+                print(f"警告: {error_msg}")
             else:
                 valid_papers.append(paper)
         
@@ -117,19 +117,58 @@ class UpdateProcessor:
             result['errors'].append("没有有效的论文数据可以更新")
             return result
         
+        # 使用AI生成缺失内容
+        if self.ai_generator.is_available():
+            print("使用AI生成缺失内容...")
+            try:
+                valid_papers = self.ai_generator.batch_enhance_papers(valid_papers)
+                
+                # 将AI生成的内容回写到更新文件（JSON & Excel）
+                try:
+                    self._persist_ai_generated_to_update_files(valid_papers)
+                    print("已将AI生成内容回写到更新文件")
+                except Exception as e:
+                    err = f"回写AI生成内容到更新文件失败: {e}"
+                    print(err)
+                    result['errors'].append(err)
+                
+                # 统计AI生成的数量
+                ai_count = 0
+                for p in valid_papers:
+                    if any(
+                        getattr(p, field, "").startswith("[AI generated]") 
+                        for field in ['title_translation', 'analogy_summary', 
+                                    'summary_motivation', 'summary_innovation',
+                                    'summary_method', 'summary_conclusion', 
+                                    'summary_limitation']
+                    ):
+                        ai_count += 1
+                result['ai_generated'] = ai_count
+                print(f"AI生成了 {result['ai_generated']} 篇论文的内容")
+            except Exception as e:
+                err = f"AI生成内容失败: {e}"
+                result['errors'].append(err)
+                print(f"错误: {err}")
+
         print(f"准备更新 {len(valid_papers)} 篇有效论文到数据库")
         
         # 添加到数据库
-        added_papers, conflict_papers = self.db_manager.add_papers(
-            valid_papers, 
-            conflict_resolution
-        )
+        try:
+            added_papers, conflict_papers = self.db_manager.add_papers(
+                valid_papers, 
+                conflict_resolution_strategy
+            )
+        except Exception as e:
+            error_msg = f"数据库操作失败: {e}"
+            result['errors'].append(error_msg)
+            print(f"错误: {error_msg}")
+            return result
         
         # 更新结果
         result['success'] = True
         result['new_papers'] = len(added_papers)
-        # Normalize conflicts into a list of dicts; db_manager may return either
-        # a list of (new_paper, existing_paper) tuples or a list of Paper objects.
+        
+        # Normalize conflicts into a list of dicts
         conflicts_list = []
         for item in conflict_papers:
             if isinstance(item, (list, tuple)) and len(item) == 2:
@@ -143,10 +182,14 @@ class UpdateProcessor:
             })
         result['conflicts'] = conflicts_list
         
-        # 清空更新文件（如果更新成功）
-        if added_papers and not conflict_papers:
-            self._clear_update_files()
-            print("更新文件已清空")
+        # 从更新文件中移除已成功处理的论文
+        try:
+            self._remove_processed_papers(added_papers)
+            print(f"已从更新文件中移除 {len(added_papers)} 篇已处理论文")
+        except Exception as e:
+            err = f"清理更新文件失败: {e}"
+            result['errors'].append(err)
+            print(f"警告: {err}")
         
         return result
     
@@ -174,12 +217,15 @@ class UpdateProcessor:
                     paper_data[tag['variable']] = str(value).strip()
             
             # 创建Paper对象
-            paper = Paper.from_dict(paper_data)
-            papers.append(paper)
+            try:
+                paper = Paper.from_dict(paper_data)
+                papers.append(paper)
+            except Exception as e:
+                print(f"警告: 解析Excel行失败: {e}")
+                continue
         
         return papers
     
-    # ...existing code...
     def _load_papers_from_json(self) -> List[Paper]:
         """从JSON文件加载论文"""
         data = read_json_file(self.update_json_path)
@@ -191,73 +237,198 @@ class UpdateProcessor:
         # JSON格式可能是一个论文列表
         def _normalize_dict_to_strings(raw: Dict) -> Dict:
             normalized = {}
-            # 使用激活标签定义的变量集合，确保只保留已知字段并转换为字符串
             for tag in self.config.get_active_tags():
                 var = tag['variable']
                 val = raw.get(var, "")
-                if val is None:
-                    val = ""
-                # 对基本类型（bool/int）保留语义，否则转为str
+                
+                # 处理空值
+                if val is None or (isinstance(val, (str, list, dict)) and not val):
+                    normalized[var] = ""
+                    continue
+                
+                # 根据类型安全转换
                 t = tag.get('type', 'string')
-                if t == 'bool':
-                    normalized[var] = bool(val) if val not in ("", None) else False
-                elif t == 'int':
-                    try:
-                        normalized[var] = int(val)
-                    except Exception:
-                        normalized[var] = 0
-                else:
-                    normalized[var] = str(val).strip()
+                try:
+                    if t == 'bool':
+                        if isinstance(val, bool):
+                            normalized[var] = val
+                        elif isinstance(val, str):
+                            normalized[var] = val.lower() in ('true', 'yes', '1', 'y', '是')
+                        elif isinstance(val, (int, float)):
+                            normalized[var] = bool(val)
+                        else:
+                            normalized[var] = False
+                    elif t == 'int':
+                        if isinstance(val, (int, float)):
+                            normalized[var] = int(val)
+                        elif isinstance(val, str) and val.strip():
+                            normalized[var] = int(float(val.strip()))
+                        else:
+                            normalized[var] = 0
+                    elif t == 'float':
+                        if isinstance(val, (int, float)):
+                            normalized[var] = float(val)
+                        elif isinstance(val, str) and val.strip():
+                            normalized[var] = float(val.strip())
+                        else:
+                            normalized[var] = 0.0
+                    else:  # string类型
+                        if isinstance(val, (list, dict)):
+                            # 对于复杂结构，转换为JSON字符串
+                            normalized[var] = json.dumps(val, ensure_ascii=False)
+                        else:
+                            normalized[var] = str(val).strip()
+                except (ValueError, TypeError, json.JSONDecodeError) as e:
+                    print(f"警告: 字段 {var} 值转换失败: {val} -> {e}")
+                    normalized[var] = ""
+            
             return normalized
         
         if isinstance(data, list):
             for paper_data in data:
-                norm = _normalize_dict_to_strings(paper_data)
-                paper = Paper.from_dict(norm)
-                papers.append(paper)
+                try:
+                    norm = _normalize_dict_to_strings(paper_data)
+                    paper = Paper.from_dict(norm)
+                    papers.append(paper)
+                except Exception as e:
+                    print(f"警告: 解析JSON条目失败: {e}")
+                    continue
         elif isinstance(data, dict):
             # 或者是一个包含论文列表的对象
             if 'papers' in data and isinstance(data['papers'], list):
                 for paper_data in data['papers']:
-                    norm = _normalize_dict_to_strings(paper_data)
-                    paper = Paper.from_dict(norm)
-                    papers.append(paper)
+                    try:
+                        norm = _normalize_dict_to_strings(paper_data)
+                        paper = Paper.from_dict(norm)
+                        papers.append(paper)
+                    except Exception as e:
+                        print(f"警告: 解析JSON论文条目失败: {e}")
+                        continue
             else:
                 # 或者直接是一个论文对象
-                norm = _normalize_dict_to_strings(data)
-                paper = Paper.from_dict(norm)
-                papers.append(paper)
+                try:
+                    norm = _normalize_dict_to_strings(data)
+                    paper = Paper.from_dict(norm)
+                    papers.append(paper)
+                except Exception as e:
+                    print(f"警告: 解析JSON对象失败: {e}")
         
         return papers
-# ...existing code...
     
     def _deduplicate_papers(self, papers: List[Paper]) -> List[Paper]:
         """去重论文列表（基于DOI和标题）"""
         unique_papers = []
-        seen_keys = set()
         
         for paper in papers:
-            key = paper.get_key()
-            if key and key not in seen_keys:
-                seen_keys.add(key)
-                unique_papers.append(paper)
-        
+            if is_duplicate_paper(unique_papers, paper):
+                continue
+            unique_papers.append(paper)
+
         return unique_papers
     
-    def _clear_update_files(self):
-        """清空更新文件"""
-        # 清空JSON文件
+    def _remove_processed_papers(self, processed_papers: List[Paper]):
+        """从更新文件中移除已处理的论文"""
+        # 1. 处理JSON文件
         if os.path.exists(self.update_json_path):
-            write_json_file(self.update_json_path, {})
+            try:
+                self._remove_papers_from_json(processed_papers)
+            except Exception as e:
+                raise Exception(f"从JSON文件移除论文失败: {e}")
         
-        # 清空Excel文件（创建空的DataFrame）
+        # 2. 处理Excel文件
         if os.path.exists(self.update_excel_path):
+            try:
+                self._remove_papers_from_excel(processed_papers)
+            except Exception as e:
+                raise Exception(f"从Excel文件移除论文失败: {e}")
+    
+    def _remove_papers_from_json(self, processed_papers: List[Paper]):
+        """从JSON文件中移除已处理的论文"""
+        data = read_json_file(self.update_json_path)
+        if not data:
+            return
+        
+        # 收集已处理论文的DOI和标题用于匹配
+        processed_keys = []
+        for paper in processed_papers:
+            key = paper.get_key()
+            if key:
+                processed_keys.append(key)
+        
+        # 根据数据结构类型进行过滤
+        if isinstance(data, list):
+            # 直接是论文列表
+            filtered_data = []
+            for item in data:
+                # 从item中提取DOI和标题构建key
+                doi = item.get('doi', '').strip()
+                title = item.get('title', '').strip()
+                item_key = f"{doi.lower()}|{title.lower()}" if doi else title.lower()
+                
+                # 如果不在已处理列表中，保留
+                if item_key not in processed_keys:
+                    filtered_data.append(item)
+            
+            # 如果过滤后还有数据，写回文件，否则清空
+            if filtered_data:
+                # 保持原始列表结构
+                write_json_file(self.update_json_path, filtered_data)
+            else:
+                write_json_file(self.update_json_path, {})
+        
+        elif isinstance(data, dict) and 'papers' in data:
+            # 是包含papers字段的字典
+            if isinstance(data['papers'], list):
+                filtered_papers = []
+                for item in data['papers']:
+                    doi = item.get('doi', '').strip()
+                    title = item.get('title', '').strip()
+                    item_key = f"{doi.lower()}|{title.lower()}" if doi else title.lower()
+                    
+                    if item_key not in processed_keys:
+                        filtered_papers.append(item)
+                
+                data['papers'] = filtered_papers
+                write_json_file(self.update_json_path, data)
+    
+    def _remove_papers_from_excel(self, processed_papers: List[Paper]):
+        """从Excel文件中移除已处理的论文"""
+        df = read_excel_file(self.update_excel_path)
+        if df is None or df.empty:
+            return
+        
+        # 收集已处理论文的DOI和标题用于匹配
+        processed_keys = []
+        for paper in processed_papers:
+            key = paper.get_key()
+            if key:
+                processed_keys.append(key)
+        
+        # 过滤DataFrame
+        rows_to_keep = []
+        for idx, row in df.iterrows():
+            # 从行中提取DOI和标题
+            doi = str(row.get('doi', '')).strip() if 'doi' in row and pd.notna(row.get('doi')) else ''
+            title = str(row.get('title', '')).strip() if 'title' in row and pd.notna(row.get('title')) else ''
+            row_key = f"{doi.lower()}|{title.lower()}" if doi else title.lower()
+            
+            # 如果不在已处理列表中，保留
+            if row_key not in processed_keys:
+                rows_to_keep.append(row)
+        
+        # 创建新的DataFrame
+        if rows_to_keep:
+            new_df = pd.DataFrame(rows_to_keep)
+            # 确保列的顺序和类型正确
+            new_df = normalize_dataframe_columns(new_df, self.config)
+            write_excel_file(self.update_excel_path, new_df)
+        else:
+            # 如果所有行都被处理，创建空DataFrame
             active_tags = self.config.get_active_tags()
             active_tags.sort(key=lambda x: x['order'])
             columns = [tag['table_name'] for tag in active_tags]
-            
-            df = pd.DataFrame(columns=columns)
-            df.to_excel(self.update_excel_path, index=False)
+            empty_df = pd.DataFrame(columns=columns)
+            write_excel_file(self.update_excel_path, empty_df)
     
     def send_notification_email(self, result: Dict):
         """发送通知邮件（模拟）"""
@@ -277,7 +448,7 @@ class UpdateProcessor:
             if result['conflicts']:
                 print(f"⚠ 发现 {len(result['conflicts'])} 处冲突需要手动处理")
                 for i, conflict in enumerate(result['conflicts'], 1):
-                    new_title = conflict['new'].get('title', '未知标题')[:50]
+                    new_title = conflict['new'].get('title', '未知标题')[:50] if conflict['new'] else '未知标题'
                     print(f"  {i}. 冲突论文: {new_title}...")
             
             if result['errors']:
@@ -290,8 +461,158 @@ class UpdateProcessor:
                 print(f"  - {error}")
 
 
+    def _persist_ai_generated_to_update_files(self, papers: List[Paper]):
+        """
+        把 AI 生成的字段原样写回到更新文件（update_json 和 update_excel）。
+        匹配策略：优先按 DOI 匹配，若 DOI 不存在则按 title（忽略大小写、首尾空白）匹配。
+        如果匹配不上，说明数据有问题，提醒用户排查。
+        """
+        if not papers:
+            return
+
+        # ---------- JSON 处理 ----------
+        json_matched = 0
+        json_unmatched = []
+        try:
+            json_data = read_json_file(self.update_json_path) or {}
+            
+            # 记录原始数据结构类型
+            original_is_dict_with_papers = isinstance(json_data, dict) and 'papers' in json_data
+            
+            # 规范读取到的结构为 list of dicts（variable keyed）
+            if original_is_dict_with_papers and isinstance(json_data['papers'], list):
+                existing_list = json_data['papers']
+            elif isinstance(json_data, list):
+                existing_list = json_data
+            else:
+                existing_list = []
+
+            # 先将 existing_list 规范为 variable-keyed 列表
+            existing_norm = normalize_json_papers(existing_list, self.config)
+
+            # 把 incoming papers 转为 variable-keyed dict 列表
+            incoming = [p.to_dict() for p in papers]
+            incoming_norm = normalize_json_papers(incoming, self.config)
+
+            # 按 DOI 或 title 匹配并合并 AI 字段（variable keys）
+            for inc in incoming_norm:
+                doi = (inc.get('doi') or "").strip()
+                title = (inc.get('title') or "").strip()
+                matched = None
+                
+                for ex in existing_norm:
+                    ex_doi = (ex.get('doi') or "").strip()
+                    ex_title = (ex.get('title') or "").strip()
+                    
+                    # 优先按DOI匹配
+                    if doi and ex_doi and ex_doi.lower() == doi.lower():
+                        matched = ex
+                        break
+                    # 其次按标题匹配
+                    if not matched and title and ex_title and ex_title.lower() == title.lower():
+                        matched = ex
+                        break
+                
+                if matched is None:
+                    json_unmatched.append(f"标题: {title[:50]}... (DOI: {doi[:20]}...)")
+                else:
+                    json_matched += 1
+                    # 覆盖 AI 相关字段（保留其他原字段）
+                    for f in ['title_translation','analogy_summary',
+                              'summary_motivation','summary_innovation',
+                              'summary_method','summary_conclusion','summary_limitation']:
+                        val = inc.get(f, "")
+                        if val is not None and val != "":
+                            matched[f] = val
+
+            # 写回 JSON（保持原有容器结构）
+            if original_is_dict_with_papers:
+                final = dict(json_data)
+                final['papers'] = existing_norm
+            else:
+                # 保持原始列表结构
+                final = existing_norm
+            
+            write_json_file(self.update_json_path, final)
+            
+        except Exception as e:
+            raise RuntimeError(f"写入更新JSON失败: {e}")
+
+        # ---------- Excel 处理 ----------
+        excel_matched = 0
+        excel_unmatched = []
+        try:
+            df = read_excel_file(self.update_excel_path)
+            if df is None or df.empty:
+                # 如果没有数据，跳过Excel处理
+                print("警告: Excel文件为空或不存在，跳过AI内容回写")
+                if json_unmatched:
+                    print(f"JSON匹配失败 {len(json_unmatched)} 条，请检查数据一致性")
+                return
+
+            # 规范数据框列
+            df = normalize_dataframe_columns(df, self.config)
+
+            # 把 incoming papers 转为 variable-keyed dict 列表并映射到 table_name 列
+            incoming = [p.to_dict() for p in papers]
+            incoming_norm = normalize_json_papers(incoming, self.config)
+
+            for inc in incoming_norm:
+                doi = (inc.get('doi') or "").strip()
+                title = (inc.get('title') or "").strip()
+                row_idx = None
+
+                # 优先按DOI匹配
+                if 'doi' in df.columns and doi:
+                    mask = df['doi'].astype(str).str.strip().str.lower() == doi.lower()
+                    if mask.any():
+                        row_idx = df[mask].index[0]
+                
+                # 其次按标题匹配
+                if row_idx is None and 'title' in df.columns and title:
+                    mask = df['title'].astype(str).str.strip().str.lower() == title.lower()
+                    if mask.any():
+                        row_idx = df[mask].index[0]
+
+                if row_idx is None:
+                    excel_unmatched.append(f"标题: {title[:50]}... (DOI: {doi[:20]}...)")
+                else:
+                    excel_matched += 1
+                    # 将 variable-keyed inc 映射回 table_name 并写入
+                    for tag in self.config.get_active_tags():
+                        var = tag['variable']
+                        col = tag['table_name']
+                        if var in inc and inc[var] not in ("", None):
+                            df.at[row_idx, col] = inc[var]
+
+            # 在最终写入前再次规范列
+            df = normalize_dataframe_columns(df, self.config)
+
+            # 写回 Excel
+            write_excel_file(self.update_excel_path, df)
+            
+        except Exception as e:
+            raise RuntimeError(f"写入更新Excel失败: {e}")
+        
+        # 输出匹配统计信息
+        print(f"AI内容回写匹配统计:")
+        print(f"  JSON: 成功匹配 {json_matched}/{len(papers)} 条记录")
+        print(f"  Excel: 成功匹配 {excel_matched}/{len(papers)} 条记录")
+        
+        # 检查不匹配的记录
+        if json_unmatched or excel_unmatched:
+            print("警告: 以下记录在更新文件中找不到匹配项，请检查数据一致性:")
+            
+            # 合并并去重不匹配记录
+            all_unmatched = set(json_unmatched + excel_unmatched)
+            for i, record in enumerate(all_unmatched, 1):
+                print(f"  {i}. {record}")
+            
+            print("建议: 检查DOI和标题是否在更新文件中正确填写")
+    
 def main():
     """主函数"""
+    print("===！！！！注意：运行该脚本前请关闭核心excel文件，以免写入冲突它不会提醒的！！！！===\n！！！只会默默处理完并尝试写入！！！\n！！！如若未关闭，请终止进程！！！")
     print("开始处理更新文件...")
     
     processor = UpdateProcessor()
@@ -314,7 +635,7 @@ def main():
     if result['success'] and result['new_papers'] > 0:
         print("\n重新生成README...")
         try:
-            from convert import ReadmeGenerator
+            from scripts.convert import ReadmeGenerator
             generator = ReadmeGenerator()
             success = generator.update_readme_file()
             
@@ -322,8 +643,11 @@ def main():
                 print("✓ README更新成功")
             else:
                 print("✗ README更新失败")
+        except ImportError as e:
+            print(f"⚠ 无法导入ReadmeGenerator模块: {e}")
+            print("  请确保convert.py文件存在且ReadmeGenerator类定义正确")
         except Exception as e:
-            print(f"重新生成README时出错: {e}")
+            print(f"⚠ 重新生成README时出错: {e}")
 
 
 if __name__ == "__main__":

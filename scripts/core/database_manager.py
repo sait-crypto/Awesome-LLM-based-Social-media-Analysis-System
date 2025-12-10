@@ -13,16 +13,17 @@ from datetime import datetime
 import warnings
 
 # 导入配置和模型
-from .config_loader import config_loader
-from .database_model import Paper
+from scripts.core.config_loader import get_config_instance
+from scripts.core.database_model import Paper, is_same_identity, is_duplicate_paper
+from scripts.utils import normalize_dataframe_columns  # 新增导入
 
 
 class DatabaseManager:
     """数据库管理器"""
     
     def __init__(self):
-        self.config = config_loader
-        self.settings = config_loader.settings
+        self.config = get_config_instance()
+        self.settings = get_config_instance().settings
         self.core_excel_path = self.settings['paths']['core_excel']
         self.backup_dir = self.settings['paths']['backup_dir']
         self.conflict_marker = self.settings['database']['conflict_marker']
@@ -96,6 +97,9 @@ class DatabaseManager:
     def save_database(self, df: pd.DataFrame, password: str = "") -> bool:
         """保存DataFrame到Excel文件"""
         try:
+            # 先根据 tag_config 规范 DataFrame 列与 category 值
+            df = normalize_dataframe_columns(df, self.config)
+
             # 备份原文件
             self.backup_database()
             
@@ -155,6 +159,10 @@ class DatabaseManager:
                 if row.get('conflict_marker'):
                     for cell in worksheet[idx + 2]:  # +2因为标题行是1，索引从0开始
                         cell.fill = conflict_fill
+                        #如果列名是doi，就在该cell内容前加冲突标记
+                        if cell.column_letter == get_column_letter(df.columns.get_loc('doi') + 1):
+                            cell.value = f"{row['conflict_marker']} {cell.value}"
+                        
     
     def get_password(self) -> str:
         """获取Excel密码"""
@@ -175,7 +183,6 @@ class DatabaseManager:
         
         return ""  # 返回空字符串表示不加密
     
-# ...existing code...
     def get_papers_from_dataframe(self, df: pd.DataFrame) -> List[Paper]:
         """从DataFrame提取Paper对象列表"""
         papers = []
@@ -199,7 +206,7 @@ class DatabaseManager:
                     t = tag.get('type', 'string')
                     if t == 'bool':
                         # 空字符串视为 False
-                        value = bool(value) if value not in ("", None) else False
+                        value = bool(value) if value not in ("", None,"false","FALSE") else False
                     elif t == 'int':
                         try:
                             value = int(value) if value not in ("", None) else 0
@@ -216,7 +223,6 @@ class DatabaseManager:
             papers.append(paper)
         
         return papers
-# ...existing code...
     
     def get_dataframe_from_papers(self, papers: List[Paper]) -> pd.DataFrame:
         """从Paper对象列表创建DataFrame"""
@@ -262,27 +268,30 @@ class DatabaseManager:
         conflict_papers = []
         
         for new_paper in new_papers:
-            # 检查是否已存在
-            is_duplicate = False
+            # 检查是否已存在（按 DOI 或 title 判断同一论文，忽略 conflict_marker）
+            is_duplicate_identity = False
             conflict_with = None
-            
             for existing_paper in existing_papers:
-                if new_paper.is_similar_to(existing_paper):
-                    is_duplicate = True
+                if is_same_identity(new_paper, existing_paper):
+                    is_duplicate_identity = True
                     conflict_with = existing_paper
                     break
             
-            if is_duplicate:
+            if is_duplicate_identity:
+                # 如果是同一论文身份，先判断是否为“完全重复提交”
+                if is_duplicate_paper(existing_papers, new_paper):
+                    # 完全相同，跳过
+                    print(f"论文: {new_paper.title}重复提交，跳过添加")
+                    continue
+
+                # 不是完全相同，按冲突策略处理
                 if conflict_resolution == 'skip':
-                    # 跳过重复论文
                     continue
                 elif conflict_resolution == 'replace':
-                    # 替换现有论文
-                    existing_papers = [p for p in existing_papers if not p.is_similar_to(new_paper)]
+                    existing_papers = [p for p in existing_papers if not is_same_identity(p, new_paper)]
                     existing_papers.append(new_paper)
                     added_papers.append(new_paper)
                 elif conflict_resolution == 'mark':
-                    # 标记冲突
                     new_paper.conflict_marker = self.conflict_marker
                     conflict_papers.append((new_paper, conflict_with))
                     existing_papers.append(new_paper)
@@ -295,7 +304,7 @@ class DatabaseManager:
         # 排序：先按分类，再按提交时间（假设提交时间在submission_time字段）
         existing_papers.sort(key=lambda x: (
             x.category,
-            x.submission_time if hasattr(x, 'submission_time') and x.submission_time else ""
+            x.submission_time if hasattr(x, 'submission_time') and x.submission_time and x.submission_time != "" else ""
         ), reverse=True)  # 越晚提交越靠前
         
         # 保存更新后的数据库
@@ -306,36 +315,48 @@ class DatabaseManager:
         if success:
             return added_papers, conflict_papers
         else:
+            print("保存数据库失败，添加的论文未能保存，将视为冲突paper保留在模板文件内")
             return [], new_papers  # 如果保存失败，返回空列表和所有新论文作为冲突
     
-    def update_paper(self, paper_id: str, updates: Dict[str, Any]) -> bool:
+    def update_paper(self, paper: Paper, updates: Dict[str, Any]) -> bool:
         """更新单篇论文"""
         df = self.load_database()
         papers = self.get_papers_from_dataframe(df)
+        success = False
         
+        updated_papers=[]
         # 查找论文
+        target_papers = [p for p in papers if is_same_identity(p, paper)]
+
         for paper in papers:
-            if paper.paper_id == paper_id:
-                # 应用更新
-                for key, value in updates.items():
-                    if hasattr(paper, key):
-                        setattr(paper, key, value)
+            if paper in target_papers:
+                if success == False:
+                    success = True
+                    # 应用更新
+                    for key, value in updates.items():
+                        if hasattr(paper, key):
+                                setattr(paper, key, value)
+                    updated_papers.append(paper)
+                else:
+                    continue # 只更新第一篇找到的，其他的过滤掉
+            else:
+                updated_papers.append(paper)
                 
-                # 保存更新
-                df = self.get_dataframe_from_papers(papers)
-                password = self.get_password()
-                return self.save_database(df, password)
+        # 保存更新
+        df = self.get_dataframe_from_papers(updated_papers)
+        password = self.get_password()
+        return self.save_database(df, password)
         
         return False
     
-    def delete_paper(self, paper_id: str) -> bool:
+    def delete_paper(self, paper: Paper) -> bool:
         """删除单篇论文"""
         df = self.load_database()
         papers = self.get_papers_from_dataframe(df)
         
         # 过滤掉要删除的论文
-        filtered_papers = [p for p in papers if p.paper_id != paper_id]
-        
+        filtered_papers = [p for p in papers if not is_same_identity(p, paper)]
+
         if len(filtered_papers) < len(papers):
             # 有论文被删除
             df = self.get_dataframe_from_papers(filtered_papers)

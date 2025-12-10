@@ -5,7 +5,7 @@ import os
 import re
 import json
 import pandas as pd
-from typing import Dict, List, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
 
@@ -250,3 +250,95 @@ def sanitize_filename(filename: str) -> str:
         filename = name[:255 - len(ext)] + ext
     
     return filename
+
+def regenerate_columns_from_tags(config_instance) -> List[str]:
+    """根据tag_config生成按order排序的表列名（table_name）列表"""
+    active_tags = config_instance.get_active_tags()
+    active_tags.sort(key=lambda x: x.get('order', 0))
+    return [tag['table_name'] for tag in active_tags]
+
+#暂不实现，因为需要将旧name保存下来以供映射
+def normalize_category_value(raw_val: Any, config_instance) -> str:
+    """
+    把 category 字段的旧name改为新的name，
+    若无法匹配则返回原值的字符串形式（strip 后）。
+    """
+    return raw_val
+    if raw_val is None:
+        return ""
+    val = str(raw_val).strip()
+    if not val:
+        return ""
+    # 构建映射：旧name -> unique_name, unique_name ->新name
+    new_cats = config_instance.get_active_categories()
+    old_cats=config_instance.old_cats
+
+    
+
+def normalize_dataframe_columns(df: pd.DataFrame, config_instance) -> pd.DataFrame:
+    """
+    确保DataFrame列按照tag_config中active tags重新生成：
+    - 添加缺失列（置空）
+    - 移除未激活的列
+    - 按order排序列顺序
+    - 对 category 列内值执行规范化（未实现）
+    """
+    if df is None:
+        df = pd.DataFrame()
+    cols = regenerate_columns_from_tags(config_instance)
+    # 保留现有行数据但只保留激活列
+    for c in cols:
+        if c not in df.columns:
+            df[c] = ""
+    # 移除多余列
+    to_keep = cols
+    df = df.loc[:, [c for c in to_keep if c in df.columns]]
+    # reorder
+    df = df[cols]
+    # # 规范化 category 列值
+    # if 'category' in df.columns:
+    #     df['category'] = df['category'].apply(lambda v: normalize_category_value(v, config_instance))
+    # 将所有非-bool/int 列转为 string（保持原有语义）
+    for tag in config_instance.get_active_tags():
+        col = tag['table_name']
+        t = tag.get('type', 'string')
+        if col in df.columns:
+            if t == 'bool':
+                df[col] = df[col].fillna(False).astype(bool)
+            elif t == 'int':
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+            else:
+                df[col] = df[col].fillna("").astype(str).str.strip()
+    return df
+
+def normalize_json_papers(raw_papers: List[Dict[str, Any]], config_instance) -> List[Dict[str, Any]]:
+    """
+    把JSON中的每篇论文都规范化为只包含active tag的变量（使用variable作为键），
+    并将类型与category规范化。（未实现）
+    """
+    normalized_list = []
+    active_tags = config_instance.get_active_tags()
+    for item in raw_papers:
+        out = {}
+        for tag in active_tags:
+            var = tag['variable']
+            table_name = tag['table_name']
+            # 支持输入既有 variable 也有 table_name 两种键
+            val = item.get(var, item.get(table_name, ""))
+            if val is None:
+                val = ""
+            t = tag.get('type', 'string')
+            if t == 'bool':
+                out[var] = bool(val) if val not in ("", None) else False
+            elif t == 'int':
+                try:
+                    out[var] = int(val)
+                except Exception:
+                    out[var] = 0
+            else:
+                out[var] = str(val).strip()
+        # 规范化 category 存储为 unique_name
+        # if 'category' in out:
+        #     out['category'] = normalize_category_value(out.get('category', ""), config_instance)
+        # normalized_list.append(out)
+    return normalized_list

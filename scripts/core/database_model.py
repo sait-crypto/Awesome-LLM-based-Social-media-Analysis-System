@@ -3,9 +3,11 @@
 定义论文数据模型
 """
 from dataclasses import dataclass, field, asdict, fields
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional,Union, Any
 from datetime import datetime
 import hashlib
+from scripts.utils import clean_doi
+from scripts.core.config_loader import get_config_instance
 
 
 @dataclass
@@ -51,13 +53,6 @@ class Paper:
         # 清理DOI格式
         if self.doi:
             self.doi = self._clean_doi(self.doi)
-        
-        # 生成论文ID（基于DOI的哈希）
-        if self.doi:
-            self.paper_id = self._generate_paper_id()
-        elif self.title and self.authors:
-            # 如果没有DOI，使用标题和作者生成ID
-            self.paper_id = self._generate_fallback_id()
     
     def _clean_doi(self, doi: str) -> str:
         """清理DOI格式，移除URL部分"""
@@ -75,10 +70,6 @@ class Paper:
                     return match.group(1)
         return doi.strip()
     
-    def _generate_paper_id(self) -> str:
-        """基于DOI生成论文ID"""
-        doi_clean = self.doi.lower().strip()
-        return hashlib.md5(doi_clean.encode()).hexdigest()[:12]
     
     def _generate_fallback_id(self) -> str:
         """生成备用ID（当没有DOI时）"""
@@ -97,37 +88,67 @@ class Paper:
         filtered_data = {k: v for k, v in data.items() if k in valid_fields}
         return cls(**filtered_data)
     
-    def is_valid(self, config_loader) -> List[str]:
-        """验证论文数据是否有效，返回错误消息列表"""
-        errors = []
-        
-        # 检查必填字段
-        required_tags = config_loader.get_required_tags()
-        for tag in required_tags:
-            value = getattr(self, tag['variable'], "")
-            if not value or str(value).strip() == "":
-                errors.append(f"{tag['display_name']} ({tag['variable']}) 是必填字段")
-        
-        # 验证字段格式
-        active_tags = config_loader.get_active_tags()
-        for tag in active_tags:
-            value = getattr(self, tag['variable'], "")
-            if value and str(value).strip() != "":
-                if not config_loader.validate_value(tag, value):
-                    errors.append(f"{tag['display_name']} ({tag['variable']}) 格式无效")
-        
-        # 验证分类是否有效
-        if self.category:
-            valid_categories = [cat['unique_name'] for cat in config_loader.get_active_categories()]
-            if self.category not in valid_categories:
-                errors.append(f"分类 '{self.category}' 无效，有效分类: {', '.join(valid_categories)}")
-        
-        return errors
+
     
     def get_key(self) -> str:
         """获取论文的唯一键（用于比较和去重）"""
         return f"{self.doi}_{self.title}"
     
+    def _normalize_doi_for_compare(self) -> str:
+        """清理 DOI 并忽略可能存在的冲突标记（conflict_marker）"""
+        conflict_marker=get_config_instance().settings['database'].get('conflict_marker','') 
+        if not self.doi:
+            return ""
+        s = str(self.doi).strip()
+        if conflict_marker:
+            s = s.replace(conflict_marker, "")
+        # 使用 _clean_doi 进一步清理 URL 前缀等
+        s = self._clean_doi(s)
+        return s.lower()
+
+    
+    def _validate_field(self,tag: Dict[str, Any], value: Any) -> bool:
+        """
+        字段级校验封装：调用 get_config_instance().validate_value 并处理 DOI 中可能的 conflict_marker。
+        返回 True 表示合法。
+        """
+        if tag.get('variable') == 'doi':
+            # 对 DOI 先去除冲突标记再校验
+            val = self._normalize_doi_for_compare()
+            return get_config_instance().validate_value(tag, val)
+        return get_config_instance().validate_value(tag, value)
+    def is_valid(self) -> List[str]:
+        """
+        论文级校验，返回错误信息列表（空表示合法）。
+        - 校验必填字段
+        - 校验字段格式（使用 validate_field）
+        - 校验 category 是否为激活分类
+        """
+        errors = []
+        required_tags = get_config_instance().get_required_tags()
+        for tag in required_tags:
+            var = tag['variable']
+            val = getattr(self, var, "")
+            if val is None or str(val).strip() == "":
+                errors.append(f"{tag.get('display_name', var)} ({var}) 是必填字段")
+
+        # 字段格式校验
+        active_tags = get_config_instance().get_active_tags()
+        for tag in active_tags:
+            var = tag['variable']
+            val = getattr(self, var, "")
+            if val is None or str(val).strip() == "":
+                continue
+            if not self._validate_field(tag, val):
+                errors.append(f"{tag.get('display_name', var)} ({var}) 格式无效")
+
+        # category 检查
+        if self.category:
+            valid_categories = [cat['unique_name'] for cat in get_config_instance().get_active_categories()]
+            if self.category not in valid_categories:
+                errors.append(f"分类 '{self.category}' 无效，有效分类: {', '.join(valid_categories)}")
+
+        return errors
     def is_similar_to(self, other: 'Paper') -> bool:
         """检查是否与另一篇论文相似（DOI或标题相同）"""
         self.title=str(self.title).strip()
@@ -137,3 +158,94 @@ class Paper:
         if self.title and other.title and self.title.lower() == other.title.lower():
             return True
         return False
+
+def _normalize_doi_for_compare(doi: Optional[str]) -> str:
+    """清理 DOI 并忽略可能存在的冲突标记（conflict_marker）"""
+    conflict_marker = get_config_instance().settings['database'].get('conflict_marker','')
+    if not doi:
+        return ""
+    s = str(doi).strip()
+    if conflict_marker:
+        s = s.replace(conflict_marker, "")
+    # 使用 utils.clean_doi 进一步清理 URL 前缀等
+    s = clean_doi(s)
+    return s.lower()
+
+def is_same_identity(a: Union[Paper, Dict[str, Any]], b: Union[Paper, Dict[str, Any]]) -> bool:
+    """
+    判断 a 和 b 是否表示同一篇论文（基于 DOI 或 title）。
+    DOI 比较时会忽略 conflict_marker。
+    支持 Paper 对象或 dict。
+    """
+    
+    def get_field(x, name):
+        if isinstance(x, Paper):
+            return getattr(x, name, "") or ""
+        return x.get(name, "") if isinstance(x, dict) else ""
+
+    doi_a = _normalize_doi_for_compare(get_field(a, 'doi') )
+    doi_b = _normalize_doi_for_compare(get_field(b, 'doi') )
+    if doi_a and doi_b and doi_a == doi_b:
+        return True
+
+    title_a = (get_field(a, 'title') or "").strip().lower()
+    title_b = (get_field(b, 'title') or "").strip().lower()
+    if title_a and title_b and title_a == title_b:
+        return True
+
+    return False
+
+def _papers_fields_equal(a: Union[Paper, Dict[str, Any]], b: Union[Paper, Dict[str, Any]], ignore_fields: Optional[List[str]] = None) -> bool:
+    """
+    精确比较两个论文条目的所有字段（用于判定是否“完全相同”）。
+    默认为比较 dataclass/asdict 的所有键，忽略 ignore_fields 中的字段。
+    比较 DOI 时会忽略 conflict_marker。
+    """
+    conflict_marker = get_config_instance().settings['database'].get('conflict_marker','')
+    if ignore_fields is None:
+        ignore_fields = ['conflict_marker', 'submission_time','status','show_in_readme']
+
+    if isinstance(a, Paper):
+        a_dict = a.to_dict()
+    else:
+        a_dict = dict(a)
+
+    if isinstance(b, Paper):
+        b_dict = b.to_dict()
+    else:
+        b_dict = dict(b)
+
+    # 规范化 DOI 比较：移除 conflict_marker 并清理
+    a_doi = _normalize_doi_for_compare(a_dict.get('doi', ""))
+    b_doi = _normalize_doi_for_compare(b_dict.get('doi', ""))
+    a_dict['doi'] = a_doi
+    b_dict['doi'] = b_doi
+
+    # 比较每个键
+    keys = set(a_dict.keys()) | set(b_dict.keys())
+    for k in keys:
+        if k in ignore_fields:
+            continue
+        va = a_dict.get(k, "")
+        vb = b_dict.get(k, "")
+        # 统一转换为字符串比较（保持 bool/int 的语义）
+        if isinstance(va, bool) or isinstance(vb, bool):
+            if bool(va) != bool(vb):
+                return False
+        else:
+            if str(va).strip() != str(vb).strip():
+                return False
+    return True
+def is_duplicate_paper(existing_papers: List[Paper], new_paper: Paper) -> bool:
+    """
+    判断新提交是否为重复论文条目：
+    - 在 existing_papers 中找出与 new_paper 表示相同论文（一致 identity）的条目集合；
+    - 如果该集合中存在任一条目的所有字段都与 new_paper 完全一致，则为重复paper，返回 True。
+    """
+    same_identity_entries = [p for p in existing_papers if is_same_identity(p, new_paper)]
+    if not same_identity_entries:
+        return False
+    for ex in same_identity_entries:
+        if _papers_fields_equal(ex, new_paper):
+            return True
+    return False

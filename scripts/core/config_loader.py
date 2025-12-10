@@ -152,14 +152,26 @@ class ConfigLoader:
             if tag.get('variable') == variable:
                 return tag
         return None
-    
+    def get_tag_field(self, variable: str,field_name:str) -> str:
+        """根据变量名和tag域名获取具体tag的具体字段值"""
+        for tag in self.tags_config.get('tags', []):
+            if tag.get('variable') == variable:
+                return tag.get(field_name,"")
+
+        return ''
     def get_category_by_unique_name(self, unique_name: str) -> Optional[Dict[str, Any]]:
         """根据唯一标识名获取分类配置"""
         for category in self.categories_config.get('categories', []):
             if category.get('unique_name') == unique_name:
                 return category
         return None
-    
+    def get_category_field(self, unique_name: str,field_name:str) -> str:
+        """根据唯一标识名和category域名获取具体category的具体字段值"""
+        for category in self.categories_config.get('categories', []):
+            if category.get('unique_name') == unique_name:
+                return category.get(field_name,"")
+
+        return ''
     def get_required_tags(self) -> List[Dict[str, Any]]:
         """获取所有必填标签"""
         required_tags = []
@@ -196,5 +208,10 @@ class ConfigLoader:
             return False
 
 
-# 创建全局配置加载器实例
-config_loader = ConfigLoader()
+# 创建全局配置加载器单例
+_config_instance=None
+def get_config_instance():
+    """获取全局配置加载器单例"""
+    global _config_instance
+    _config_instance = ConfigLoader() if _config_instance is None else _config_instance
+    return _config_instance
