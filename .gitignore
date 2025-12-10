@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 数据库和备份
+master/paper_database.xlsx
+master/backups/
+submit_template.json
+submit_template.xlsx
+
+# 配置文件中的敏感信息
+config/setting.config
+
+# 临时文件
+*.tmp
+*.temp
+
+# 日志文件
+*.log

@@ -1,0 +1,313 @@
+name: Process Paper Submission PR
+
+on:
+  pull_request:
+    paths:
+      - 'submit_template.json'
+      - 'submit_template.xlsx'
+    branches: [ main ]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  process-submission:
+    runs-on: ubuntu-latest
+    
+    # 仅在特定路径更改时才运行
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'paper-submission') ||
+      contains(github.event.pull_request.head.ref, 'paper-submission')
+    
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas openpyxl requests python-dateutil
+        
+        # 检查是否安装了必需的包
+        python -c "import pandas, openpyxl, requests; print('Dependencies installed successfully')"
+    
+    - name: Check for update files
+      id: check-files
+      run: |
+        echo "Checking for update files..."
+        JSON_EXISTS=false
+        EXCEL_EXISTS=false
+        
+        if [ -f "submit_template.json" ] && [ -s "submit_template.json" ]; then
+          echo "Found non-empty submit_template.json"
+          JSON_EXISTS=true
+        fi
+        
+        if [ -f "submit_template.xlsx" ] && [ -s "submit_template.xlsx" ]; then
+          echo "Found non-empty submit_template.xlsx"
+          EXCEL_EXISTS=true
+        fi
+        
+        echo "json_exists=$JSON_EXISTS" >> $GITHUB_OUTPUT
+        echo "excel_exists=$EXCEL_EXISTS" >> $GITHUB_OUTPUT
+        
+        if [ "$JSON_EXISTS" = "false" ] && [ "$EXCEL_EXISTS" = "false" ]; then
+          echo "No update files found or they are empty"
+          exit 1
+        fi
+    
+    - name: Set up environment variables
+      run: |
+        # 设置Excel密码（从GitHub Secret读取）
+        if [ -n "${{ secrets.EXCEL_KEY }}" ]; then
+          echo "EXCEL_KEY=${{ secrets.EXCEL_KEY }}" >> $GITHUB_ENV
+        else
+          echo "EXCEL_KEY=" >> $GITHUB_ENV
+        fi
+        
+        # 设置DeepSeek API密钥（从GitHub Secret读取）
+        if [ -n "${{ secrets.DEEPSEEK_API }}" ]; then
+          echo "DEEPSEEK_API=${{ secrets.DEEPSEEK_API }}" >> $GITHUB_ENV
+        else
+          echo "DEEPSEEK_API=" >> $GITHUB_ENV
+        fi
+        
+        # 设置其他环境变量
+        echo "GITHUB_PR_NUMBER=${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+        echo "GITHUB_PR_AUTHOR=${{ github.event.pull_request.user.login }}" >> $GITHUB_ENV
+        echo "GITHUB_PR_TITLE=${{ github.event.pull_request.title }}" >> $GITHUB_ENV
+    
+    - name: Run update processor
+      id: update-process
+      run: |
+        echo "Running update processor..."
+        
+        # 运行更新脚本
+        cd scripts
+        python update.py
+        
+        # 检查更新结果
+        if [ -f "update_result.json" ]; then
+          RESULT=$(cat update_result.json)
+          echo "result=$RESULT" >> $GITHUB_OUTPUT
+        else
+          echo "result={\"success\": false, \"message\": \"No result file generated\"}" >> $GITHUB_OUTPUT
+        fi
+      continue-on-error: true
+    
+    - name: Generate README
+      if: steps.update-process.outcome == 'success'
+      run: |
+        echo "Generating README..."
+        cd scripts
+        python convert.py
+        
+        # 检查README是否更新
+        if git diff --name-only HEAD | grep -q "README.md"; then
+          echo "README updated"
+          echo "readme_updated=true" >> $GITHUB_ENV
+        else
+          echo "README not changed"
+          echo "readme_updated=false" >> $GITHUB_ENV
+        fi
+    
+    - name: Commit changes
+      if: steps.update-process.outcome == 'success'
+      run: |
+        echo "Committing changes..."
+        
+        # 配置Git
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        # 检查是否有更改
+        if git diff --quiet; then
+          echo "No changes to commit"
+          echo "changes_committed=false" >> $GITHUB_ENV
+        else
+          # 添加更改
+          git add .
+          
+          # 提交更改
+          COMMIT_MESSAGE="Automated update from PR #$GITHUB_PR_NUMBER"
+          git commit -m "$COMMIT_MESSAGE"
+          
+          # 推送到当前分支（PR分支）
+          git push
+          
+          echo "Changes committed and pushed"
+          echo "changes_committed=true" >> $GITHUB_ENV
+        fi
+    
+    - name: Create summary comment
+      run: |
+        echo "Creating PR comment..."
+        
+        # 创建处理结果摘要
+        SUMMARY="## 📊 Paper Submission Processing Result\n\n"
+        
+        if [ "${{ steps.update-process.outcome }}" = "success" ]; then
+          SUMMARY+="✅ **Successfully processed submission**\n\n"
+          
+          # 从步骤输出获取结果
+          RESULT='${{ steps.update-process.outputs.result }}'
+          
+          if [ -n "$RESULT" ] && [ "$RESULT" != "null" ]; then
+            # 解析JSON结果（这里简化处理）
+            SUMMARY+="- Update processed successfully\n"
+          else
+            SUMMARY+="- Update processed (no detailed result)\n"
+          fi
+          
+          if [ "$readme_updated" = "true" ]; then
+            SUMMARY+="- README updated\n"
+          fi
+          
+          if [ "$changes_committed" = "true" ]; then
+            SUMMARY+="- Changes committed to PR branch\n"
+          fi
+          
+          SUMMARY+="\nThank you for your submission! The paper database has been updated."
+          
+        else
+          SUMMARY+="❌ **Processing failed**\n\n"
+          SUMMARY+="The submission could not be processed automatically.\n\n"
+          SUMMARY+="**Possible reasons:**\n"
+          SUMMARY+="- Invalid file format\n"
+          SUMMARY+="- Missing required fields\n"
+          SUMMARY+="- Database update error\n\n"
+          SUMMARY+="Please check your submission and try again, or contact the maintainers."
+        fi
+        
+        # 添加处理信息
+        SUMMARY+="\n\n---\n"
+        SUMMARY+="**Process Information:**\n"
+        SUMMARY+="- PR: #$GITHUB_PR_NUMBER by @$GITHUB_PR_AUTHOR\n"
+        SUMMARY+="- Run ID: ${{ github.run_id }}\n"
+        SUMMARY+="- Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        
+        # 输出摘要（用于后续步骤）
+        echo "$SUMMARY" > pr_summary.md
+        
+        # 也可以在GitHub Actions日志中显示
+        echo "$SUMMARY"
+    
+    - name: Comment on PR
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const fs = require('fs');
+          const summary = fs.readFileSync('pr_summary.md', 'utf8');
+          
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          
+          // 检查是否已有来自本Action的评论
+          const botComment = comments.find(comment => 
+            comment.user.type === 'Bot' && 
+            comment.body.includes('Paper Submission Processing Result')
+          );
+          
+          if (botComment) {
+            // 更新现有评论
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: botComment.id,
+              body: summary
+            });
+          } else {
+            // 创建新评论
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: summary
+            });
+          }
+    
+    - name: Send notification email
+      if: always()
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: smtp.gmail.com
+        server_port: 465
+        username: submitter
+        password: ${{ secrets.EMAIL_PASSWORD }}
+        subject: "Paper Submission PR #${{ github.event.pull_request.number }} - ${{ job.status }}"
+        to: 2182712226@qq.com
+        from: GitHub Actions <submitter>
+        body: |
+          Paper submission PR #${{ github.event.pull_request.number }} has been processed.
+          
+          Status: ${{ job.status }}
+          PR Title: ${{ github.event.pull_request.title }}
+          Author: @${{ github.event.pull_request.user.login }}
+          
+          View PR: ${{ github.event.pull_request.html_url }}
+          View Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          
+          ---
+          
+          $(cat pr_summary.md)
+    
+    - name: Clean up update files
+      if: steps.update-process.outcome == 'success'
+      run: |
+        echo "Cleaning up update files..."
+        
+        # 清空更新文件
+        echo '{"papers": []}' > submit_template.json
+        
+        # 创建空的Excel文件
+        python -c "
+        import pandas as pd
+        df = pd.DataFrame()
+        df.to_excel('submit_template.xlsx', index=False)
+        "
+        
+        # 提交清理
+        if [ "$changes_committed" = "true" ]; then
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add submit_template.json submit_template.xlsx
+          git commit -m "Clear update files after processing"
+          git push
+        fi
+    
+    - name: Add labels
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          // 添加处理状态标签
+          const labels = ['paper-submission'];
+          
+          if ('${{ steps.update-process.outcome }}' === 'success') {
+            labels.push('processed-successfully');
+          } else {
+            labels.push('needs-review');
+          }
+          
+          await github.rest.issues.addLabels({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            labels: labels
+          });
