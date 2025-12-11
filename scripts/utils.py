@@ -4,7 +4,6 @@
 import os
 import re
 import json
-import pandas as pd
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
@@ -89,50 +88,7 @@ def ensure_directory(path: str) -> bool:
         return False
 
 
-def read_json_file(filepath: str) -> Optional[Dict]:
-    """读取JSON文件"""
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"读取JSON文件失败 {filepath}: {e}")
-        return None
 
-
-def write_json_file(filepath: str, data: Dict, indent: int = 2) -> bool:
-    """写入JSON文件"""
-    try:
-        ensure_directory(os.path.dirname(filepath))
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=indent)
-        return True
-    except Exception as e:
-        print(f"写入JSON文件失败 {filepath}: {e}")
-        return False
-
-
-def read_excel_file(filepath: str) -> Optional[pd.DataFrame]:
-    """读取Excel文件"""
-    try:
-        if not os.path.exists(filepath):
-            return pd.DataFrame()
-        
-        df = pd.read_excel(filepath, engine='openpyxl')
-        return df
-    except Exception as e:
-        print(f"读取Excel文件失败 {filepath}: {e}")
-        return None
-
-
-def write_excel_file(filepath: str, df: pd.DataFrame) -> bool:
-    """写入Excel文件"""
-    try:
-        ensure_directory(os.path.dirname(filepath))
-        df.to_excel(filepath, index=False, engine='openpyxl')
-        return True
-    except Exception as e:
-        print(f"写入Excel文件失败 {filepath}: {e}")
-        return False
 
 
 def truncate_text(text: str, max_length: int, ellipsis: str = "...") -> str:
@@ -251,66 +207,27 @@ def sanitize_filename(filename: str) -> str:
     
     return filename
 
-def regenerate_columns_from_tags(config_instance) -> List[str]:
-    """根据tag_config生成按order排序的表列名（table_name）列表"""
-    active_tags = config_instance.get_active_tags()
-    active_tags.sort(key=lambda x: x.get('order', 0))
-    return [tag['table_name'] for tag in active_tags]
 
-#暂不实现，因为需要将旧name保存下来以供映射
-def normalize_category_value(raw_val: Any, config_instance) -> str:
-    """
-    把 category 字段的旧name改为新的name，
-    若无法匹配则返回原值的字符串形式（strip 后）。
-    """
-    return raw_val
-    if raw_val is None:
-        return ""
-    val = str(raw_val).strip()
-    if not val:
-        return ""
-    # 构建映射：旧name -> unique_name, unique_name ->新name
-    new_cats = config_instance.get_active_categories()
-    old_cats=config_instance.old_cats
+def read_json_file(filepath: str) -> Optional[Dict]:
+    """读取JSON文件"""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"读取JSON文件失败 {filepath}: {e}")
+        return None
 
-    
 
-def normalize_dataframe_columns(df: pd.DataFrame, config_instance) -> pd.DataFrame:
-    """
-    确保DataFrame列按照tag_config中active tags重新生成：
-    - 添加缺失列（置空）
-    - 移除未激活的列
-    - 按order排序列顺序
-    - 对 category 列内值执行规范化（未实现）
-    """
-    if df is None:
-        df = pd.DataFrame()
-    cols = regenerate_columns_from_tags(config_instance)
-    # 保留现有行数据但只保留激活列
-    for c in cols:
-        if c not in df.columns:
-            df[c] = ""
-    # 移除多余列
-    to_keep = cols
-    df = df.loc[:, [c for c in to_keep if c in df.columns]]
-    # reorder
-    df = df[cols]
-    # # 规范化 category 列值
-    # if 'category' in df.columns:
-    #     df['category'] = df['category'].apply(lambda v: normalize_category_value(v, config_instance))
-    # 将所有非-bool/int 列转为 string（保持原有语义）
-    for tag in config_instance.get_active_tags():
-        col = tag['table_name']
-        t = tag.get('type', 'string')
-        if col in df.columns:
-            if t == 'bool':
-                df[col] = df[col].fillna(False).astype(bool)
-            elif t == 'int':
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
-            else:
-                df[col] = df[col].fillna("").astype(str).str.strip()
-    return df
-
+def write_json_file(filepath: str, data: Dict, indent: int = 2) -> bool:
+    """写入JSON文件"""
+    try:
+        ensure_directory(os.path.dirname(filepath))
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=indent)
+        return True
+    except Exception as e:
+        print(f"写入JSON文件失败 {filepath}: {e}")
+        return False
 def normalize_json_papers(raw_papers: List[Dict[str, Any]], config_instance) -> List[Dict[str, Any]]:
     """
     把JSON中的每篇论文都规范化为只包含active tag的变量（使用variable作为键），

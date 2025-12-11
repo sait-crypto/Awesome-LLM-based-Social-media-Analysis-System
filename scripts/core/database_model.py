@@ -40,14 +40,13 @@ class Paper:
     pipeline_image: str = ""
     abstract: str = ""
     contributor: str = ""
-    show_in_readme: bool = True
-    status: str = "" # "" "unread" "reading" "done" "adopted"
     notes: str = ""
-    submission_time: str = ""
-    conflict_marker: bool = False  # 冲突标记
     
     # 系统字段
-    
+    show_in_readme: bool = True
+    status: str = "" # "" "unread" "reading" "done" "adopted"
+    submission_time: str = ""
+    conflict_marker: bool = False  # 冲突标记
     def __post_init__(self):
         """初始化后处理"""
         # 清理DOI格式
@@ -144,15 +143,15 @@ class Paper:
                 errors.append(f"分类 '{self.category}' 无效，有效分类: {', '.join(valid_categories)}")
 
         return errors
-    def is_similar_to(self, other: 'Paper') -> bool:
-        """检查是否与另一篇论文相似（DOI或标题相同）"""
-        self.title=str(self.title).strip()
-        other.title=str(other.title).strip()
-        if self.doi and other.doi and self.doi == other.doi:
-            return True
-        if self.title and other.title and self.title.lower() == other.title.lower():
-            return True
-        return False
+    # def is_similar_to(self, other: 'Paper') -> bool:
+    #     """检查是否与另一篇论文相似（DOI或标题相同）"""
+    #     self.title=str(self.title).strip()
+    #     other.title=str(other.title).strip()
+    #     if self.doi and other.doi and self.doi == other.doi:
+    #         return True
+    #     if self.title and other.title and self.title.lower() == other.title.lower():
+    #         return True
+    #     return False
 
 def _normalize_doi_for_compare(doi: Optional[str]) -> str:
     """清理 DOI 并忽略可能存在的冲突标记（conflict_marker）"""

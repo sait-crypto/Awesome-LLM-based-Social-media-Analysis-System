@@ -6,17 +6,30 @@ on:
       - 'submit_template.json'
       - 'submit_template.xlsx'
     branches: [ main ]
+    types: [opened, synchronize, labeled, reopened]
   workflow_dispatch:  # 允许手动触发
+
+env:
+  # 控制处理模式的环境变量
+  # 设置为 "True" 时：自动处理所有提交的论文 PR
+  # 设置为 "False" 时：需要手动批准（添加 approved 标签）
+  AUTO_PROCESS_MODE: ${{ vars.AUTO_PROCESS_SUBMISSIONS || 'False' }}
 
 jobs:
   process-submission:
     runs-on: ubuntu-latest
     
-    # 仅在特定路径更改时才运行
+    # 根据处理模式决定运行条件
     if: |
       github.event_name == 'workflow_dispatch' ||
-      contains(github.event.pull_request.labels.*.name, 'paper-submission') ||
-      contains(github.event.pull_request.head.ref, 'paper-submission')
+      
+      (env.AUTO_PROCESS_MODE == 'True' && github.event_name == 'pull_request' && (
+        contains(github.event.pull_request.labels.*.name, 'paper-submission') ||
+        contains(github.event.pull_request.head.ref, 'paper-submission')
+      )) ||
+      
+      (env.AUTO_PROCESS_MODE == 'False' && github.event_name == 'pull_request' && 
+        contains(github.event.pull_request.labels.*.name, 'paper-submission-approved'))
     
     permissions:
       contents: write
@@ -30,6 +43,20 @@ jobs:
         fetch-depth: 0
         token: ${{ secrets.GITHUB_TOKEN }}
     
+    - name: Display processing mode
+      run: |
+        echo "========================================="
+        if [ "$AUTO_PROCESS_MODE" = "True" ]; then
+          echo "🤖 自动处理模式已启用"
+          echo "将自动处理所有带有 'paper-submission' 标签的 PR"
+        else
+          echo "👨‍💼 手动批准模式已启用"
+          echo "只处理带有 'paper-submission-approved' 标签的 PR"
+          echo ""
+          echo "审核后，请添加 'paper-submission-approved' 标签来触发处理"
+        fi
+        echo "========================================="
+    
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -41,31 +68,37 @@ jobs:
         pip install pandas openpyxl requests python-dateutil
         
         # 检查是否安装了必需的包
-        python -c "import pandas, openpyxl, requests; print('Dependencies installed successfully')"
+        python -c "import pandas, openpyxl, requests; print('✅ 依赖安装成功')"
     
     - name: Check for update files
       id: check-files
       run: |
-        echo "Checking for update files..."
-        JSON_EXISTS=false
-        EXCEL_EXISTS=false
+        echo "📁 检查更新文件..."
+        JSON_EXISTS=False
+        EXCEL_EXISTS=False
         
         if [ -f "submit_template.json" ] && [ -s "submit_template.json" ]; then
-          echo "Found non-empty submit_template.json"
-          JSON_EXISTS=true
+          echo "✅ 找到非空文件: submit_template.json"
+          JSON_EXISTS=True
+        else
+          echo "⚠️  文件不存在或为空: submit_template.json"
         fi
         
         if [ -f "submit_template.xlsx" ] && [ -s "submit_template.xlsx" ]; then
-          echo "Found non-empty submit_template.xlsx"
-          EXCEL_EXISTS=true
+          echo "✅ 找到非空文件: submit_template.xlsx"
+          EXCEL_EXISTS=True
+        else
+          echo "⚠️  文件不存在或为空: submit_template.xlsx"
         fi
         
         echo "json_exists=$JSON_EXISTS" >> $GITHUB_OUTPUT
         echo "excel_exists=$EXCEL_EXISTS" >> $GITHUB_OUTPUT
         
-        if [ "$JSON_EXISTS" = "false" ] && [ "$EXCEL_EXISTS" = "false" ]; then
-          echo "No update files found or they are empty"
+        if [ "$JSON_EXISTS" = "False" ] && [ "$EXCEL_EXISTS" = "False" ]; then
+          echo "❌ 未找到可用的更新文件"
           exit 1
+        else
+          echo "✅ 找到可处理的更新文件"
         fi
     
     - name: Set up environment variables
@@ -84,15 +117,26 @@ jobs:
           echo "DEEPSEEK_API=" >> $GITHUB_ENV
         fi
         
-        # 设置其他环境变量
-        echo "GITHUB_PR_NUMBER=${{ github.event.pull_request.number }}" >> $GITHUB_ENV
-        echo "GITHUB_PR_AUTHOR=${{ github.event.pull_request.user.login }}" >> $GITHUB_ENV
-        echo "GITHUB_PR_TITLE=${{ github.event.pull_request.title }}" >> $GITHUB_ENV
-    
+        # 设置PR信息
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          echo "GITHUB_PR_NUMBER=${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+          echo "GITHUB_PR_AUTHOR=${{ github.event.pull_request.user.login }}" >> $GITHUB_ENV
+          echo "GITHUB_PR_TITLE=${{ github.event.pull_request.title }}" >> $GITHUB_ENV
+          echo "GITHUB_PR_URL=${{ github.event.pull_request.html_url }}" >> $GITHUB_ENV
+        else
+          echo "GITHUB_PR_NUMBER=MANUAL" >> $GITHUB_ENV
+          echo "GITHUB_PR_AUTHOR=workflow_dispatch" >> $GITHUB_ENV
+          echo "GITHUB_PR_TITLE=Manual Trigger" >> $GITHUB_ENV
+          echo "GITHUB_PR_URL=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> $GITHUB_ENV
+        fi
+        
+        # 设置处理模式信息
+        echo "PROCESSING_MODE=${{ env.AUTO_PROCESS_MODE }}" >> $GITHUB_ENV
+        
     - name: Run update processor
       id: update-process
       run: |
-        echo "Running update processor..."
+        echo "🔄 运行更新处理器..."
         
         # 运行更新脚本
         cd scripts
@@ -102,31 +146,33 @@ jobs:
         if [ -f "update_result.json" ]; then
           RESULT=$(cat update_result.json)
           echo "result=$RESULT" >> $GITHUB_OUTPUT
+          echo "✅ 更新处理器执行完成"
         else
-          echo "result={\"success\": false, \"message\": \"No result file generated\"}" >> $GITHUB_OUTPUT
+          echo "result={\"success\": False, \"message\": \"未生成结果文件\"}" >> $GITHUB_OUTPUT
+          echo "⚠️  更新处理器未生成结果文件"
         fi
-      continue-on-error: true
+      continue-on-error: True
     
     - name: Generate README
       if: steps.update-process.outcome == 'success'
       run: |
-        echo "Generating README..."
+        echo "📄 生成 README..."
         cd scripts
         python convert.py
         
         # 检查README是否更新
         if git diff --name-only HEAD | grep -q "README.md"; then
-          echo "README updated"
-          echo "readme_updated=true" >> $GITHUB_ENV
+          echo "✅ README 已更新"
+          echo "readme_updated=True" >> $GITHUB_ENV
         else
-          echo "README not changed"
-          echo "readme_updated=false" >> $GITHUB_ENV
+          echo "ℹ️  README 未更改"
+          echo "readme_updated=False" >> $GITHUB_ENV
         fi
     
     - name: Commit changes
       if: steps.update-process.outcome == 'success'
       run: |
-        echo "Committing changes..."
+        echo "💾 提交更改..."
         
         # 配置Git
         git config --local user.email "action@github.com"
@@ -134,77 +180,86 @@ jobs:
         
         # 检查是否有更改
         if git diff --quiet; then
-          echo "No changes to commit"
-          echo "changes_committed=false" >> $GITHUB_ENV
+          echo "ℹ️  没有需要提交的更改"
+          echo "changes_committed=False" >> $GITHUB_ENV
         else
           # 添加更改
           git add .
           
           # 提交更改
           COMMIT_MESSAGE="Automated update from PR #$GITHUB_PR_NUMBER"
+          
+          if [ "$PROCESSING_MODE" = "False" ]; then
+            COMMIT_MESSAGE="$COMMIT_MESSAGE (manually approved)"
+          fi
+          
           git commit -m "$COMMIT_MESSAGE"
           
           # 推送到当前分支（PR分支）
           git push
           
-          echo "Changes committed and pushed"
-          echo "changes_committed=true" >> $GITHUB_ENV
+          echo "✅ 更改已提交并推送"
+          echo "changes_committed=True" >> $GITHUB_ENV
         fi
     
     - name: Create summary comment
       run: |
-        echo "Creating PR comment..."
+        echo "💬 创建PR评论摘要..."
         
         # 创建处理结果摘要
-        SUMMARY="## 📊 Paper Submission Processing Result\n\n"
+        SUMMARY="## 📊 论文提交处理结果\n\n"
+        
+        # 显示处理模式
+        if [ "$PROCESSING_MODE" = "True" ]; then
+          SUMMARY+="**处理模式:** 🤖 自动处理\n\n"
+        else
+          SUMMARY+="**处理模式:** 👨‍💼 手动批准\n\n"
+        fi
         
         if [ "${{ steps.update-process.outcome }}" = "success" ]; then
-          SUMMARY+="✅ **Successfully processed submission**\n\n"
+          SUMMARY+="✅ **成功处理提交**\n\n"
           
-          # 从步骤输出获取结果
-          RESULT='${{ steps.update-process.outputs.result }}'
+          # 添加成功详情
+          SUMMARY+="- 更新文件已处理\n"
           
-          if [ -n "$RESULT" ] && [ "$RESULT" != "null" ]; then
-            # 解析JSON结果（这里简化处理）
-            SUMMARY+="- Update processed successfully\n"
+          if [ "$readme_updated" = "True" ]; then
+            SUMMARY+="- README 已更新\n"
           else
-            SUMMARY+="- Update processed (no detailed result)\n"
+            SUMMARY+="- README 无需更新\n"
           fi
           
-          if [ "$readme_updated" = "true" ]; then
-            SUMMARY+="- README updated\n"
+          if [ "$changes_committed" = "True" ]; then
+            SUMMARY+="- 更改已提交到 PR 分支\n"
           fi
           
-          if [ "$changes_committed" = "true" ]; then
-            SUMMARY+="- Changes committed to PR branch\n"
-          fi
-          
-          SUMMARY+="\nThank you for your submission! The paper database has been updated."
+          SUMMARY+="\n感谢您的提交！论文数据库已更新。"
           
         else
-          SUMMARY+="❌ **Processing failed**\n\n"
-          SUMMARY+="The submission could not be processed automatically.\n\n"
-          SUMMARY+="**Possible reasons:**\n"
-          SUMMARY+="- Invalid file format\n"
-          SUMMARY+="- Missing required fields\n"
-          SUMMARY+="- Database update error\n\n"
-          SUMMARY+="Please check your submission and try again, or contact the maintainers."
+          SUMMARY+="❌ **处理失败**\n\n"
+          SUMMARY+="提交无法自动处理。\n\n"
+          SUMMARY+="**可能的原因:**\n"
+          SUMMARY+="- 文件格式无效\n"
+          SUMMARY+="- 缺少必填字段\n"
+          SUMMARY+="- 数据库更新错误\n\n"
+          SUMMARY+="请检查您的提交并重试，或联系维护人员。"
         fi
         
         # 添加处理信息
         SUMMARY+="\n\n---\n"
-        SUMMARY+="**Process Information:**\n"
+        SUMMARY+="**处理信息:**\n"
         SUMMARY+="- PR: #$GITHUB_PR_NUMBER by @$GITHUB_PR_AUTHOR\n"
-        SUMMARY+="- Run ID: ${{ github.run_id }}\n"
-        SUMMARY+="- Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        SUMMARY+="- 标题: $GITHUB_PR_TITLE\n"
+        SUMMARY+="- 运行ID: ${{ github.run_id }}\n"
+        SUMMARY+="- 时间戳: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
         
-        # 输出摘要（用于后续步骤）
+        # 输出摘要到文件（用于后续步骤）
         echo "$SUMMARY" > pr_summary.md
         
-        # 也可以在GitHub Actions日志中显示
+        # 在日志中显示摘要
         echo "$SUMMARY"
     
     - name: Comment on PR
+      if: github.event_name == 'pull_request'
       uses: actions/github-script@v7
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -221,7 +276,7 @@ jobs:
           // 检查是否已有来自本Action的评论
           const botComment = comments.find(comment => 
             comment.user.type === 'Bot' && 
-            comment.body.includes('Paper Submission Processing Result')
+            comment.body.includes('论文提交处理结果')
           );
           
           if (botComment) {
@@ -232,6 +287,7 @@ jobs:
               comment_id: botComment.id,
               body: summary
             });
+            console.log('✅ 更新了现有评论');
           } else {
             // 创建新评论
             await github.rest.issues.createComment({
@@ -240,37 +296,13 @@ jobs:
               issue_number: context.issue.number,
               body: summary
             });
+            console.log('✅ 创建了新评论');
           }
-    
-    - name: Send notification email
-      if: always()
-      uses: dawidd6/action-send-mail@v3
-      with:
-        server_address: smtp.gmail.com
-        server_port: 465
-        username: submitter
-        password: ${{ secrets.EMAIL_PASSWORD }}
-        subject: "Paper Submission PR #${{ github.event.pull_request.number }} - ${{ job.status }}"
-        to: 2182712226@qq.com
-        from: GitHub Actions <submitter>
-        body: |
-          Paper submission PR #${{ github.event.pull_request.number }} has been processed.
-          
-          Status: ${{ job.status }}
-          PR Title: ${{ github.event.pull_request.title }}
-          Author: @${{ github.event.pull_request.user.login }}
-          
-          View PR: ${{ github.event.pull_request.html_url }}
-          View Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          
-          ---
-          
-          $(cat pr_summary.md)
     
     - name: Clean up update files
       if: steps.update-process.outcome == 'success'
       run: |
-        echo "Cleaning up update files..."
+        echo "🧹 清理更新文件..."
         
         # 清空更新文件
         echo '{"papers": []}' > submit_template.json
@@ -280,34 +312,95 @@ jobs:
         import pandas as pd
         df = pd.DataFrame()
         df.to_excel('submit_template.xlsx', index=False)
+        print('✅ 已清空更新文件')
         "
         
         # 提交清理
-        if [ "$changes_committed" = "true" ]; then
+        if [ "$changes_committed" = "True" ]; then
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add submit_template.json submit_template.xlsx
           git commit -m "Clear update files after processing"
           git push
+          echo "✅ 清理提交已推送"
         fi
     
-    - name: Add labels
+    - name: Manage labels
+      if: github.event_name == 'pull_request'
       uses: actions/github-script@v7
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         script: |
-          // 添加处理状态标签
+          // 管理标签
           const labels = ['paper-submission'];
           
           if ('${{ steps.update-process.outcome }}' === 'success') {
             labels.push('processed-successfully');
+            
+            // 在手动模式下，处理完成后移除批准标签
+            if ('${{ env.AUTO_PROCESS_MODE }}' === 'False') {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  name: 'paper-submission-approved'
+                });
+                console.log('✅ 已移除批准标签');
+              } catch (e) {
+                console.log('ℹ️  批准标签不存在或已移除');
+              }
+            }
           } else {
             labels.push('needs-review');
+            
+            // 在手动模式下，如果处理失败，也移除批准标签
+            if ('${{ env.AUTO_PROCESS_MODE }}' === 'False') {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  name: 'paper-submission-approved'
+                });
+              } catch (e) {
+                // 忽略错误
+              }
+            }
           }
           
+          // 添加新标签
           await github.rest.issues.addLabels({
             owner: context.repo.owner,
             repo: context.repo.repo,
             issue_number: context.issue.number,
             labels: labels
           });
+          
+          console.log('✅ 已添加标签: ' + labels.join(', '));
+    
+    - name: Send notification (optional)
+      if: always() && github.event_name == 'pull_request'
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: smtp.gmail.com
+        server_port: 465
+        username: ${{ secrets.EMAIL_USERNAME }}
+        password: ${{ secrets.EMAIL_PASSWORD }}
+        subject: "论文提交 PR #${{ github.event.pull_request.number }} - ${{ job.status }}"
+        to: ${{ secrets.NOTIFICATION_EMAIL }}
+        from: GitHub Actions <${{ secrets.EMAIL_USERNAME }}>
+        body: |
+          论文提交 PR #${{ github.event.pull_request.number }} 处理完成。
+          
+          状态: ${{ job.status }}
+          模式: ${{ env.AUTO_PROCESS_MODE == 'True' ? '自动处理' : '手动批准' }}
+          PR标题: ${{ github.event.pull_request.title }}
+          作者: @${{ github.event.pull_request.user.login }}
+          
+          查看PR: ${{ github.event.pull_request.html_url }}
+          查看运行: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          
+          ---
+          
+          $(cat pr_summary.md)

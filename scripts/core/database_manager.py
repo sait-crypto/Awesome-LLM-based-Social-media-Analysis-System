@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
 # 导入配置和模型
 from scripts.core.config_loader import get_config_instance
 from scripts.core.database_model import Paper, is_same_identity, is_duplicate_paper
-from scripts.utils import normalize_dataframe_columns  # 新增导入
+from scripts.update_file_utils import get_update_file_utils
 
 
 class DatabaseManager:
@@ -158,11 +158,11 @@ class DatabaseManager:
             conflict_fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
             
             for idx, row in df.iterrows():
-                if row.get(conflict_row_name).strip() not in [False,0,None,"False","FALSE","false","","0"]:
+                if row.get(conflict_row_name) not in [False,0,None,"False","FALSE","false","","0"]:
                     for cell in worksheet[idx + 2]:  # +2因为标题行是1，索引从0开始
                         cell.fill = conflict_fill
-                        #如果列名是title，就在该cell内容前加冲突标记
-                        if cell.column_letter == get_column_letter(df.columns.get_loc('title') + 1):
+                        #如果列名是doi，就在该cell内容前加冲突标记
+                        if cell.column_letter == get_column_letter(df.columns.get_loc('doi') + 1):
                             cell.value = f"{row['conflict_marker']} {cell.value}"
         else:
             print(f"添加论文冲突格式时，发现数据库表格没有conflict_marker列")
@@ -275,53 +275,65 @@ class DatabaseManager:
         conflict_papers = []
 
         for new_paper in new_papers:
-
+            new_paper.submission_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
             # 检查是否已存在（按 DOI 或 title 判断同一论文，忽略 conflict_marker）
-            is_same_paper = False
-            duplicate_papers = []
+            same_identity_papers = []
             conflict_with = None
             conflict_index = 0
             
             # 找出所有同identity论文
             for idx, existing_paper in enumerate(existing_papers):
                 if is_same_identity(new_paper, existing_paper):
-                    is_same_paper = True
-                    duplicate_papers.append(existing_paper)
-                    # 唯一一个最初版本
-                    if existing_paper.conflict_marker == False:
+                    same_identity_papers.append(existing_paper)
+                    # 记录第一个无冲突标记的论文作为冲突对象
+                    if conflict_with is None and not existing_paper.conflict_marker:
                         conflict_with = existing_paper
                         conflict_index = idx
-
-            if is_same_paper:
-                if conflict_with == None:
-                    print("提交时发现存在同指向论文，但无法找到最初论文，已停止写入新论文，请检查")
-                    return [], new_papers
-                
-                # 如果是同一论文身份，先判断是否为"完全重复提交"
-                if is_duplicate_paper(duplicate_papers, new_paper):
+            
+            if same_identity_papers:
+                # 先判断是否为"完全重复提交"
+                if is_duplicate_paper(same_identity_papers, new_paper):
                     # 完全相同，跳过
                     print(f"论文: {new_paper.title}重复提交，跳过添加")
                     continue
 
                 # 不是完全相同，按冲突策略处理
                 if conflict_resolution == 'skip':
+                    print(f"论文: {new_paper.title}存在冲突，已跳过")
                     continue
-                # 完全替换
+                
                 elif conflict_resolution == 'replace':
-                    existing_papers = [p for p in existing_papers if not is_same_identity(p, new_paper)]
-                    # 这里不直接插入，而是先添加到列表末尾，稍后排序
+                    # 完全替换：删除所有同身份论文，添加新论文
+                    existing_papers = [p for p in existing_papers 
+                                    if not is_same_identity(p, new_paper)]
                     existing_papers.append(new_paper)
                     added_papers.append(new_paper)
+                    print(f"论文: {new_paper.title}替换原有论文")
+                    
                 elif conflict_resolution == 'mark':
                     new_paper.conflict_marker = True
-                    conflict_papers.append((new_paper, conflict_with))
-                    # 不直接插入，稍后排序处理
+                    
+                    # 如果没有无冲突标记的论文，使用第一篇作为冲突对象
+                    if conflict_with is None and same_identity_papers:
+                        conflict_with = same_identity_papers[0]
+                        conflict_index = next(idx for idx, p in enumerate(existing_papers) 
+                                            if is_same_identity(p, conflict_with))
+                        print(f"警告：论文 {new_paper.title[:50]}... 的所有同身份论文都有冲突标记")
+                    
+                    if conflict_with:
+                        conflict_papers.append((new_paper, conflict_with))
+                        print(f"论文: {new_paper.title}与现有论文冲突，已标记")
+                    else:
+                        print(f"警告：论文 {new_paper.title[:50]}... 没有找到冲突对象，但仍然标记为冲突")
+                    
                     existing_papers.append(new_paper)
                     added_papers.append(new_paper)
             else:
                 # 新论文，添加到列表末尾，稍后排序
                 existing_papers.append(new_paper)
                 added_papers.append(new_paper)
+                print(f"论文: {new_paper.title}作为新论文添加")
 
         # 修正的排序逻辑：
         # 1. 首先找出所有无冲突标记的paper

@@ -8,7 +8,7 @@ import requests
 from typing import Dict, List, Optional, Any
 import time
 from dataclasses import asdict
-
+from scripts.update_file_utils import get_update_file_utils
 from scripts.core.config_loader import get_config_instance
 from scripts.core.database_model import Paper
 
@@ -98,7 +98,7 @@ class AIGenerator:
 1. 用一句话概括方法的核心
 2. 适当使用比喻或类比
 3. 保持学术性但易懂
-4. 长度控制在35字以内
+4. 长度控制在35字以内，能短尽量短
 5. 提示词中前面标有[AI generated]的字段表示由AI生成，未经人类审核，请谨慎参考
 6. 不能出现'|'字符
 7.生成中英双语，先英文再中文，使用"[翻译]"字符串分割
@@ -173,7 +173,7 @@ class AIGenerator:
         # 1. 目标/动机
         motivation_prompt = f"""{preprompt}
 
-你的分工：请总结并直接给出这篇论文的研究目标或动机（35字以内）："""
+你的分工：请总结并直接给出这篇论文的研究目标或动机（35字以内，能短尽量短）："""
         if  field == 'summary_motivation':
             motivation = self._call_api(motivation_prompt, max_tokens=80)
             if motivation:
@@ -182,7 +182,7 @@ class AIGenerator:
         # 2. 创新点
         innovation_prompt = f"""{preprompt}
 
-你的分工：请总结并直接给出这篇论文的主要创新点，即该论文有什么值得我引用到综述里的（35字以内）："""
+你的分工：请总结并直接给出这篇论文的主要创新点，即该论文有什么值得我引用到综述里的（35字以内，能短尽量短）："""
         if field == 'summary_innovation':
             innovation = self._call_api(innovation_prompt, max_tokens=80)
             if innovation:
@@ -191,7 +191,7 @@ class AIGenerator:
         # 3. 方法精炼
         method_prompt = f"""{preprompt}
 
-你的分工：请精炼总结并直接给出这篇论文的核心方法（35字以内）："""
+你的分工：请精炼总结并直接给出这篇论文的核心方法（35字以内，能短尽量短）："""
         if field == 'summary_method':
             method = self._call_api(method_prompt, max_tokens=80)
             if method:
@@ -200,7 +200,7 @@ class AIGenerator:
         # 4. 简要结论
         conclusion_prompt = f"""{preprompt}
 
-你的分工：请总结并直接给出这篇论文的主要结论或贡献（35字以内）："""
+你的分工：请总结并直接给出这篇论文的主要结论或贡献（35字以内，能短尽量短）："""
         if field == 'summary_conclusion':
             conclusion = self._call_api(conclusion_prompt, max_tokens=80)
             if conclusion:
@@ -209,7 +209,7 @@ class AIGenerator:
         # 5. 重要局限/展望
         limitation_prompt = f"""{preprompt}
 
-你的分工：请总结并直接指出这篇论文的重要局限性或未来工作展望（35字以内）："""
+你的分工：请总结并直接指出这篇论文的重要局限性或未来工作展望（35字以内，能短尽量短）："""
         if field == 'summary_limitation':
             limitation = self._call_api(limitation_prompt, max_tokens=80)
             if limitation:

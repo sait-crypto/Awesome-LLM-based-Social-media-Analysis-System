@@ -1,4 +1,6 @@
-"""
+依然是最小修改原则，将两种template文件的共用处理方法，即：读取方法，写入方法、remove方法（包括utils.py中的）统一实现到新文件update_file_utils.py中，其他地方都使用引用其方法
+
+我需要该文件不引用除自带的tkinter外的外部库，请检查并删除相关逻辑（读取excel、写入excel等没有被引入的），并保证其他逻辑仍能正常实现（最小更改原则），（写入和读取文件应该只处理json，并提醒用户只能处理json，clean_doi应用于写入文件前）"""
 图形化界面提交系统
 """
 import os
@@ -14,12 +16,8 @@ from datetime import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../'))
 
 from scripts.core.config_loader import get_config_instance
-from scripts.core.database_model import Paper
-
 from scripts.utils import (
-    read_json_file, 
-    write_json_file, 
-    normalize_json_papers,
+
     get_current_timestamp, 
     validate_url, 
     validate_doi, 
@@ -398,7 +396,6 @@ class PaperSubmissionGUI:
                                 val = ""
                             t = tag.get('type', 'string')
                             if t == 'bool':
-                                #todo
                                 normalized[var] = bool(val) if val not in ("", None) else False
                             elif t == 'int':
                                 try:
@@ -412,9 +409,7 @@ class PaperSubmissionGUI:
                         self.papers.append(paper)
                     
                     self.update_paper_list()
-                    self.update_status(f"已从{self.update_json_path}加载 {len(self.papers)} 篇论文")
-                    messagebox.showinfo("须知",f"该界面用于:\n    1.生成json更新文件\n    2.自动分支并提交PR\n如果根目录中的submit_template.xlsx或submit_template.json已按规范填写内容，你可以手动提交PR或使用该界面自动分支并提交PR，您提交的内容会自动更新到仓库论文列表")
-
+                    self.update_status(f"已加载 {len(self.papers)} 篇论文")
             except Exception as e:
                 messagebox.showerror("错误", f"加载更新文件失败: {e}")
     
@@ -653,8 +648,6 @@ class PaperSubmissionGUI:
         # 验证所有论文
         invalid_papers = []
         for i, paper in enumerate(self.papers):
-            #遍历时首先将doi的网址部分清掉
-            paper.doi=clean_doi(paper.doi)
             errors = paper.is_valid()
             if errors:
                 invalid_papers.append((i+1, paper.title[:50], errors[:2]))
@@ -683,257 +676,95 @@ class PaperSubmissionGUI:
         except Exception as e:
             messagebox.showerror("错误", f"保存JSON失败: {e}")
             return
-        messagebox.showerror(f"已保存")
         
-    
+        # 写 Excel：先生成 DataFrame，再规范列顺序并写入
+        from scripts.core.database_manager import DatabaseManager
+        dbm = DatabaseManager()
+        df = dbm.get_dataframe_from_papers(self.papers)
+        # normalize before write
+        df = normalize_dataframe_columns(df, self.config)
+        try:
+            write_excel_file(self.update_excel_path, df)
+        except Exception as e:
+            messagebox.showerror("错误", f"保存Excel失败: {e}")
+            return
         
         messagebox.showinfo("成功", "所有论文已保存到更新文件")
         self.update_status(f"已保存 {len(self.papers)} 篇论文到更新文件")
     
     def submit_pr(self):
         """提交PR（模拟）"""
-        messagebox.showinfo("须知", f"将自动通过pull request提交论文，具体进行以下操作:\n  1.如果当前在main分支，将进行自动创建并切换到新分支\n  2.自动提交PR\n  3.如果根目录中的submit_template.xlsx或submit_template.json已按规范填写，且没有项目中任何其他更改，您提交的论文会自动更新到仓库论文列表\n\n")
-        
         # 检查是否有论文
         if not self.papers:
-            messagebox.showwarning("警告", "两个submit_template文件中没有论文可以提交")
+            messagebox.showwarning("警告", "没有论文可以提交")
             return
         
         # 检查是否已保存
         if not os.path.exists(self.update_json_path):
-            if  messagebox.askyesno("确认", "表单内容尚未保存到submit_template.json，是否先保存？取消保存将不会提交表单内容"):
-            
-                self.save_all_papers()
-
+            if not messagebox.askyesno("确认", "更新文件尚未保存，是否先保存？"):
+                return
+            self.save_all_papers()
+        
         # 确认提交
-        if not messagebox.askyesno("确认", f"确定要提交submit_template.xlsx和submit_template.json中的论文吗？"):
+        if not messagebox.askyesno("确认", f"确定要提交 {len(self.papers)} 篇论文吗？"):
             return
+        
+        # 在实际版本中，这里会调用Git命令提交PR
+        # 这里我们只模拟这个过程
+        self.update_status("正在提交PR...")
         
         # 在后台线程中执行
         def submit_thread():
             try:
-                import subprocess
+                # 模拟处理时间
                 import time
+                time.sleep(2)
                 
-                # 1. 检查Git是否安装
-                try:
-                    subprocess.run(["git", "--version"], check=True, capture_output=True)
-                except (subprocess.CalledProcessError, FileNotFoundError):
-                    raise Exception("Git未安装！请先安装Git：\nWindows: https://git-scm.com/download/win\nmacOS: brew install git\nLinux: sudo apt-get install git")
-                
-                # 2. 检查当前分支
-                result = subprocess.run(["git", "branch", "--show-current"], 
-                                       capture_output=True, text=True, cwd=os.getcwd())
-                current_branch = result.stdout.strip()
-                
-                # 3. 如果在main分支，创建新分支
-                if current_branch == "main":
-                    branch_name = f"paper-submission-{int(time.time())}"
-                    try:
-                        subprocess.run(["git", "checkout", "-b", branch_name], 
-                                      check=True, capture_output=True, text=True, cwd=os.getcwd())
-                        self.root.after(0, lambda: self.update_status(f"已创建并切换到新分支: {branch_name}"))
-                    except subprocess.CalledProcessError as e:
-                        raise Exception(f"创建分支失败: {e.stderr}")
-                else:
-                    branch_name = current_branch
-                    self.root.after(0, lambda: self.update_status(f"使用现有分支: {branch_name}"))
-                
-                # 4. 添加文件并提交
-                try:
-                    # 添加更新文件
-                    subprocess.run(["git", "add", self.update_json_path], 
-                                 check=True, capture_output=True, cwd=os.getcwd())
-                    
-                    # 如果有Excel文件也添加
-                    if os.path.exists(self.update_excel_path):
-                        subprocess.run(["git", "add", self.update_excel_path], 
-                                     check=True, capture_output=True, cwd=os.getcwd())
-                    
-                    
-                    self.root.after(0, lambda: self.update_status("已提交更改到本地仓库"))
-                except subprocess.CalledProcessError as e:
-                    raise Exception(f"提交更改失败: {e.stderr}")
-                
-                # 5. 推送到远程
-                try:
-                    subprocess.run(["git", "push", "origin", branch_name], 
-                                 check=True, capture_output=True, text=True, cwd=os.getcwd())
-                    self.root.after(0, lambda: self.update_status(f"已推送到远程分支: {branch_name}"))
-                except subprocess.CalledProcessError as e:
-                    raise Exception(f"推送失败: {e.stderr}\n\n请检查远程仓库配置，或手动执行: git push origin {branch_name}")
-                
-                # 6. 创建PR（尝试使用GitHub CLI）
-                try:
-                    # 检查是否安装了GitHub CLI
-                    try:
-                        subprocess.run(["gh", "--version"], check=True, capture_output=True)
-                        use_gh = True
-                    except (subprocess.CalledProcessError, FileNotFoundError):
-                        use_gh = False
-                    
-                    if use_gh:
-                        # 使用GitHub CLI创建PR
-                        pr_title = f"论文提交: {len(self.papers)} 篇新论文"
-                        pr_body = f"通过GUI提交了 {len(self.papers)} 篇论文。\n\n包含论文:\n" + "\n".join([f"- {paper.title[:50]}..." for paper in self.papers[:5]])
-                        if len(self.papers) > 5:
-                            pr_body += f"\n...以及其他 {len(self.papers)-5} 篇论文"
-                        
-                        result = subprocess.run(
-                            ["gh", "pr", "create", 
-                             "--title", pr_title,
-                             "--body", pr_body,
-                             "--base", "main"],
-                            capture_output=True, text=True, cwd=os.getcwd()
-                        )
-                        
-                        if result.returncode == 0:
-                            pr_url = result.stdout.strip()
-                            self.root.after(0, lambda: self.show_pr_result(pr_url))
-                        else:
-                            raise Exception(f"GitHub CLI创建PR失败: {result.stderr}")
-                    else:
-                        # GitHub CLI未安装，提供手动创建指引
-                        repo_url = ""
-                        try:
-                            # 尝试获取远程仓库URL
-                            result = subprocess.run(["git", "remote", "get-url", "origin"], 
-                                                   capture_output=True, text=True, cwd=os.getcwd())
-                            repo_url = result.stdout.strip()
-                        except:
-                            pass
-                        
-                        if repo_url and "github.com" in repo_url:
-                            # 将SSH URL转换为HTTPS URL
-                            if repo_url.startswith("git@"):
-                                repo_url = repo_url.replace(":", "/").replace("git@", "https://")
-                                repo_url = repo_url.replace(".git", "")
-                            
-                            manual_pr_url = f"{repo_url}/compare/main...{branch_name}?expand=1"
-                            self.root.after(0, lambda: self.show_manual_pr_guide(branch_name, manual_pr_url))
-                        else:
-                            self.root.after(0, lambda: self.show_github_cli_guide(branch_name))
-                
-                except Exception as e:
-                    # GitHub CLI相关错误
-                    if "GitHub CLI" in str(e):
-                        self.root.after(0, lambda: self.show_github_cli_guide(branch_name))
-                    else:
-                        self.root.after(0, lambda: self.show_pr_result(""))
+                # 在主线程中显示结果
+                self.root.after(0, lambda: self.show_pr_result())
                 
             except Exception as e:
-                self.root.after(0, lambda: messagebox.showerror("提交失败", f"{str(e)}"))
+                self.root.after(0, lambda: messagebox.showerror("错误", f"提交失败: {e}"))
                 self.root.after(0, lambda: self.update_status("提交失败"))
         
         threading.Thread(target=submit_thread, daemon=True).start()
     
-    def show_github_cli_guide(self, branch_name):
-        """显示GitHub CLI安装指引"""
-        guide = f"""
-GitHub CLI未安装或配置，无法自动创建PR。
-
-请选择以下任一方式：
-
-1. 安装GitHub CLI（推荐）:
-   Windows: winget install --id GitHub.cli
-   macOS: brew install gh
-   Linux: 查看 https://github.com/cli/cli#installation
-
-   安装后需要登录: gh auth login
-
-2. 手动创建PR:
-   a. 访问您的GitHub仓库页面
-   b. 点击 "Compare & pull request"
-   c. 选择 base: main  ←→ compare: {branch_name}
-   d. 填写PR信息并提交
-
-当前分支: {branch_name}
-"""
-        messagebox.showinfo("手动创建PR指引", guide)
-        self.update_status("需要手动创建PR")
-    
-    def show_manual_pr_guide(self, branch_name, pr_url):
-        """显示手动创建PR的指引"""
-        guide = f"""
-已成功推送分支 {branch_name}！
-
-请手动创建Pull Request:
-
-1. 打开链接创建PR:
-   {pr_url}
-
-2. 或者:
-   a. 访问您的GitHub仓库
-   b. 点击 "New pull request"
-   c. 选择: base: main ←→ compare: {branch_name}
-   d. 填写标题和描述
-   e. 点击 "Create pull request"
-
-提交的论文数: {len(self.papers)} 篇
-"""
-        messagebox.showinfo("创建Pull Request", guide)
-        self.update_status(f"请手动创建PR: {branch_name}")
-    
-    def show_pr_result(self, pr_url=None):
+    def show_pr_result(self):
         """显示PR提交结果"""
         result_window = tk.Toplevel(self.root)
         result_window.title("PR提交结果")
-        result_window.geometry("700x500")
+        result_window.geometry("600x400")
         
         # 标题
-        if pr_url:
-            title_text = "✅ PR提交成功"
-            pr_text = f"PR链接: {pr_url}"
-        else:
-            title_text = "📤 代码已推送，需要创建PR"
-            pr_text = "请按照指引手动创建Pull Request"
-        
         title_label = ttk.Label(
             result_window,
-            text=title_text,
+            text="✅ PR提交成功",
             font=("Arial", 14, "bold")
         )
         title_label.pack(pady=(20, 10))
         
-        # PR链接
-        pr_label = ttk.Label(
+        # 说明
+        explanation = ttk.Label(
             result_window,
-            text=pr_text,
-            wraplength=600,
+            text="您的论文已成功提交！\n\n项目维护者将会：\n1. 审核您的提交\n2. 自动更新数据库\n3. 合并到主分支\n4. 重新生成README",
             justify=tk.LEFT
         )
-        pr_label.pack(pady=(0, 20))
-        
-        if pr_url:
-            # 添加复制链接按钮
-            def copy_url():
-                self.root.clipboard_clear()
-                self.root.clipboard_append(pr_url)
-                self.update_status("PR链接已复制到剪贴板")
-            
-            copy_button = ttk.Button(
-                result_window,
-                text="📋 复制PR链接",
-                command=copy_url
-            )
-            copy_button.pack(pady=(0, 10))
+        explanation.pack(pady=(0, 20))
         
         # 提交的论文列表
-        list_frame = ttk.LabelFrame(result_window, text=f"已提交的论文 ({len(self.papers)}篇)", padding=10)
+        list_frame = ttk.LabelFrame(result_window, text="已提交的论文", padding=10)
         list_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
         
-        # 创建滚动文本框显示论文列表
-        text_widget = scrolledtext.ScrolledText(list_frame, height=10)
-        text_widget.pack(fill=tk.BOTH, expand=True)
+        # 创建列表
+        listbox = tk.Listbox(list_frame, height=8)
+        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=listbox.yview)
+        listbox.configure(yscrollcommand=scrollbar.set)
         
         for i, paper in enumerate(self.papers, 1):
-            text_widget.insert(tk.END, f"{i}. {paper.title}\n")
-            text_widget.insert(tk.END, f"   作者: {paper.authors[:50]}...\n")
-            text_widget.insert(tk.END, f"   分类: {paper.category}\n")
-            if i < len(self.papers):
-                text_widget.insert(tk.END, "-" * 60 + "\n")
+            listbox.insert(tk.END, f"{i}. {paper.title[:60]}...")
         
-        text_widget.config(state=tk.DISABLED)
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
         # 按钮
         button_frame = ttk.Frame(result_window)
@@ -947,9 +778,7 @@ GitHub CLI未安装或配置，无法自动创建PR。
         )
         close_button.pack()
         
-        self.update_status("PR提交完成" if pr_url else "代码已推送，等待PR创建")
-    
-
+        self.update_status("PR提交成功")
     
     def load_template(self):
         """加载模板文件"""
@@ -965,13 +794,9 @@ GitHub CLI未安装或配置，无法自动创建PR。
             if filepath.endswith('.json'):
                 data = read_json_file(filepath)
             elif filepath.endswith('.xlsx'):
-                try:
-                    import pandas as pd
-
-                except Exception as e:
-                    messagebox.showerror("错误", f"无法导入pandas依赖:{e}\n 注意如果要加载excel文件，你需要安装pandas依赖包")
-                    return
+                import pandas as pd
                 df = pd.read_excel(filepath, engine='openpyxl')
+                
                 # 转换为Paper对象列表
                 papers_data = []
                 for _, row in df.iterrows():
@@ -988,7 +813,7 @@ GitHub CLI未安装或配置，无法自动创建PR。
                 
                 data = {'papers': papers_data}
             else:
-                messagebox.showerror("错误", "不支持的文件格式，如果想要处理excel文件，你需要安装pandas依赖包")
+                messagebox.showerror("错误", "不支持的文件格式")
                 return
             
             if data and 'papers' in data:

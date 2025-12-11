@@ -17,7 +17,8 @@ from scripts.core.config_loader import get_config_instance
 from scripts.core.database_manager import DatabaseManager
 from scripts.core.database_model import Paper, is_duplicate_paper
 from scripts.ai_generator import AIGenerator
-from scripts.utils import read_json_file, read_excel_file, get_current_timestamp, write_json_file, write_excel_file, normalize_dataframe_columns, normalize_json_papers
+from scripts.utils import  get_current_timestamp
+from scripts.update_file_utils import get_update_file_utils
 import pandas as pd
 
 

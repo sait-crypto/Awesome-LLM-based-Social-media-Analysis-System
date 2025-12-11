@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from core.database_manager import DatabaseManager
 from core.database_model import Paper
+from scripts.update_file_utils import get_update_file_utils
 from scripts.utils import truncate_text, format_authors, create_hyperlink, escape_markdown
 import pandas as pd
 from typing import Dict, List

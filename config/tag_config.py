@@ -29,6 +29,7 @@ TAGS_CONFIG = {
             "enabled": True,                # 对于immutable标签，此设置被忽略
             "immutable": True,              # 不可禁用，必填项
             "required": True,               # 必须填写
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
         },
         #以下3个标签在readme列表中共用一列，使用"title&authors&date"作为列名，使用"[display_name]"分割5个字段
         {
@@ -43,6 +44,7 @@ TAGS_CONFIG = {
             "enabled": True,
             "immutable": True,
             "required": True,               # 必须填写
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
         },
         {
             "variable": "authors",          # 不可更改
@@ -56,6 +58,8 @@ TAGS_CONFIG = {
             "enabled": True,
             "immutable": True,
             "required": True,               # 必须填写
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
         {
             "variable": "date",          # 不可更改
@@ -69,6 +73,8 @@ TAGS_CONFIG = {
             "enabled": True,
             "immutable": True,
             "required": True,               # 必须填写
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
         {
             "variable": "category",         # 不可更改
@@ -82,6 +88,8 @@ TAGS_CONFIG = {
             "enabled": True,
             "immutable": True,
             "required": True,               # 必须填写
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
         #以下5个标签在readme列表中共用一列，它们5个是写综述时直接引用的一句话总结。使用"summary"作为列名，使用"[display_name]"分割5个字段
         {
@@ -96,6 +104,8 @@ TAGS_CONFIG = {
             "enabled": True,
             "immutable": True,
             "required": False,              
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
         {
             "variable": "summary_innovation",
@@ -109,6 +119,8 @@ TAGS_CONFIG = {
             "enabled": True,
             "immutable": True,
             "required": False,              
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
         {
             "variable": "summary_method",
@@ -122,6 +134,8 @@ TAGS_CONFIG = {
             "enabled": True,
             "immutable": True,
             "required": False,              
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
         {
             "variable": "summary_conclusion",
@@ -134,7 +148,9 @@ TAGS_CONFIG = {
             "show_in_readme": True,
             "enabled": True,
             "immutable": True,
-            "required": False,              
+            "required": False,            
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
         {
             "variable": "summary_limitation",
@@ -148,6 +164,8 @@ TAGS_CONFIG = {
             "enabled": True,
             "immutable": True,
             "required": False,              
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
         #以下2个标签在readme列表中共用一列，使用"links"作为列名，使用"[display_name]"分割2个字段
         {
@@ -162,6 +180,8 @@ TAGS_CONFIG = {
             "enabled": True,
             "immutable": True,
             "required": True,               # 必须填写
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
         {
             "variable": "project_url",
@@ -175,6 +195,8 @@ TAGS_CONFIG = {
             "enabled": True,
             "immutable": True,             
             "required": False,              
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
         {
             "variable": "conference",
@@ -187,7 +209,9 @@ TAGS_CONFIG = {
             "show_in_readme": False,
             "enabled": True,
             "immutable": True,
-            "required": False,              
+            "required": False,           
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
     # ==================== 可禁用标签 (immutable=false) ====================
         {
@@ -201,7 +225,9 @@ TAGS_CONFIG = {
             "show_in_readme": False,
             "enabled": True,
             "immutable": False,
-            "required": False,              
+            "required": False,         
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
         {
             "variable": "analogy_summary",
@@ -214,7 +240,9 @@ TAGS_CONFIG = {
             "show_in_readme": True,
             "enabled": True,
             "immutable": False,
-            "required": False,              
+            "required": False,            
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
          #直接在readme的论文列表中根据路径显示图片
         {
@@ -228,7 +256,9 @@ TAGS_CONFIG = {
             "show_in_readme": True,
             "enabled": True,
             "immutable": False,
-            "required": False,              
+            "required": False,       
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
         {
             "variable": "abstract",
@@ -241,7 +271,9 @@ TAGS_CONFIG = {
             "show_in_readme": False,
             "enabled": True,
             "immutable": True,
-            "required": True,              
+            "required": True,         
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
         {
             "variable": "contributor",
@@ -254,38 +286,13 @@ TAGS_CONFIG = {
             "show_in_readme": False,
             "enabled": True,
             "immutable": False,
-            "required": False,              
-        },
-        # ==================== 数据库内部控制标签，不供提交时手动填写 ====================
-        {
-            "variable": "show_in_readme",
-            "order": 18,
-            "table_name": "show in readme",
-            "display_name": "显示控制",
-            "description": "控制论文是否在README中显示",
-            "type": "bool",
-            "validation": None,
-            "show_in_readme": False,      # 这个标签本身不在README中显示
-            "enabled": True,
-            "immutable": True,
-            "required": False,              
-        },
-        {
-            "variable": "status",
-            "order": 19,
-            "table_name": "status",
-            "display_name": "阅读状态",
-            "description": "论文的阅读状态", #unread，reading、done、adopted
-            "type": "enum",
-            "validation": None,
-            "show_in_readme": False,
-            "enabled": True,
-            "immutable": False,
-            "required": False,              
+            "required": False,             
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
         {
             "variable": "notes",
-            "order": 20,
+            "order": 18,
             "table_name": "notes",
             "display_name": "notes",
             "description": "其他备注信息",
@@ -295,7 +302,41 @@ TAGS_CONFIG = {
             "enabled": True,
             "immutable": False,
             "required": False,              
+            "system_var": False,            #控制字段，为真时只在数据库中显示               
+
         },
+        # ==================== 数据库内部控制标签，不供提交时手动填写 ====================
+        {
+            "variable": "show_in_readme",
+            "order": 19,
+            "table_name": "show in readme",
+            "display_name": "显示控制",
+            "description": "控制论文是否在README中显示",
+            "type": "bool",
+            "validation": None,
+            "show_in_readme": False,      # 这个标签本身不在README中显示
+            "enabled": True,
+            "immutable": True,
+            "required": False,             
+            "system_var": True,            #控制字段，为真时只在数据库中显示               
+
+        },
+        {
+            "variable": "status",
+            "order": 20,
+            "table_name": "status",
+            "display_name": "阅读状态",
+            "description": "论文的阅读状态", #unread，reading、done、adopted
+            "type": "enum",
+            "validation": None,
+            "show_in_readme": False,
+            "enabled": True,
+            "immutable": False,
+            "required": False,              
+            "system_var": True,            #控制字段，为真时只在数据库中显示               
+
+        },
+
         {
             "variable": "submission_time",
             "order": 21,
@@ -307,7 +348,8 @@ TAGS_CONFIG = {
             "show_in_readme": False,
             "enabled": True,
             "immutable": False,
-            "required": False,              
+            "required": False,     
+            "system_var": True,            #控制字段，为真时只在数据库中显示           
         },
         {
             "variable": "conflict_marker",
@@ -320,7 +362,8 @@ TAGS_CONFIG = {
             "show_in_readme": False,
             "enabled": True,
             "immutable": True,
-            "required": False,              
+            "required": False,     
+            "system_var": True,            #控制字段，为真时只在数据库中显示           
         },
     ]
 }
