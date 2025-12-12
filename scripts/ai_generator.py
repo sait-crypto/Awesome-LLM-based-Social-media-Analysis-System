@@ -19,6 +19,8 @@ class AIGenerator:
     def __init__(self):
         self.config = get_config_instance()
         self.settings = get_config_instance().settings
+        self.update_utils = get_update_file_utils()
+
         # 兼容配置项为 bool 或 str 的情况；确保得到布尔值
         enable_val = self.settings['ai'].get('enable_ai_generation', True)
         try:
@@ -29,6 +31,8 @@ class AIGenerator:
         self.api_url = "https://api.deepseek.com/v1/chat/completions"
         self.max_retries = 3
         self.retry_delay = 2
+
+        
     
     def _get_api_key(self) -> Optional[str]:
         """获取API密钥"""

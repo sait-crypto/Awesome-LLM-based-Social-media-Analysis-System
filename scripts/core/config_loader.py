@@ -180,6 +180,23 @@ class ConfigLoader:
                 required_tags.append(tag)
         return required_tags
     
+    def get_non_system_tags(self) -> List[Dict[str, Any]]:
+        """获取所有非系统字段标签（system_var=False）,不包括禁用的tag！"""
+        non_system_tags = []
+        for tag in self.get_active_tags():
+            # 从配置中读取system_var字段，默认为False
+            if not tag.get('system_var', False):
+                non_system_tags.append(tag)
+        return non_system_tags
+    def get_system_tags(self) -> List[Dict[str, Any]]:
+        """获取所有系统字段标签（system_var=True）"""
+        system_tags = []
+        for tag in self.get_active_tags():
+            # 从配置中读取system_var字段，默认为False
+            if tag.get('system_var', False):
+                system_tags.append(tag)
+        return system_tags
+    
     def validate_value(self, tag: Dict[str, Any], value: Any) -> bool:
         """验证值是否符合标签的验证规则"""
         # 处理空值：必填项为空则验证失败，非必填为空则通过

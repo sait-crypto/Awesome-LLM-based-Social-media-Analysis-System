@@ -207,56 +207,66 @@ class DatabaseManager:
         """
         # 加载现有数据库
         df = self.load_database()
-        old_papers = self.update_utils.excel_to_paper(df, only_non_system=False)
+        old_papers=self.update_utils.excel_to_paper(df, only_non_system=False)
 
-        # non_conflict_papers存储结构: [(主论文, [冲突论文1, 冲突论文2, ...]), ...]
-        non_conflict_papers: List[Tuple[Paper, List[Paper]]] = []    
-        conflict_papers: List[Paper] = []
+        non_conflict_papers:List[Tuple[Paper, List[Paper]]]= []    
+        conflict_papers:List[Paper]=[]
+
         added_papers = []
-        old_conflict_papers = []
-        
-        # 分离现有论文中的正常论文和冲突论文
+        old_conflict_papers=[]
         for p in old_papers:
-            if not p.conflict_marker:
-                non_conflict_papers.append((p, []))
+            if p.conflict_marker==False:
+                non_conflict_papers.append((p,[]))
             else:
                 old_conflict_papers.append(p)
         
-        # 还原原有的冲突结构
-        for old_conflict in old_conflict_papers:
-            conflict_found = False
-            for i, (main_paper, conflict_list) in enumerate(non_conflict_papers):
-                if is_same_identity(old_conflict, main_paper):
-                    conflict_list.append(old_conflict)
-                    conflict_found = True
-                    break
-            
-            if not conflict_found:
-                # 如果没有找到对应的主论文，将这个冲突论文作为一个新的主论文
-                print(f"警告：数据库原有冲突论文 {old_conflict.title[:50]}... 没有找到对应主论文，将其作为新论文添加")
-                non_conflict_papers.append((old_conflict, []))
-                old_conflict.conflict_marker = False  # 清除冲突标记
-        
-        # 处理新论文
-        for new_paper in new_papers:
-            # 检查是否已存在
-            same_identity_indices = []
-            main_paper_idx = -1
+        #还原原有的冲突结构，并统一处理
+        for new_paper in old_conflict_papers:
+            # 检查是否已存在（按 DOI 或 title 判断同一论文，忽略 conflict_marker）
+            same_identity_papers = []
+            conflict_with = None
             
             # 找出所有同identity论文
-            for idx, (main_paper, conflict_list) in enumerate(non_conflict_papers):
-                if is_same_identity(new_paper, main_paper):
-                    same_identity_indices.append(idx)
-                    if not main_paper.conflict_marker and main_paper_idx == -1:
-                        main_paper_idx = idx
+            for existing_paper in non_conflict_papers:
+                if is_same_identity(new_paper, existing_paper[0]):
+                    same_identity_papers.append(existing_paper[0])
+                    # 记录第一个无冲突标记的论文作为冲突对象
+                    if conflict_with is None and not existing_paper[0].conflict_marker:
+                        conflict_with = existing_paper[0]
+                        existing_paper[1].append(new_paper)#已有正常论文绑定该冲突论文            
+                
+            # 如果没有无冲突标记的论文，使用第一篇作为冲突对象
+            if conflict_with is None and same_identity_papers:
+                conflict_with = same_identity_papers[0]
+                print(f"警告：数据库原有论文 {new_paper.title[:50]}... 的所有同身份论文都有冲突标记，这种情况不应出现，一定有唯一一篇没有冲突标记的论，请排查")
             
-            if same_identity_indices:
-                # 检查是否为"完全重复提交"
-                all_same_papers = [non_conflict_papers[idx][0] for idx in same_identity_indices]
-                if is_duplicate_paper(all_same_papers, new_paper, complete_compare=False):
+            if conflict_with:
+                continue
+            else:
+                print(f"警告：数据库原有论文论文 {new_paper.title[:50]}... 没有找到冲突对象，但仍然标记为冲突")
+                
+        #处理新论文
+        for new_paper in new_papers:
+            # 检查是否已存在（按 DOI 或 title 判断同一论文，忽略 conflict_marker）
+            same_identity_papers = []
+            conflict_with = None
+            
+            # 找出所有同identity论文
+            for existing_paper in non_conflict_papers:
+                if is_same_identity(new_paper, existing_paper[0]):
+                    same_identity_papers.append(existing_paper[0])
+                    # 记录第一个无冲突标记的论文作为冲突对象
+                    if conflict_with is None and not existing_paper[0].conflict_marker:
+                        conflict_with = existing_paper[0]
+                        existing_paper[1].append(new_paper)#已有正常论文绑定该冲突论文
+
+            if same_identity_papers:
+                # 先判断是否为"完全重复提交"
+                if is_duplicate_paper(same_identity_papers, new_paper,complete_compare=False):
+                    # 完全相同，跳过
                     print(f"论文: {new_paper.title}——重复提交，跳过添加")
                     continue
-                
+
                 # 不是完全相同，按冲突策略处理
                 if conflict_resolution == 'skip':
                     print(f"论文: {new_paper.title}——存在冲突，已跳过")
@@ -264,67 +274,67 @@ class DatabaseManager:
                 
                 elif conflict_resolution == 'replace':
                     # 完全替换：删除所有同身份论文，添加新论文
-                    # 从后往前删除，避免索引错乱
-                    for idx in sorted(same_identity_indices, reverse=True):
-                        del non_conflict_papers[idx]
-                    
-                    non_conflict_papers.append((new_paper, []))
+                    non_conflict_papers = [p for p in non_conflict_papers 
+                                    if not is_same_identity(p[0], new_paper)]
+                    non_conflict_papers.append((new_paper,[]))
                     added_papers.append(new_paper)
                     print(f"论文: {new_paper.title}——替换原有论文")
-                
+                    
                 elif conflict_resolution == 'mark':
                     new_paper.conflict_marker = True
+                    # 如果没有无冲突标记的论文，使用第一篇作为冲突对象
+                    if conflict_with is None and same_identity_papers:
+                        conflict_with = same_identity_papers[0]
+                        print(f"警告：论文 {new_paper.title[:50]}... 的所有同身份论文都有冲突标记，这种情况不应出现，一定有唯一一篇没有冲突标记的论，请排查")
                     
-                    if main_paper_idx != -1:
-                        # 添加到对应主论文的冲突列表中
-                        non_conflict_papers[main_paper_idx][1].append(new_paper)
+                    if conflict_with:
                         conflict_papers.append(new_paper)
                         print(f"论文: {new_paper.title}——与现有论文冲突，已标记并作为冲突论文添加")
                     else:
-                        # 所有同身份论文都有冲突标记，这是一个特殊情况
-                        # 将第一篇作为主论文，并添加冲突
-                        first_idx = same_identity_indices[0]
-                        main_paper = non_conflict_papers[first_idx][0]
-                        conflict_list = non_conflict_papers[first_idx][1]
-                        
-                        # 清除第一篇的冲突标记，使其成为主论文
-                        main_paper.conflict_marker = False
-                        conflict_list.append(new_paper)
                         conflict_papers.append(new_paper)
-                        print(f"警告：论文 {new_paper.title[:50]}... 的所有同身份论文都有冲突标记，将第一篇清除标记并作为主论文")
+                        print(f"警告：论文 {new_paper.title[:50]}... 没有找到冲突对象，但仍然标记为冲突")
+                    
+                    #non_conflict_papers.append((new_paper,[]))
+                    #added_papers.append(new_paper)
             else:
-                # 新论文，添加到列表
-                non_conflict_papers.append((new_paper, []))
+                # 新论文，添加到列表末尾，稍后排序
+                non_conflict_papers.append((new_paper,[]))
                 added_papers.append(new_paper)
                 print(f"论文: {new_paper.title}——作为新论文添加")
-        
-        # 排序
-        # 按category分组
+
+        #排序
+        # 按category分组排序
         category_groups = {}
-        for main_paper, conflict_list in non_conflict_papers:
-            if main_paper.category not in category_groups:
-                category_groups[main_paper.category] = []
-            category_groups[main_paper.category].append((main_paper, conflict_list))
+        for paper in non_conflict_papers:
+            if paper[0].category not in category_groups:
+                category_groups[paper[0].category] = []
+            category_groups[paper[0].category].append(paper)
+
         
-        # 每个category内部按提交时间倒序（假设有submission_time属性）
-        sorted_all_papers = []
+        # 每个category内部按提交时间倒序（越晚提交越靠前）
+        sorted_non_conflict = []
         for category in sorted(category_groups.keys()):
             papers_in_category = category_groups[category]
-            # 按主论文的提交时间倒序排序
-            papers_in_category.sort(key=lambda x: x[0].submission_time, reverse=True)
-            
-            # 添加主论文和对应的冲突论文
-            for main_paper, conflict_list in papers_in_category:
-                # 先添加冲突论文（按提交时间倒序，最新的在最上面）
-                if conflict_list:
-                    conflict_list.sort(key=lambda x: x.submission_time, reverse=True)
-                    sorted_all_papers.extend(conflict_list)
-                
-                # 再添加主论文
-                sorted_all_papers.append(main_paper)
+            # 按提交时间倒序排序（假设有submission_time属性）
+            papers_in_category.sort(key=lambda x: x.submission_time, reverse=True)
+            sorted_non_conflict.extend(papers_in_category)
         
+        
+        # 添加论文对应的冲突论文，紧挨原论文，越晚提交越靠上
+        sorted_papers=[]
+        if conflict_papers or old_conflict_papers:
+            # 假设有submission_time属性
+            #conflict_marked_papers.sort(key=lambda x: x.submission_time)
+            for idx,p  in enumerate(sorted_non_conflict):
+                sorted_papers.append(p[0])
+                #从冲突条目列表中依次插入冲突条目
+                if p[1]:
+                    for c in p[1]:
+                        sorted_papers.insert(idx,c)
+            
+
         # 保存更新后的数据库
-        df = self.update_utils.paper_to_excel(sorted_all_papers, only_non_system=False)
+        df = self.update_utils. paper_to_excel(sorted_papers, only_non_system=False)
         password = self.get_password()
         success = self.save_database(df, password)
         
@@ -332,7 +342,7 @@ class DatabaseManager:
             return added_papers, conflict_papers
         else:
             print("保存数据库失败，添加的论文未能保存")
-            return [], new_papers
+            return [], new_papers  # 如果保存失败，返回空列表和所有新论文作为冲突
     
     def update_paper(self, paper: Paper, updates: Dict[str, Any]) -> bool:
         """更新单篇论文"""

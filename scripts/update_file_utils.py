@@ -2,16 +2,39 @@
 更新文件工具模块
 统一处理模板文件（Excel和JSON）的读取、写入和移除操作
 只处理非系统字段
+提供以下方法：
+read_json_file
+write_json_file
+read_excel_file
+write_excel_file
+load_papers_from_excel
+load_papers_from_json
+remove_papers_from_json
+remove_papers_from_excel
+persist_ai_generated_to_update_files
+normalize_update_file_columns
+create_empty_update_file_df
+normalize_category_value
+normalize_dataframe_columns
+excel_to_paper
+json_to_paper
+paper_to_excel
+paper_to_json
 """
 import os
 import json
 import pandas as pd
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional,Union
 from dataclasses import asdict
 
 from scripts.core.config_loader import get_config_instance
-from scripts.core.database_model import Paper
-from scripts.utils import ensure_directory
+from scripts.core.database_model import Paper,is_same_identity, is_duplicate_paper
+from scripts.utils import (
+    ensure_directory,
+    read_json_file,
+    write_json_file, 
+    normalize_json_papers,
+)
 
 class UpdateFileUtils:
     """更新文件工具类"""
@@ -24,24 +47,12 @@ class UpdateFileUtils:
 
     def read_json_file(self,filepath: str) -> Optional[Dict]:
         """读取JSON文件"""
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"读取JSON文件失败 {filepath}: {e}")
-            return None
+        return read_json_file(filepath)
 
 
     def write_json_file(self,filepath: str, data: Dict, indent: int = 2) -> bool:
         """写入JSON文件"""
-        try:
-            ensure_directory(os.path.dirname(filepath))
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=indent)
-            return True
-        except Exception as e:
-            print(f"写入JSON文件失败 {filepath}: {e}")
-            return False
+        return write_json_file(filepath,data,indent)
 
 
     def read_excel_file(self,filepath: str) -> Optional[pd.DataFrame]:
@@ -67,7 +78,7 @@ class UpdateFileUtils:
             print(f"写入Excel文件失败 {filepath}: {e}")
             return False
     def load_papers_from_excel(self, filepath: str = None) -> List[Paper]:
-        """从Excel文件加载论文（只读取非系统字段）"""
+        """从Excel文件加载论文"""
         if filepath is None:
             filepath = self.update_excel_path
             
@@ -75,40 +86,10 @@ class UpdateFileUtils:
         if df is None or df.empty:
             return []
         
-        papers = []
-        
-        # 只获取非系统字段的标签
-        non_system_tags = self.get_non_system_tags()
-        
-        for _, row in df.iterrows():
-            paper_data = {}
-            
-            # 将Excel行转换为Paper对象
-            for tag in non_system_tags:
-                column_name = tag['table_name']
-                
-                # 只处理在Excel中出现的列
-                if column_name in row:
-                    value = row[column_name]
-                    
-                    # 处理NaN值
-                    if pd.isna(value):
-                        value = ""
-                    
-                    paper_data[tag['variable']] = str(value).strip()
-            
-            # 创建Paper对象（系统字段会使用默认值）
-            try:
-                paper = Paper.from_dict(paper_data)
-                papers.append(paper)
-            except Exception as e:
-                print(f"警告: 解析Excel行失败: {e}")
-                continue
-        
-        return papers
+        return self.excel_to_paper(df, only_non_system=True)
     
     def load_papers_from_json(self, filepath: str = None) -> List[Paper]:
-        """从JSON文件加载论文（只读取非系统字段）"""
+        """从JSON文件加载论文"""
         if filepath is None:
             filepath = self.update_json_path
             
@@ -116,94 +97,15 @@ class UpdateFileUtils:
         if not data:
             return []
         
-        papers = []
+        # 处理不同的JSON结构
+        if isinstance(data, dict) and 'papers' in data:
+            papers_data = data['papers']
+        elif isinstance(data, list):
+            papers_data = data
+        else:
+            papers_data = [data]
         
-        # 只获取非系统字段的标签
-        non_system_tags = self.get_non_system_tags()
-        
-        # JSON格式可能是一个论文列表
-        def _normalize_dict_to_strings(raw: Dict) -> Dict:
-            normalized = {}
-            for tag in non_system_tags:
-                var = tag['variable']
-                val = raw.get(var, "")
-                # 只处理文件中出现的字段
-                if var not in raw:
-                    # 如果JSON中没有这个字段，跳过（系统字段会使用默认值）
-                    continue
-                # 处理空值
-                if val is None or (isinstance(val, (str, list, dict)) and not val):
-                    normalized[var] = ""
-                    continue
-                
-                # 根据类型安全转换
-                t = tag.get('type', 'string')
-                try:
-                    if t == 'bool':
-                        if isinstance(val, bool):
-                            normalized[var] = val
-                        elif isinstance(val, str):
-                            normalized[var] = val.lower() in ('true', 'yes', '1', 'y', '是')
-                        elif isinstance(val, (int, float)):
-                            normalized[var] = bool(val)
-                        else:
-                            normalized[var] = False
-                    elif t == 'int':
-                        if isinstance(val, (int, float)):
-                            normalized[var] = int(val)
-                        elif isinstance(val, str) and val.strip():
-                            normalized[var] = int(float(val.strip()))
-                        else:
-                            normalized[var] = 0
-                    elif t == 'float':
-                        if isinstance(val, (int, float)):
-                            normalized[var] = float(val)
-                        elif isinstance(val, str) and val.strip():
-                            normalized[var] = float(val.strip())
-                        else:
-                            normalized[var] = 0.0
-                    else:  # string类型
-                        if isinstance(val, (list, dict)):
-                            # 对于复杂结构，转换为JSON字符串
-                            normalized[var] = json.dumps(val, ensure_ascii=False)
-                        else:
-                            normalized[var] = str(val).strip()
-                except (ValueError, TypeError, json.JSONDecodeError) as e:
-                    print(f"警告: 字段 {var} 值转换失败: {val} -> {e}")
-                    normalized[var] = ""
-            
-            return normalized
-        
-        if isinstance(data, list):
-            for paper_data in data:
-                try:
-                    norm = _normalize_dict_to_strings(paper_data)
-                    paper = Paper.from_dict(norm)
-                    papers.append(paper)
-                except Exception as e:
-                    print(f"警告: 解析JSON条目失败: {e}")
-                    continue
-        elif isinstance(data, dict):
-            # 或者是一个包含论文列表的对象
-            if 'papers' in data and isinstance(data['papers'], list):
-                for paper_data in data['papers']:
-                    try:
-                        norm = _normalize_dict_to_strings(paper_data)
-                        paper = Paper.from_dict(norm)
-                        papers.append(paper)
-                    except Exception as e:
-                        print(f"警告: 解析JSON论文条目失败: {e}")
-                        continue
-            else:
-                # 或者直接是一个论文对象
-                try:
-                    norm = _normalize_dict_to_strings(data)
-                    paper = Paper.from_dict(norm)
-                    papers.append(paper)
-                except Exception as e:
-                    print(f"警告: 解析JSON对象失败: {e}")
-        
-        return papers
+        return self.json_to_paper(papers_data, only_non_system=True)
     
     def remove_papers_from_json(self, processed_papers: List[Paper], filepath: str = None):
         """从JSON文件中移除已处理的论文（只处理非系统字段）"""
@@ -309,134 +211,83 @@ class UpdateFileUtils:
         ai_fields = ['title_translation', 'analogy_summary',
                     'summary_motivation', 'summary_innovation',
                     'summary_method', 'summary_conclusion', 'summary_limitation']
-        
-        # ---------- JSON 处理 ----------
-        self._persist_ai_to_json(papers, ai_fields)
-        
-        # ---------- Excel 处理 ----------
-        self._persist_ai_to_excel(papers, ai_fields)
+        try:
+            # ---------- JSON 处理 ----------
+            self._persist_ai_to_json(papers, ai_fields)
+            
+            # ---------- Excel 处理 ----------
+            self._persist_ai_to_excel(papers, ai_fields)
+            print("已将AI生成内容回写到更新文件")
+        except Exception as e:
+            err = f"回写AI生成内容到更新文件失败: {e}"
+            print(err)
+            raise
     
     def _persist_ai_to_json(self, papers: List[Paper], ai_fields: List[str]):
-        """将AI生成内容写回JSON文件"""
         try:
+            
+            # 读取现有数据并转换为Paper对象列表
             json_data = self.read_json_file(self.update_json_path) or {}
             
-            # 记录原始数据结构类型
-            original_is_dict_with_papers = isinstance(json_data, dict) and 'papers' in json_data
+            if 'papers' not in json_data:
+                json_data['papers'] = []
             
-            # 规范读取到的结构为 list of dicts（variable keyed）
-            if original_is_dict_with_papers and isinstance(json_data['papers'], list):
-                existing_list = json_data['papers']
-            elif isinstance(json_data, list):
-                existing_list = json_data
-            else:
-                existing_list = []
-
-            # 把 incoming papers 转为 variable-keyed dict 列表
-            incoming = [p.to_dict() for p in papers]
+            existing_papers = self.json_to_paper(json_data['papers'], only_non_system=True)
             
-            # 按 DOI 或 title 匹配并合并 AI 字段
-            for inc in incoming:
-                doi = (inc.get('doi') or "").strip()
-                title = (inc.get('title') or "").strip()
-                matched = None
-                
-                for ex in existing_list:
-                    ex_doi = (ex.get('doi') or "").strip()
-                    ex_title = (ex.get('title') or "").strip()
-                    
-                    # 优先按DOI匹配
-                    if doi and ex_doi and ex_doi.lower() == doi.lower():
-                        matched = ex
+            # 匹配并更新AI字段
+            for ai_paper in papers:
+                for existing_paper in existing_papers:
+                    if is_same_identity(ai_paper, existing_paper):
+                        # 更新AI相关字段
+                        for field in ai_fields:
+                            new_value = getattr(ai_paper, field, "")
+                            if new_value:
+                                setattr(existing_paper, field, new_value)
                         break
-                    # 其次按标题匹配
-                    if not matched and title and ex_title and ex_title.lower() == title.lower():
-                        matched = ex
-                        break
-                
-                if matched is not None:
-                    # 覆盖 AI 相关字段（保留其他原字段）
-                    for field in ai_fields:
-                        val = inc.get(field, "")
-                        if val is not None and val != "":
-                            matched[field] = val
-
-            # 写回 JSON（保持原有容器结构）
-            if original_is_dict_with_papers:
-                final = dict(json_data)
-                final['papers'] = existing_list
-            else:
-                # 保持原始列表结构
-                final = existing_list
             
-            self.write_json_file(self.update_json_path, final)
-            
+            # 转换回JSON格式并保存
+            json_data['papers'] = self.paper_to_json(existing_papers)
+            self.write_json_file(self.update_json_path, json_data)
+        
         except Exception as e:
             raise RuntimeError(f"写入更新JSON失败: {e}")
     
     def _persist_ai_to_excel(self, papers: List[Paper], ai_fields: List[str]):
-        """将AI生成内容写回Excel文件"""
-        try:
+        try:            
+            # 读取现有数据
             df = self.read_excel_file(self.update_excel_path)
             if df is None or df.empty:
-                # 如果没有数据，跳过Excel处理
-                print("警告: Excel文件为空或不存在，跳过AI内容回写")
                 return
-
-            # 规范数据框列（只使用非系统字段）
-            df = self.normalize_update_file_columns(df)
-
-            # 把 incoming papers 转为 dict 列表
-            incoming = [p.to_dict() for p in papers]
-
-            for inc in incoming:
-                doi = (inc.get('doi') or "").strip()
-                title = (inc.get('title') or "").strip()
-                row_idx = None
-
-                # 优先按DOI匹配
-                if 'doi' in df.columns and doi:
-                    mask = df['doi'].astype(str).str.strip().str.lower() == doi.lower()
-                    if mask.any():
-                        row_idx = df[mask].index[0]
-                
-                # 其次按标题匹配
-                if row_idx is None and 'title' in df.columns and title:
-                    mask = df['title'].astype(str).str.strip().str.lower() == title.lower()
-                    if mask.any():
-                        row_idx = df[mask].index[0]
-
-                if row_idx is not None:
-                    # 更新AI相关字段
-                    for field in ai_fields:
-                        if field in inc and inc[field] not in ("", None):
-                            # 找到对应的列名
-                            for tag in self.get_non_system_tags():
-                                if tag['variable'] == field:
-                                    df.at[row_idx, tag['table_name']] = inc[field]
-                                    break
-
-            # 写回 Excel
-            self.write_excel_file(self.update_excel_path, df)
+            
+            # 转换为Paper对象列表
+            existing_papers = self.excel_to_paper(df, only_non_system=True)
+            
+            # 匹配并更新AI字段
+            for ai_paper in papers:
+                for existing_paper in existing_papers:
+                    if is_same_identity(ai_paper, existing_paper):
+                        # 更新AI相关字段
+                        for field in ai_fields:
+                            new_value = getattr(ai_paper, field, "")
+                            if new_value:
+                                setattr(existing_paper, field, new_value)
+                        break
+            
+            # 转换回DataFrame并保存
+            new_df = self.paper_to_excel(existing_papers, only_non_system=True)
+            self.write_excel_file(self.update_excel_path, new_df)
             
         except Exception as e:
             raise RuntimeError(f"写入更新Excel失败: {e}")
     
-    def get_non_system_tags(self) -> List[Dict[str, Any]]:
-        """获取所有非系统字段标签（system_var=False）"""
-        non_system_tags = []
-        for tag in self.config.get_active_tags():
-            # 从配置中读取system_var字段，默认为False
-            if not tag.get('system_var', False):
-                non_system_tags.append(tag)
-        return non_system_tags
+
     
     def normalize_update_file_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         确保DataFrame列按照非系统字段重新生成
         """
         # 只使用非系统字段
-        non_system_tags = self.get_non_system_tags()
+        non_system_tags = self.config.get_non_system_tags()
         non_system_tags.sort(key=lambda x: x['order'])
         columns = [tag['table_name'] for tag in non_system_tags]
         
@@ -463,7 +314,7 @@ class UpdateFileUtils:
     
     def create_empty_update_file_df(self) -> pd.DataFrame:
         """创建空的更新文件DataFrame（只包含非系统字段）"""
-        non_system_tags = self.get_non_system_tags()
+        non_system_tags = self.config.get_non_system_tags()
         non_system_tags.sort(key=lambda x: x['order'])
         columns = [tag['table_name'] for tag in non_system_tags]
         return pd.DataFrame(columns=columns)
@@ -528,39 +379,413 @@ class UpdateFileUtils:
                     df[col] = df[col].fillna("").astype(str).str.strip()
         return df
 
-
     def normalize_json_papers(self,raw_papers: List[Dict[str, Any]], config_instance) -> List[Dict[str, Any]]:
         """
         把JSON中的每篇论文都规范化为只包含active tag的变量（使用variable作为键），
         并将类型与category规范化。（未实现）
         """
-        normalized_list = []
-        active_tags = config_instance.get_active_tags()
-        for item in raw_papers:
-            out = {}
-            for tag in active_tags:
-                var = tag['variable']
-                table_name = tag['table_name']
-                # 支持输入既有 variable 也有 table_name 两种键
-                val = item.get(var, item.get(table_name, ""))
-                if val is None:
-                    val = ""
-                t = tag.get('type', 'string')
-                if t == 'bool':
-                    out[var] = bool(val) if val not in ("", None) else False
-                elif t == 'int':
-                    try:
-                        out[var] = int(val)
-                    except Exception:
-                        out[var] = 0
+        return normalize_json_papers(raw_papers, config_instance) 
+    
+    #===================数据规范化===========================
+    def json_to_paper(self, json_data: Union[Dict, List[Dict]], only_non_system: bool = False) -> List[Paper]:
+        """
+        数据规范化方法：将JSON数据转换为Paper对象列表（或单个Paper对象）
+        
+        Args:
+            json_data: JSON数据，可以是字典或字典列表
+            only_non_system: 是否只处理非系统字段
+            
+        Returns:
+            返回Paper列表，如果是单个字典则只有唯一一个元素
+        """
+        # 统一处理为列表
+        if isinstance(json_data, dict):
+            input_is_single = True
+            data_list = [json_data]
+        else:
+            input_is_single = False
+            data_list = json_data
+        
+        # 获取标签配置
+        if only_non_system:
+            tags = self.config.get_non_system_tags()
+        else:
+            tags = self.config.get_active_tags()
+        
+        papers = []
+        for item in data_list:
+            try:
+                paper_data = self._dict_to_paper_data(item, tags)
+                paper = Paper.from_dict(paper_data)
+                papers.append(paper)
+            except Exception as e:
+                print(f"警告: 解析JSON条目失败: {e}")
+                continue
+        
+        # # 返回与输入一致的格式
+        # if input_is_single and papers:
+        #     return papers[0]
+        return papers
+    
+    def excel_to_paper(self, df: Union[pd.DataFrame, pd.Series], only_non_system: bool = False) -> List[Paper]:
+        """
+        数据规范化方法：将Excel数据（DataFrame或Series）转换为Paper对象列表（或单个Paper对象）
+        
+        Args:
+            df: DataFrame或Series
+            only_non_system: 是否只处理非系统字段
+            
+        Returns:
+            返回Paper列表，如果是Series只有唯一一个元素
+        """
+        # 统一处理为DataFrame
+        if isinstance(df, pd.Series):
+            input_is_single = True
+            df = pd.DataFrame([df])
+        else:
+            input_is_single = False
+        
+        if df is None or df.empty:
+            return [] if not input_is_single else None
+        
+        # 获取标签配置
+        if only_non_system:
+            tags = self.config.get_non_system_tags()
+        else:
+            tags = self.config.get_active_tags()
+        
+        papers = []
+        for _, row in df.iterrows():
+            try:
+                paper_data = self._excel_row_to_paper_data(row, tags)
+                paper = Paper.from_dict(paper_data)
+                papers.append(paper)
+            except Exception as e:
+                print(f"警告: 解析Excel行失败: {e}")
+                continue
+        
+        # # 返回与输入一致的格式
+        # if input_is_single and papers:
+        #     return papers[0]
+        return papers
+    
+    def paper_to_json(self, papers: Union[Paper, List[Paper]]) -> Union[Dict, List[Dict]]:
+        """
+        数据规范化方法：将Paper对象（或列表）转换为JSON可序列化的字典（或字典列表）
+        
+        Args:
+            papers: Paper对象或Paper对象列表
+            
+        Returns:
+            如果是单个Paper返回字典，如果是列表返回字典列表
+        """
+        # 统一处理为列表
+        if isinstance(papers, Paper):
+            input_is_single = True
+            papers_list = [papers]
+        else:
+            input_is_single = False
+            papers_list = papers
+        
+        result = []
+        for paper in papers_list:
+            try:
+                paper_dict = self._paper_to_dict(paper)
+                result.append(paper_dict)
+            except Exception as e:
+                print(f"警告: 转换Paper到字典失败: {e}")
+                continue
+        
+        # 返回与输入一致的格式
+        if input_is_single and result:
+            return result[0]
+        return result
+    
+    def paper_to_excel(self, papers: Union[Paper, List[Paper]], only_non_system: bool = False) -> pd.DataFrame:
+        """
+        数据规范化方法：将Paper对象（或列表）转换为Excel DataFrame
+        
+        Args:
+            papers: Paper对象或Paper对象列表
+            only_non_system: 是否只包含非系统字段
+            
+        Returns:
+            DataFrame
+        """
+        # 统一处理为列表
+        if isinstance(papers, Paper):
+            papers_list = [papers]
+        else:
+            papers_list = papers
+        
+        if not papers_list:
+            return pd.DataFrame()
+        
+        # 获取标签配置
+        if only_non_system:
+            tags = self.config.get_non_system_tags()
+        else:
+            tags = self.config.get_active_tags()
+        
+        # 按order排序
+        tags.sort(key=lambda x: x['order'])
+        
+        # 准备数据
+        data = []
+        for paper in papers_list:
+            try:
+                # 新增检查：确保paper是Paper实例
+                if not isinstance(paper, Paper):
+                    print(f"警告: 跳过非Paper实例: {type(paper)}")
+                    continue
+                row_data = self._paper_to_excel_row(paper, tags)
+                data.append(row_data)
+            except Exception as e:
+                print(f"警告: 转换Paper到Excel行失败: {e}")
+                continue
+        
+        # 创建DataFrame
+        if not data:
+            return pd.DataFrame()
+        
+        # 获取列名（使用table_name）
+        columns = [tag['table_name'] for tag in tags]
+        df = pd.DataFrame(data, columns=columns)
+        
+        return df
+    
+    # ========== 核心私有方法 ==========
+    
+    def _dict_to_paper_data(self, data_dict: Dict, tags: List[Dict]) -> Dict:
+        """
+        核心方法：将字典数据转换为Paper可用的数据字典
+        
+        Args:
+            data_dict: 原始数据字典
+            tags: 标签配置列表
+            
+        Returns:
+            规范化的Paper数据字典
+        """
+        paper_data = {}
+        
+        for tag in tags:
+            var_name = tag['variable']
+            table_name = tag['table_name']
+            tag_type = tag.get('type', 'string')
+            
+            # 尝试从两种键名获取值
+            value = data_dict.get(var_name, data_dict.get(table_name, ""))
+            
+            # 处理空值
+            if value is None or (isinstance(value, str) and value.strip() == ""):
+                # 根据类型设置默认值
+                if tag_type == 'bool':
+                    value = False
+                elif tag_type == 'int':
+                    value = 0
+                elif tag_type == 'float':
+                    value = 0.0
                 else:
-                    out[var] = str(val).strip()
-            # 规范化 category 存储为 unique_name
-            # if 'category' in out:
-            #     out['category'] = normalize_category_value(out.get('category', ""), config_instance)
-            normalized_list.append(out)
-        return normalized_list
-
+                    value = ""
+            else:
+                # 类型转换
+                value = self._convert_value_by_type(value, tag_type)
+            
+            paper_data[var_name] = value
+        
+        return paper_data
+    
+    def _excel_row_to_paper_data(self, row: pd.Series, tags: List[Dict]) -> Dict:
+        """
+        核心方法：将Excel行转换为Paper可用的数据字典
+        
+        Args:
+            row: pandas Series
+            tags: 标签配置列表
+            
+        Returns:
+            规范化的Paper数据字典
+        """
+        paper_data = {}
+        
+        for tag in tags:
+            var_name = tag['variable']
+            table_name = tag['table_name']
+            tag_type = tag.get('type', 'string')
+            
+            # Excel中使用table_name作为列名
+            if table_name in row:
+                value = row[table_name]
+            else:
+                value = ""
+            
+            # 处理pandas NaN
+            if pd.isna(value):
+                # 根据类型设置默认值
+                if tag_type == 'bool':
+                    value = False
+                elif tag_type == 'int':
+                    value = 0
+                elif tag_type == 'float':
+                    value = 0.0
+                else:
+                    value = ""
+            else:
+                # 类型转换
+                value = self._convert_value_by_type(value, tag_type)
+            
+            paper_data[var_name] = value
+        
+        return paper_data
+    
+    def _paper_to_dict(self, paper: Paper) -> Dict:
+        """
+        核心方法：将Paper对象转换为字典
+        
+        Args:
+            paper: Paper对象
+            
+        Returns:
+            字典，键为variable名称
+        """
+        paper_dict = asdict(paper)
+        
+        # 确保所有字段都是可序列化的
+        for key, value in paper_dict.items():
+            if value is None:
+                paper_dict[key] = ""
+            elif isinstance(value, bool):
+                paper_dict[key] = value
+            elif isinstance(value, (int, float)):
+                paper_dict[key] = value
+            else:
+                paper_dict[key] = str(value)
+        
+        return paper_dict
+    
+    def _paper_to_excel_row(self, paper: Paper, tags: List[Dict]) -> Dict:
+        """
+        核心方法：将Paper对象转换为Excel行数据
+        
+        Args:
+            paper: Paper对象
+            tags: 标签配置列表
+            
+        Returns:
+            字典，键为table_name
+        """
+        row_data = {}
+        paper_dict = asdict(paper)
+        
+        for tag in tags:
+            var_name = tag['variable']
+            table_name = tag['table_name']
+            tag_type = tag.get('type', 'string')
+            
+            value = paper_dict.get(var_name, "")
+            
+            # 处理空值
+            if value is None or (isinstance(value, str) and value.strip() == ""):
+                value = ""
+            
+            # 类型转换确保Excel中的格式正确
+            if tag_type == 'bool':
+                # Excel中布尔值通常显示为TRUE/FALSE
+                value = bool(value)
+            elif tag_type == 'int':
+                try:
+                    value = int(value) if value not in ("", None) else 0
+                except (ValueError, TypeError):
+                    value = 0
+            elif tag_type == 'float':
+                try:
+                    value = float(value) if value not in ("", None) else 0.0
+                except (ValueError, TypeError):
+                    value = 0.0
+            
+            row_data[table_name] = value
+        
+        return row_data
+    
+    def _convert_value_by_type(self, value: Any, tag_type: str) -> Any:
+        """
+        根据标签类型转换值
+        
+        Args:
+            value: 原始值
+            tag_type: 标签类型
+            
+        Returns:
+            转换后的值
+        """
+        if tag_type == 'bool':
+            # 布尔类型转换
+            if isinstance(value, bool):
+                return value
+            elif isinstance(value, (int, float)):
+                return bool(value)
+            elif isinstance(value, str):
+                value_lower = value.strip().lower()
+                if value_lower in ('True','TRUE','true', 'yes', '1', 'y', '是', '真'):
+                    return True
+                elif value_lower in ('False''FALSE','false', 'no', '0', 'n', '否', '假'):
+                    return False
+                else:
+                    # 尝试转换为布尔值
+                    try:
+                        return bool(int(value))
+                    except:
+                        return False
+            else:
+                return bool(value)
+        
+        elif tag_type == 'int':
+            # 整数类型转换
+            if isinstance(value, (int, float)):
+                return int(value)
+            elif isinstance(value, str) and value.strip():
+                try:
+                    return int(float(value.strip()))
+                except (ValueError, TypeError):
+                    return 0
+            else:
+                return 0
+        
+        elif tag_type == 'float':
+            # 浮点数类型转换
+            if isinstance(value, (int, float)):
+                return float(value)
+            elif isinstance(value, str) and value.strip():
+                try:
+                    return float(value.strip())
+                except (ValueError, TypeError):
+                    return 0.0
+            else:
+                return 0.0
+        
+        elif tag_type == 'text':
+            # 文本类型，保持原样
+            if isinstance(value, (list, dict)):
+                # 复杂结构转换为JSON字符串
+                try:
+                    return json.dumps(value, ensure_ascii=False)
+                except:
+                    return str(value)
+            else:
+                return str(value).strip()
+        
+        else:  # 'string' 或 'enum' 或其他
+            # 字符串类型
+            if isinstance(value, (list, dict)):
+                # 复杂结构转换为JSON字符串
+                try:
+                    return json.dumps(value, ensure_ascii=False)
+                except:
+                    return str(value)
+            else:
+                return str(value).strip()
+    
 
 # 创建全局单例
 _update_file_utils_instance = None

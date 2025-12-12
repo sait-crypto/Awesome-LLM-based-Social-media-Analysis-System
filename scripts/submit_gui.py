@@ -17,9 +17,10 @@ from scripts.core.config_loader import get_config_instance
 from scripts.core.database_model import Paper
 
 from scripts.utils import (
-    read_json_file, 
+    read_json_file,
     write_json_file, 
     normalize_json_papers,
+    
     get_current_timestamp, 
     validate_url, 
     validate_doi, 
@@ -682,9 +683,7 @@ class PaperSubmissionGUI:
             write_json_file(self.update_json_path, data)
         except Exception as e:
             messagebox.showerror("错误", f"保存JSON失败: {e}")
-            return
-        messagebox.showerror(f"已保存")
-        
+            return        
     
         
         messagebox.showinfo("成功", "所有论文已保存到更新文件")
