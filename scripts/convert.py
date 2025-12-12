@@ -25,6 +25,8 @@ class ReadmeGenerator:
         self.config = get_config_instance()
         self.settings = get_config_instance().settings
         self.db_manager = DatabaseManager()
+        self.update_utils = get_update_file_utils()
+
         self.max_title_length = int(self.settings['readme'].get('max_title_length', 100))
         self.max_authors_length = int(self.settings['readme'].get('max_authors_length', 150))
     
@@ -35,7 +37,7 @@ class ReadmeGenerator:
         # 在生成 README 之前，确保所有字段在 "[翻译]" 之前截断
         if df is not None and not df.empty:
             df = self._truncate_translation_suffix(df)
-        papers = self.db_manager.get_papers_from_dataframe(df)
+        papers = self.update_utils.excel_to_paper(df, only_non_system=False)
         # 排除冲突条目
         papers=[p for p in papers if p.conflict_marker==False]
         # 按分类分组

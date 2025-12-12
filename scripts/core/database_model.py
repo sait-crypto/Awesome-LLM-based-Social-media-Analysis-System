@@ -143,15 +143,6 @@ class Paper:
                 errors.append(f"分类 '{self.category}' 无效，有效分类: {', '.join(valid_categories)}")
 
         return errors
-    # def is_similar_to(self, other: 'Paper') -> bool:
-    #     """检查是否与另一篇论文相似（DOI或标题相同）"""
-    #     self.title=str(self.title).strip()
-    #     other.title=str(other.title).strip()
-    #     if self.doi and other.doi and self.doi == other.doi:
-    #         return True
-    #     if self.title and other.title and self.title.lower() == other.title.lower():
-    #         return True
-    #     return False
 
 def _normalize_doi_for_compare(doi: Optional[str]) -> str:
     """清理 DOI 并忽略可能存在的冲突标记（conflict_marker）"""
@@ -189,25 +180,36 @@ def is_same_identity(a: Union[Paper, Dict[str, Any]], b: Union[Paper, Dict[str, 
 
     return False
 
-def _papers_fields_equal(a: Union[Paper, Dict[str, Any]], b: Union[Paper, Dict[str, Any]], ignore_fields: Optional[List[str]] = None) -> bool:
+def _papers_fields_equal(new: Union[Paper, Dict[str, Any]], exist: Union[Paper, Dict[str, Any]],
+                         complete_compare=False, ignore_fields: Optional[List[str]] = None) -> bool:
     """
-    精确比较两个论文条目的所有字段（用于判定是否“完全相同”）。
-    默认为比较 dataclass/asdict 的所有键，忽略 ignore_fields 中的字段。
+    精确比较两个论文条目的字段（用于判定是否"完全相同"）。
+    参数：
+        new：新提交论文
+        exist：用于比较的已存在论文
+        complete_compare：bool，是否进行严格的所有字段比较
+        ignore_fields：List，需要忽略的字段，默认值：系统字段
+    complete_compare=False：除忽略ignore_fields外，需要特殊处理空字段：
+        如果new的非空域集合是exist的子集，则只判断new中所有非空字段是否相同，相同返回True
+        如果new的非空域集合非exist的子集（前者包含后者或无包含关系），则直接返回False
+    complete_compare=True：除忽略ignore_fields外，比较全部字段
+    
     比较 DOI 时会忽略 conflict_marker。
     """
     conflict_marker = get_config_instance().settings['database'].get('conflict_marker','')
     if ignore_fields is None:
-        ignore_fields = ['conflict_marker', 'submission_time','status','show_in_readme']
+        system_tags=get_config_instance().get_system_tags()
+        ignore_fields = [t["variable"] for t in system_tags]
 
-    if isinstance(a, Paper):
-        a_dict = a.to_dict()
+    if isinstance(new, Paper):
+        a_dict = new.to_dict()
     else:
-        a_dict = dict(a)
+        a_dict = dict(new)
 
-    if isinstance(b, Paper):
-        b_dict = b.to_dict()
+    if isinstance(exist, Paper):
+        b_dict = exist.to_dict()
     else:
-        b_dict = dict(b)
+        b_dict = dict(exist)
 
     # 规范化 DOI 比较：移除 conflict_marker 并清理
     a_doi = _normalize_doi_for_compare(a_dict.get('doi', ""))
@@ -215,22 +217,78 @@ def _papers_fields_equal(a: Union[Paper, Dict[str, Any]], b: Union[Paper, Dict[s
     a_dict['doi'] = a_doi
     b_dict['doi'] = b_doi
 
-    # 比较每个键
-    keys = set(a_dict.keys()) | set(b_dict.keys())
-    for k in keys:
-        if k in ignore_fields:
-            continue
-        va = a_dict.get(k, "")
-        vb = b_dict.get(k, "")
-        # 统一转换为字符串比较（保持 bool/int 的语义）
-        if isinstance(va, bool) or isinstance(vb, bool):
-            if bool(va) != bool(vb):
-                return False
-        else:
-            if str(va).strip() != str(vb).strip():
-                return False
-    return True
-def is_duplicate_paper(existing_papers: List[Paper], new_paper: Paper) -> bool:
+    def is_non_empty(value):
+        """判断字段值是否为非空"""
+        if value is None:
+            return False
+        if isinstance(value, (str, list, dict, set)):
+            return bool(value)
+        if isinstance(value, (int, float)):
+            # 数字类型总是视为有值
+            return True
+        # 其他类型转为字符串判断
+        return str(value).strip() != ""
+
+    def get_non_empty_keys(dict_obj, ignore_keys):
+        """获取字典中非空的键（排除忽略字段）"""
+        return {
+            k: dict_obj[k] 
+            for k in dict_obj 
+            if k not in ignore_keys and is_non_empty(dict_obj[k])
+        }
+
+    if not complete_compare:
+        # 获取非空字段集合
+        a_non_empty = get_non_empty_keys(a_dict, ignore_fields)
+        b_non_empty = get_non_empty_keys(b_dict, ignore_fields)
+        
+        # 检查new的非空字段是否是exist的非空字段的子集
+        a_keys_set = set(a_non_empty.keys())
+        b_keys_set = set(b_non_empty.keys())
+        
+        if not a_keys_set.issubset(b_keys_set):
+            # new的非空域集合不是exist的子集，直接返回False
+            return False
+        
+        # 比较new中的所有非空字段
+        for k in a_non_empty:
+            if k in ignore_fields:
+                continue
+                
+            va = a_non_empty[k]
+            vb = b_dict.get(k, "")
+            
+            # 统一转换为字符串比较（保持 bool/int 的语义）
+            if isinstance(va, bool) or isinstance(vb, bool):
+                if bool(va) != bool(vb):
+                    return False
+            
+            else:
+                if str(va).strip() != str(vb).strip():
+                    return False
+        return True
+    
+    else:
+        # complete_compare=True：除忽略ignore_fields外，比较全部字段
+        # 获取所有需要比较的键（排除忽略字段）
+        all_keys = set(a_dict.keys()) | set(b_dict.keys())
+        
+        for k in all_keys:
+            if k in ignore_fields:
+                continue
+                
+            va = a_dict.get(k, "")
+            vb = b_dict.get(k, "")
+            
+            # 统一转换为字符串比较（保持 bool/int 的语义）
+            if isinstance(va, bool) or isinstance(vb, bool):
+                if bool(va) != bool(vb):
+                    return False
+            else:
+                if str(va).strip() != str(vb).strip():
+                    return False
+        return True
+def is_duplicate_paper(existing_papers: List[Paper], new_paper: Paper,complete_compare=False) -> bool:
     """
     判断新提交是否为重复论文条目：
     - 在 existing_papers 中找出与 new_paper 表示相同论文（一致 identity）的条目集合；
@@ -240,6 +298,6 @@ def is_duplicate_paper(existing_papers: List[Paper], new_paper: Paper) -> bool:
     if not same_identity_entries:
         return False
     for ex in same_identity_entries:
-        if _papers_fields_equal(ex, new_paper):
+        if _papers_fields_equal(ex, new_paper,complete_compare):
             return True
     return False

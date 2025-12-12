@@ -21,13 +21,16 @@ jobs:
     
     # 根据处理模式决定运行条件
     if: |
+      # 1. 总是允许手动触发
       github.event_name == 'workflow_dispatch' ||
       
+      # 2. 自动模式：处理带有 paper-submission 标签或分支名的 PR
       (env.AUTO_PROCESS_MODE == 'True' && github.event_name == 'pull_request' && (
         contains(github.event.pull_request.labels.*.name, 'paper-submission') ||
         contains(github.event.pull_request.head.ref, 'paper-submission')
       )) ||
       
+      # 3. 手动模式：只处理带有批准标签的 PR
       (env.AUTO_PROCESS_MODE == 'False' && github.event_name == 'pull_request' && 
         contains(github.event.pull_request.labels.*.name, 'paper-submission-approved'))
     
