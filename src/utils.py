@@ -208,54 +208,6 @@ def sanitize_filename(filename: str) -> str:
     return filename
 
 
-def read_json_file(filepath: str) -> Optional[Dict]:
-    """读取JSON文件"""
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"读取JSON文件失败 {filepath}: {e}")
-        return None
 
 
-def write_json_file(filepath: str, data: Dict, indent: int = 2) -> bool:
-    """写入JSON文件"""
-    try:
-        ensure_directory(os.path.dirname(filepath))
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=indent)
-        return True
-    except Exception as e:
-        print(f"写入JSON文件失败 {filepath}: {e}")
-        return False
-def normalize_json_papers(raw_papers: List[Dict[str, Any]], config_instance) -> List[Dict[str, Any]]:
-    """
-    把JSON中的每篇论文都规范化为只包含active tag的变量（使用variable作为键），
-    并将类型与category规范化。（未实现）
-    """
-    normalized_list = []
-    active_tags = config_instance.get_active_tags()
-    for item in raw_papers:
-        out = {}
-        for tag in active_tags:
-            var = tag['variable']
-            table_name = tag['table_name']
-            # 支持输入既有 variable 也有 table_name 两种键
-            val = item.get(var, item.get(table_name, ""))
-            if val is None:
-                val = ""
-            t = tag.get('type', 'string')
-            if t == 'bool':
-                out[var] = bool(val) if val not in ("", None) else False
-            elif t == 'int':
-                try:
-                    out[var] = int(val)
-                except Exception:
-                    out[var] = 0
-            else:
-                out[var] = str(val).strip()
-        # 规范化 category 存储为 unique_name
-        # if 'category' in out:
-        #     out['category'] = normalize_category_value(out.get('category', ""), config_instance)
-        normalized_list.append(out)
-    return normalized_list
+

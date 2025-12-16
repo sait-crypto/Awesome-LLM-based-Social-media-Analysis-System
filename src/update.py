@@ -18,7 +18,7 @@ from src.core.database_manager import DatabaseManager
 from src.core.database_model import Paper, is_duplicate_paper
 from src.ai_generator import AIGenerator
 from src.utils import  get_current_timestamp
-from src.update_file_utils import get_update_file_utils
+from src.core.update_file_utils import get_update_file_utils
 import pandas as pd
 
 

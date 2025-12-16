@@ -10,10 +10,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from core.database_manager import DatabaseManager
 from core.database_model import Paper
-from src.update_file_utils import get_update_file_utils
+from src.core.update_file_utils import get_update_file_utils
 from src.utils import truncate_text, format_authors, create_hyperlink, escape_markdown
 import pandas as pd
 from typing import Dict, List
+import re
 
 from src.core.config_loader import get_config_instance
 
@@ -61,6 +62,24 @@ class ReadmeGenerator:
         
         return markdown_output
     
+    def _slug(self, name: str) -> str:
+        """简单 slug（用于Anchor链接）"""
+        s = str(name or "").strip()
+        s = re.sub(r'[^A-Za-z0-9\s\-]', '', s)
+        return re.sub(r'\s+', '-', s)
+    
+    def _generate_quick_links(self) -> str:
+        """根据 categories 配置生成 Quick Links 列表（插入到表格前）"""
+        cats = [c for c in self.config.get_active_categories() if c.get('enabled', True)]
+        if not cats:
+            return ""
+        lines = ["### Quick Links", ""]
+        for c in cats:
+            name = c.get('name', c.get('unique_name'))
+            anchor = self._slug(name)
+            lines.append(f"  - [{name}](#{anchor})")
+        return "\n".join(lines)
+    
     def _group_papers_by_category(self, papers: List[Paper]) -> Dict[str, List[Paper]]:
         """按分类分组论文"""
         papers_by_category = {}
@@ -90,9 +109,9 @@ class ReadmeGenerator:
         if not papers:
             return ""
         
-        # 表格头
-        table_header = "| Title & Authors | Analogy Summary | Summary | Pipeline | Links |\n"
-        table_separator = "|:--| :----: | :---: | :---: | :---: |\n"
+        # 表格头（只保留 Title、Analogy、Pipeline、Summary）
+        table_header = "| Title & Authors | Analogy Summary | Pipeline | Summary |\n"
+        table_separator = "|:--| :----: | :---: | :---: |\n"
         
         table_rows = ""
         
@@ -110,16 +129,15 @@ class ReadmeGenerator:
         # 第2列：类比总结
         analogy_cell = self._generate_analogy_cell(paper)
         
-        # 第3列：一句话总结（5个字段）
-        summary_cell = self._generate_summary_cell(paper)
-        
-        # 第4列：Pipeline图
+        # 第3列：Pipeline图
         pipeline_cell = self._generate_pipeline_cell(paper)
         
-        # 第5列：链接
-        links_cell = self._generate_links_cell(paper)
-        
-        return f"|{title_authors_cell}|{analogy_cell}|{summary_cell}|{pipeline_cell}|{links_cell}|\n"
+        # 第4列：一句话总结（小字体显示）
+        summary_cell = self._generate_summary_cell(paper)
+        if summary_cell:
+            summary_cell = f"<small>{summary_cell}</small>"
+
+        return f"|{title_authors_cell}|{analogy_cell}|{pipeline_cell}|{summary_cell}|\n"
     
     def _generate_title_authors_cell(self, paper: Paper) -> str:
         """生成标题和作者单元格"""
@@ -133,20 +151,23 @@ class ReadmeGenerator:
         if paper.conference:
             conference_badge = f" [![Publish](https://img.shields.io/badge/Conference-{paper.conference.replace(' ', '_')}-blue)]()"
         
-        # 如果有项目链接，添加GitHub星星徽章
-        github_badge = ""
-        if paper.project_url and 'github.com' in paper.project_url:
-            # 提取GitHub仓库路径
-            import re
-            match = re.search(r'github\.com/([^/]+/[^/]+)', paper.project_url)
-            if match:
-                repo_path = match.group(1)
-                github_badge = f'[![Star](https://img.shields.io/github/stars/{repo_path}.svg?style=social&label=Star)](https://github.com/{repo_path})'
-        
-        # 组合
+        # 如果有项目链接，添加项目标：GitHub 使用 Star 徽章，否则使用简单 Project 徽章
+        project_badge = ""
+        if paper.project_url:
+            if 'github.com' in paper.project_url:
+                match = re.search(r'github\.com/([^/]+/[^/]+)', paper.project_url)
+                if match:
+                    repo_path = match.group(1)
+                    project_badge = f'[![Star](https://img.shields.io/github/stars/{repo_path}.svg?style=social&label=Star)](https://github.com/{repo_path})'
+                else:
+                    project_badge = f'[![Project](https://img.shields.io/badge/Project-View-blue)]({paper.project_url})'
+            else:
+                project_badge = f'[![Project](https://img.shields.io/badge/Project-View-blue)]({paper.project_url})'
+
+        # 组合（project first, then conference）
         badges = ""
-        if github_badge or conference_badge:
-            badges = f"{github_badge}{conference_badge}<br>"
+        if project_badge or conference_badge:
+            badges = f"{project_badge}{conference_badge}<br>"
         
         title_with_link = create_hyperlink(title, paper.paper_url)
         
@@ -243,6 +264,8 @@ class ReadmeGenerator:
         
         # 生成新的表格部分
         new_tables = self.generate_readme_tables()
+        # 生成 Quick Links（基于 categories 配置）
+        tables_intro = self._generate_quick_links()
         
         # 查找并替换表格部分
         # 表格部分在"## Full paper list"之后开始
@@ -283,7 +306,11 @@ class ReadmeGenerator:
 # """
         
         #new_content = before_tables + tables_intro + "\n" + new_tables + "\n" + after_tables
-        new_content = before_tables +  "\n" + new_tables + "\n" + after_tables
+        # 插入 Quick Links（若有）
+        if tables_intro:
+            new_content = before_tables + "\n" + tables_intro + "\n\n" + new_tables + "\n" + after_tables
+        else:
+            new_content = before_tables +  "\n" + new_tables + "\n" + after_tables
         
         # 写入文件
         try:

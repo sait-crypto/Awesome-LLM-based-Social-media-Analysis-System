@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
 # 导入配置和模型
 from src.core.config_loader import get_config_instance
 from src.core.database_model import Paper, is_same_identity, is_duplicate_paper
-from src.update_file_utils import get_update_file_utils
+from src.core.update_file_utils import get_update_file_utils
 
 
 class DatabaseManager:

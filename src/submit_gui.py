@@ -15,12 +15,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../'))
 
 from src.core.config_loader import get_config_instance
 from src.core.database_model import Paper
+from src.core.update_file_utils import get_update_file_utils
+
 
 from src.utils import (
-    read_json_file,
-    write_json_file, 
-    normalize_json_papers,
-    
+
     get_current_timestamp, 
     validate_url, 
     validate_doi, 
@@ -43,6 +42,8 @@ class PaperSubmissionGUI:
         # 加载配置
         self.config = get_config_instance()
         self.settings = get_config_instance().settings
+        self.update_utils = get_update_file_utils()
+        
         
         # 论文列表
         self.papers = []  # 存储Paper对象
@@ -51,6 +52,9 @@ class PaperSubmissionGUI:
         # 更新文件路径
         self.update_json_path = self.settings['paths']['update_json']
         self.update_excel_path = self.settings['paths']['update_excel']
+
+        # 表单首次打开？
+        self.first_open = True
         
         # 创建界面
         self.setup_ui()
@@ -60,12 +64,14 @@ class PaperSubmissionGUI:
         
         # 初始化tooltip
         self.tooltip = None
+        # 内部标志：当程序性改变 selection 时，防止重复触发选择事件导致弹窗循环
+        self._ignore_selection_event = False
     
     def setup_ui(self):
         """设置用户界面"""
         # 创建主框架
         main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        main_frame.grid(row=0, column=0, sticky="nsew")
         
         # 配置网格权重
         self.root.columnconfigure(0, weight=1)
@@ -83,16 +89,17 @@ class PaperSubmissionGUI:
         
         # 创建左右两个主要区域
         left_frame = ttk.Frame(main_frame)
-        left_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 10))
+        left_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 10))
         
         right_frame = ttk.Frame(main_frame)
-        right_frame.grid(row=1, column=1, sticky=(tk.W, tk.E, tk.N, tk.S))
+        right_frame.grid(row=1, column=1, sticky="nsew")
         
         # 配置左右框架的网格权重
         left_frame.columnconfigure(0, weight=1)
         left_frame.rowconfigure(1, weight=1)
         right_frame.columnconfigure(0, weight=1)
-        right_frame.rowconfigure(0, weight=1)
+        # 使右侧表单的第1行（canvas）和左侧列表在垂直方向上有相同的弹性
+        right_frame.rowconfigure(1, weight=1)
         
         # 左侧：论文列表
         self.setup_paper_list_frame(left_frame)
@@ -105,6 +112,10 @@ class PaperSubmissionGUI:
         
         # 状态栏
         self.setup_status_bar(main_frame)
+
+        # 绑定 Enter 键到保存操作（在多行文本框中按 Enter 保持换行）
+        # 使用 root 绑定并在处理时判断焦点所在的控件类型，确保只有在表单字段时触发保存
+        self.root.bind('<Return>', self._on_enter_pressed)
     
     def setup_paper_list_frame(self, parent):
         """设置论文列表框架"""
@@ -114,7 +125,7 @@ class PaperSubmissionGUI:
         
         # 论文列表框架
         list_frame = ttk.Frame(parent)
-        list_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        list_frame.grid(row=1, column=0, sticky="nsew")
         
         # 配置网格权重
         list_frame.columnconfigure(0, weight=1)
@@ -139,11 +150,15 @@ class PaperSubmissionGUI:
         self.paper_tree.configure(yscrollcommand=scrollbar.set)
         
         # 网格布局
-        self.paper_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        self.paper_tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
         
         # 绑定选择事件
         self.paper_tree.bind('<<TreeviewSelect>>', self.on_paper_selected)
+        # 支持鼠标滚轮在列表上滚动（Windows/Mac 和 X11）
+        self.paper_tree.bind('<MouseWheel>', self._on_mousewheel_tree)
+        self.paper_tree.bind('<Button-4>', self._on_mousewheel_tree)
+        self.paper_tree.bind('<Button-5>', self._on_mousewheel_tree)
         
         # 列表操作按钮框架
         list_buttons_frame = ttk.Frame(parent)
@@ -192,10 +207,16 @@ class PaperSubmissionGUI:
         # 配置Canvas
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.create_window((0, 0), window=self.form_frame, anchor=tk.NW)
-        
+
+        # 保存 canvas 引用并绑定鼠标滚轮事件（Windows/Mac 使用 <MouseWheel>，X11 使用 Button-4/5）
+        self.form_canvas = canvas
+        canvas.bind('<MouseWheel>', self._on_mousewheel_canvas)
+        canvas.bind('<Button-4>', self._on_mousewheel_canvas)
+        canvas.bind('<Button-5>', self._on_mousewheel_canvas)
+
         # 网格布局
-        canvas.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        scrollbar.grid(row=1, column=1, sticky=(tk.N, tk.S))
+        canvas.grid(row=1, column=0, sticky="nsew")
+        scrollbar.grid(row=1, column=1, sticky="ns")
         
         # 配置网格权重
         parent.columnconfigure(0, weight=1)
@@ -246,7 +267,7 @@ class PaperSubmissionGUI:
             if field_type == 'enum' and variable == 'category':
                 # 分类下拉框
                 combo = ttk.Combobox(self.form_frame, state="readonly")
-                combo.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=(10, 5), padx=(10, 0))
+                combo.grid(row=row, column=1, sticky="we", pady=(10, 5), padx=(10, 0))
                 
                 # 设置分类选项
                 categories = self.config.get_active_categories()
@@ -269,10 +290,10 @@ class PaperSubmissionGUI:
             elif field_type == 'text':
                 # 多行文本框
                 text_frame = ttk.Frame(self.form_frame)
-                text_frame.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=(10, 5), padx=(10, 0))
+                text_frame.grid(row=row, column=1, sticky="we", pady=(10, 5), padx=(10, 0))
                 
                 text_widget = scrolledtext.ScrolledText(text_frame, height=5, width=40)
-                text_widget.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+                text_widget.grid(row=0, column=0, sticky="nsew")
                 
                 # 配置网格权重
                 text_frame.columnconfigure(0, weight=1)
@@ -283,7 +304,7 @@ class PaperSubmissionGUI:
             else:
                 # 单行文本框
                 entry = ttk.Entry(self.form_frame, width=50)
-                entry.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=(10, 5), padx=(10, 0))
+                entry.grid(row=row, column=1, sticky="we", pady=(10, 5), padx=(10, 0))
                 
                 self.form_fields[variable] = entry
             
@@ -308,8 +329,12 @@ class PaperSubmissionGUI:
             label.pack()
         
         def leave(event):
-            if hasattr(self, 'tooltip'):
-                self.tooltip.destroy()
+            tooltip = getattr(self, 'tooltip', None)
+            if tooltip is not None:
+                try:
+                    tooltip.destroy()
+                finally:
+                    self.tooltip = None
         
         widget.bind("<Enter>", enter)
         widget.bind("<Leave>", leave)
@@ -375,46 +400,78 @@ class PaperSubmissionGUI:
             relief=tk.SUNKEN,
             anchor=tk.W
         )
-        status_bar.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+        status_bar.grid(row=3, column=0, columnspan=2, sticky="we", pady=(10, 0))
     
     def update_status(self, message):
         """更新状态栏"""
         self.status_var.set(message)
         self.root.update_idletasks()
+
+    def _on_enter_pressed(self, event):
+        """处理回车键：当焦点在表单字段（非多行文本）时，触发保存当前论文。"""
+        try:
+            focused = self.root.focus_get()
+            if focused is None:
+                return
+
+            # 如果焦点在多行文本框（ScrolledText / Text），保留换行行为
+            if isinstance(focused, scrolledtext.ScrolledText) or isinstance(focused, tk.Text):
+                return
+
+            # 仅当焦点位于表单的某个字段上时触发保存
+            for variable, widget in self.form_fields.items():
+                try:
+                    if focused == widget or str(focused).startswith(str(widget)):
+                        # 调用保存方法
+                        self.save_current_paper()
+                        # 阻止后续默认绑定（例如按钮激活等）
+                        return "break"
+                except Exception:
+                    continue
+        except Exception:
+            # 保守处理：不让回车导致未处理的异常
+            return
+
+    def _on_mousewheel_tree(self, event):
+        """处理列表（Treeview）的鼠标滚轮事件"""
+        try:
+            # Windows/Mac 使用 event.delta，X11 使用 event.num（4/5）
+            if hasattr(event, 'delta'):
+                delta = int(-1 * (event.delta / 120))
+                if delta == 0:
+                    delta = -1 if event.delta > 0 else 1
+            else:
+                delta = 1 if getattr(event, 'num', 5) == 5 else -1
+            self.paper_tree.yview_scroll(delta, 'units')
+            return "break"
+        except Exception:
+            return
+
+    def _on_mousewheel_canvas(self, event):
+        """处理表单 Canvas 的鼠标滚轮事件"""
+        try:
+            if not hasattr(self, 'form_canvas'):
+                return
+            if hasattr(event, 'delta'):
+                delta = int(-1 * (event.delta / 120))
+                if delta == 0:
+                    delta = -1 if event.delta > 0 else 1
+            else:
+                delta = 1 if getattr(event, 'num', 5) == 5 else -1
+            self.form_canvas.yview_scroll(delta, 'units')
+            return "break"
+        except Exception:
+            return
     
     def load_existing_updates(self):
         """加载现有的更新文件"""
         if os.path.exists(self.update_json_path):
             try:
-                data = read_json_file(self.update_json_path)
-                if data and 'papers' in data:
-                    papers_data = data['papers']
-                    for paper_data in papers_data:
-                        # 统一将读取到的字段按激活标签转换为字符串（保留 bool/int）
-                        normalized = {}
-                        for tag in self.config.get_active_tags():
-                            var = tag['variable']
-                            val = paper_data.get(var, "")
-                            if val is None:
-                                val = ""
-                            t = tag.get('type', 'string')
-                            if t == 'bool':
-                                #todo
-                                normalized[var] = bool(val) if val not in ("", None) else False
-                            elif t == 'int':
-                                try:
-                                    normalized[var] = int(val)
-                                except Exception:
-                                    normalized[var] = 0
-                            else:
-                                normalized[var] = str(val).strip()
-                        
-                        paper = Paper.from_dict(normalized)
-                        self.papers.append(paper)
-                    
-                    self.update_paper_list()
-                    self.update_status(f"已从{self.update_json_path}加载 {len(self.papers)} 篇论文")
-                    messagebox.showinfo("须知",f"该界面用于:\n    1.生成json更新文件\n    2.自动分支并提交PR\n如果根目录中的submit_template.xlsx或submit_template.json已按规范填写内容，你可以手动提交PR或使用该界面自动分支并提交PR，您提交的内容会自动更新到仓库论文列表")
+                self.papers.extend(self.update_utils.load_papers_from_json(self.update_json_path))
+            
+                self.update_paper_list()
+                self.update_status(f"已从{self.update_json_path}加载 {len(self.papers)} 篇论文")
+                messagebox.showinfo("须知",f"该界面用于:\n    1.生成json更新文件\n    2.自动分支并提交PR\n如果根目录中的submit_template.xlsx或submit_template.json已按规范填写内容，你可以手动提交PR或使用该界面自动分支并提交PR，您提交的内容会自动更新到仓库论文列表")
 
             except Exception as e:
                 messagebox.showerror("错误", f"加载更新文件失败: {e}")
@@ -446,6 +503,26 @@ class PaperSubmissionGUI:
         selection = self.paper_tree.selection()
         if not selection:
             return
+        
+        # 检查重入保护（用于程序性修改 selection 时避免重复触发）
+        if getattr(self, '_ignore_selection_event', False):
+            return
+
+        # 获取当前表单中的论文（如果有正在编辑的）
+        if self.current_paper_index >= 0 and self.current_paper_index < len(self.papers):
+            # 保存当前编辑的论文
+            if not self.save_current_paper():
+                # 如果保存失败，恢复为之前的选择（如果存在），并暂时忽略选择事件
+                children = self.paper_tree.get_children()
+                prev_item = None
+                if 0 <= self.current_paper_index < len(children):
+                    prev_item = children[self.current_paper_index]
+                if prev_item:
+                    self._ignore_selection_event = True
+                    self.paper_tree.selection_set(prev_item)
+                    # 在短时间后恢复事件处理
+                    self.root.after(50, lambda: setattr(self, '_ignore_selection_event', False))
+                return
         
         # 获取选中的论文索引
         item = selection[0]
@@ -569,6 +646,10 @@ class PaperSubmissionGUI:
     
     def add_paper(self):
         """添加新论文"""
+        # 如果当前有正在编辑的论文，先保存
+        if self.current_paper_index >= 0:
+            if not self.save_current_paper():
+                return
         # 清空表单
         self.clear_form()
         self.current_paper_index = -1
@@ -583,28 +664,77 @@ class PaperSubmissionGUI:
     
     def save_current_paper(self):
         """保存当前论文"""
+        if self.first_open:
+            self.first_open = False
+            return True
+        
         paper = self.get_paper_from_form()
+        if paper is None:
+            return False
         if not paper:
-            return
+            return False
+        
+        # 获取当前选择的列表项（如果有）
+        current_selection = self.paper_tree.selection()
         
         if self.current_paper_index >= 0:
             # 更新现有论文
             self.papers[self.current_paper_index] = paper
-            messagebox.showinfo("成功", "论文已更新")
+            
+            # 更新列表中的显示
+            title = paper.title[:50] + "..." if len(paper.title) > 50 else paper.title
+            authors = paper.authors[:30] + "..." if len(paper.authors) > 30 else paper.authors
+            
+            # 获取分类显示名
+            category_display = paper.category
+            if hasattr(self, 'category_mapping'):
+                for display_name, unique_name in self.category_mapping.items():
+                    if unique_name == paper.category:
+                        category_display = display_name
+                        break
+            
+            # 更新Treeview中的对应行
+            children = self.paper_tree.get_children()
+            if self.current_paper_index < len(children):
+                item_id = children[self.current_paper_index]
+                self.paper_tree.item(item_id, values=(self.current_paper_index + 1, title, authors, category_display))
+            
+            # 重新选中之前的项（如果存在）
+            if current_selection:
+                # 使用重入保护，防止selection_set触发 on_paper_selected 导致重复保存/弹窗
+                self._ignore_selection_event = True
+                self.paper_tree.selection_set(current_selection)
+                self.root.after(50, lambda: setattr(self, '_ignore_selection_event', False))
+            
+            self.update_status(f"论文已更新: {paper.title[:30]}...")
+            
         else:
             # 添加新论文
             self.papers.append(paper)
             self.current_paper_index = len(self.papers) - 1
-            messagebox.showinfo("成功", "论文已添加")
-        
-        # 更新列表
-        self.update_paper_list()
-        
-        # 选中当前论文
-        if self.paper_tree.get_children():
-            self.paper_tree.selection_set(self.paper_tree.get_children()[self.current_paper_index])
+            
+            # 准备显示值
+            title = paper.title[:50] + "..." if len(paper.title) > 50 else paper.title
+            authors = paper.authors[:30] + "..." if len(paper.authors) > 30 else paper.authors
+            
+            # 获取分类显示名
+            category_display = paper.category
+            if hasattr(self, 'category_mapping'):
+                for display_name, unique_name in self.category_mapping.items():
+                    if unique_name == paper.category:
+                        category_display = display_name
+                        break
+            
+            # 在列表末尾添加新项
+            item_id = self.paper_tree.insert("", "end", values=(len(self.papers), title, authors, category_display))
+            
+            # 选中新添加的项
+            self.paper_tree.selection_set(item_id)
+            
+            self.update_status(f"论文已添加: {paper.title[:30]}...")
         
         self.update_status(f"已保存论文: {paper.title[:30]}...")
+        return True
     
     def delete_paper(self):
         """删除当前论文"""
@@ -650,7 +780,8 @@ class PaperSubmissionGUI:
         if not self.papers:
             messagebox.showwarning("警告", "没有论文可以保存")
             return
-        
+        if self.save_current_paper()==False:
+            return
         # 验证所有论文
         invalid_papers = []
         for i, paper in enumerate(self.papers):
@@ -672,7 +803,7 @@ class PaperSubmissionGUI:
         # 准备数据（variable-keyed）
         papers_data = [paper.to_dict() for paper in self.papers]
         # 先用config规范 JSON 内容（只保留 active tags，并规范 category）
-        normalized_json = normalize_json_papers(papers_data, self.config)
+        normalized_json = self.update_utils.normalize_json_papers(papers_data, self.config)
         data = {
             "papers": normalized_json,
             "meta": {
@@ -680,7 +811,7 @@ class PaperSubmissionGUI:
             }
         }
         try:
-            write_json_file(self.update_json_path, data)
+            self.update_utils.write_json_file(self.update_json_path, data)
         except Exception as e:
             messagebox.showerror("错误", f"保存JSON失败: {e}")
             return        
@@ -962,7 +1093,7 @@ GitHub CLI未安装或配置，无法自动创建PR。
         
         try:
             if filepath.endswith('.json'):
-                data = read_json_file(filepath)
+                data = self.update_utils.read_json_file(filepath)
             elif filepath.endswith('.xlsx'):
                 try:
                     import pandas as pd

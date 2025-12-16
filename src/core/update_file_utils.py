@@ -23,7 +23,6 @@ paper_to_json
 """
 import os
 import json
-import pandas as pd
 from typing import List, Dict, Any, Optional,Union
 from dataclasses import asdict
 
@@ -31,9 +30,6 @@ from src.core.config_loader import get_config_instance
 from src.core.database_model import Paper,is_same_identity, is_duplicate_paper
 from src.utils import (
     ensure_directory,
-    read_json_file,
-    write_json_file, 
-    normalize_json_papers,
 )
 
 class UpdateFileUtils:
@@ -47,16 +43,35 @@ class UpdateFileUtils:
 
     def read_json_file(self,filepath: str) -> Optional[Dict]:
         """读取JSON文件"""
-        return read_json_file(filepath)
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"读取JSON文件失败 {filepath}: {e}")
+            return None
+
 
 
     def write_json_file(self,filepath: str, data: Dict, indent: int = 2) -> bool:
         """写入JSON文件"""
-        return write_json_file(filepath,data,indent)
+        try:
+            ensure_directory(os.path.dirname(filepath))
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=indent)
+            return True
+        except Exception as e:
+            print(f"写入JSON文件失败 {filepath}: {e}")
+            return False
 
 
-    def read_excel_file(self,filepath: str) -> Optional[pd.DataFrame]:
+    def read_excel_file(self,filepath: str) :
         """读取Excel文件"""
+        try:
+            import pandas as pd
+
+        except Exception as e:
+            print( f"无法导入pandas依赖:{e}\n 注意如果要加载excel文件，你需要安装pandas依赖包")
+            return
         try:
             if not os.path.exists(filepath):
                 return pd.DataFrame()
@@ -68,8 +83,14 @@ class UpdateFileUtils:
             return None
 
 
-    def write_excel_file(self,filepath: str, df: pd.DataFrame) -> bool:
+    def write_excel_file(self,filepath: str, df) -> bool:
         """写入Excel文件"""
+        try:
+            import pandas as pd
+
+        except Exception as e:
+            print( f"无法导入pandas依赖:{e}\n 注意如果要加载excel文件，你需要安装pandas依赖包")
+            return False
         try:
             ensure_directory(os.path.dirname(filepath))
             df.to_excel(filepath, index=False, engine='openpyxl')
@@ -79,6 +100,7 @@ class UpdateFileUtils:
             return False
     def load_papers_from_excel(self, filepath: str = None) -> List[Paper]:
         """从Excel文件加载论文"""
+
         if filepath is None:
             filepath = self.update_excel_path
             
@@ -115,6 +137,8 @@ class UpdateFileUtils:
         data = self.read_json_file(filepath)
         if not data:
             return
+        
+
         
         # 收集已处理论文的DOI和标题用于匹配
         processed_keys = []
@@ -161,6 +185,12 @@ class UpdateFileUtils:
     
     def remove_papers_from_excel(self, processed_papers: List[Paper], filepath: str = None):
         """从Excel文件中移除已处理的论文（只处理非系统字段）"""
+        try:
+            import pandas as pd
+
+        except Exception as e:
+            print( f"无法导入pandas依赖:{e}\n 注意如果要加载excel文件，你需要安装pandas依赖包")
+            return
         if filepath is None:
             filepath = self.update_excel_path
             
@@ -190,8 +220,6 @@ class UpdateFileUtils:
         # 创建新的DataFrame
         if rows_to_keep:
             new_df = pd.DataFrame(rows_to_keep)
-            # 确保列的顺序和类型正确（只使用非系统字段）
-            new_df = self.normalize_update_file_columns(new_df)
             self.write_excel_file(filepath, new_df)
         else:
             # 如果所有行都被处理，创建空DataFrame（只包含非系统字段）
@@ -282,10 +310,16 @@ class UpdateFileUtils:
     
 
     
-    def normalize_update_file_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+    def normalize_update_file_columns(self, df):
         """
         确保DataFrame列按照非系统字段重新生成
         """
+        try:
+            import pandas as pd
+
+        except Exception as e:
+            print( f"无法导入pandas依赖:{e}\n 注意如果要加载excel文件，你需要安装pandas依赖包")
+            return
         # 只使用非系统字段
         non_system_tags = self.config.get_non_system_tags()
         non_system_tags.sort(key=lambda x: x['order'])
@@ -312,8 +346,14 @@ class UpdateFileUtils:
                     df[col] = df[col].fillna("").astype(str).str.strip()
         return df
     
-    def create_empty_update_file_df(self) -> pd.DataFrame:
+    def create_empty_update_file_df(self):
         """创建空的更新文件DataFrame（只包含非系统字段）"""
+        try:
+            import pandas as pd
+
+        except Exception as e:
+            print( f"无法导入pandas依赖:{e}\n 注意如果要加载excel文件，你需要安装pandas依赖包")
+            return
         non_system_tags = self.config.get_non_system_tags()
         non_system_tags.sort(key=lambda x: x['order'])
         columns = [tag['table_name'] for tag in non_system_tags]
@@ -343,7 +383,7 @@ class UpdateFileUtils:
         old_cats=config_instance.old_cats
 
 
-    def normalize_dataframe_columns(self,df: pd.DataFrame, config_instance) -> pd.DataFrame:
+    def normalize_dataframe_columns(self,df, config_instance) -> Any:
         """
         确保DataFrame列按照tag_config中active tags重新生成：
         - 添加缺失列（置空）
@@ -351,6 +391,12 @@ class UpdateFileUtils:
         - 按order排序列顺序
         - 对 category 列内值执行规范化（未实现）
         """
+        try:
+            import pandas as pd
+
+        except Exception as e:
+            print( f"无法导入pandas依赖:{e}\n 注意如果要加载excel文件，你需要安装pandas依赖包")
+            return 
         if df is None:
             df = pd.DataFrame()
         cols = self._regenerate_columns_from_tags(config_instance)
@@ -384,7 +430,32 @@ class UpdateFileUtils:
         把JSON中的每篇论文都规范化为只包含active tag的变量（使用variable作为键），
         并将类型与category规范化。（未实现）
         """
-        return normalize_json_papers(raw_papers, config_instance) 
+        normalized_list = []
+        active_tags = config_instance.get_active_tags()
+        for item in raw_papers:
+            out = {}
+            for tag in active_tags:
+                var = tag['variable']
+                table_name = tag['table_name']
+                # 支持输入既有 variable 也有 table_name 两种键
+                val = item.get(var, item.get(table_name, ""))
+                if val is None:
+                    val = ""
+                t = tag.get('type', 'string')
+                if t == 'bool':
+                    out[var] = bool(val) if val not in ("", None) else False
+                elif t == 'int':
+                    try:
+                        out[var] = int(val)
+                    except Exception:
+                        out[var] = 0
+                else:
+                    out[var] = str(val).strip()
+            # 规范化 category 存储为 unique_name
+            # if 'category' in out:
+            #     out['category'] = normalize_category_value(out.get('category', ""), config_instance)
+            normalized_list.append(out)
+        return normalized_list
     
     #===================数据规范化===========================
     def json_to_paper(self, json_data: Union[Dict, List[Dict]], only_non_system: bool = False) -> List[Paper]:
@@ -405,12 +476,14 @@ class UpdateFileUtils:
         else:
             input_is_single = False
             data_list = json_data
-        
+
         # 获取标签配置
         if only_non_system:
             tags = self.config.get_non_system_tags()
         else:
             tags = self.config.get_active_tags()
+
+        data_list = self.normalize_json_papers(data_list, self.config)
         
         papers = []
         for item in data_list:
@@ -427,7 +500,7 @@ class UpdateFileUtils:
         #     return papers[0]
         return papers
     
-    def excel_to_paper(self, df: Union[pd.DataFrame, pd.Series], only_non_system: bool = False) -> List[Paper]:
+    def excel_to_paper(self, df, only_non_system: bool = False) -> List[Paper]:
         """
         数据规范化方法：将Excel数据（DataFrame或Series）转换为Paper对象列表（或单个Paper对象）
         
@@ -438,10 +511,17 @@ class UpdateFileUtils:
         Returns:
             返回Paper列表，如果是Series只有唯一一个元素
         """
+        try:
+            import pandas as pd
+
+        except Exception as e:
+            print( f"无法导入pandas依赖:{e}\n 注意如果要加载excel文件，你需要安装pandas依赖包")
+            return []
         # 统一处理为DataFrame
         if isinstance(df, pd.Series):
             input_is_single = True
             df = pd.DataFrame([df])
+            df=self.normalize_dataframe_columns(df, self.config)
         else:
             input_is_single = False
         
@@ -453,6 +533,7 @@ class UpdateFileUtils:
             tags = self.config.get_non_system_tags()
         else:
             tags = self.config.get_active_tags()
+        
         
         papers = []
         for _, row in df.iterrows():
@@ -487,6 +568,7 @@ class UpdateFileUtils:
             input_is_single = False
             papers_list = papers
         
+
         result = []
         for paper in papers_list:
             try:
@@ -495,13 +577,13 @@ class UpdateFileUtils:
             except Exception as e:
                 print(f"警告: 转换Paper到字典失败: {e}")
                 continue
-        
+        paper_dict=self.normalize_json_papers(result, self.config)
         # 返回与输入一致的格式
         if input_is_single and result:
             return result[0]
         return result
     
-    def paper_to_excel(self, papers: Union[Paper, List[Paper]], only_non_system: bool = False) -> pd.DataFrame:
+    def paper_to_excel(self, papers: Union[Paper, List[Paper]], only_non_system: bool = False) :
         """
         数据规范化方法：将Paper对象（或列表）转换为Excel DataFrame
         
@@ -512,6 +594,12 @@ class UpdateFileUtils:
         Returns:
             DataFrame
         """
+        try:
+            import pandas as pd
+
+        except Exception as e:
+            print( f"无法导入pandas依赖:{e}\n 注意如果要加载excel文件，你需要安装pandas依赖包")
+            return
         # 统一处理为列表
         if isinstance(papers, Paper):
             papers_list = [papers]
@@ -551,6 +639,8 @@ class UpdateFileUtils:
         # 获取列名（使用table_name）
         columns = [tag['table_name'] for tag in tags]
         df = pd.DataFrame(data, columns=columns)
+        df = self.normalize_dataframe_columns(df, self.config)
+
         
         return df
     
@@ -596,7 +686,7 @@ class UpdateFileUtils:
         
         return paper_data
     
-    def _excel_row_to_paper_data(self, row: pd.Series, tags: List[Dict]) -> Dict:
+    def _excel_row_to_paper_data(self, row, tags: List[Dict]) -> Dict:
         """
         核心方法：将Excel行转换为Paper可用的数据字典
         
@@ -607,6 +697,12 @@ class UpdateFileUtils:
         Returns:
             规范化的Paper数据字典
         """
+        try:
+            import pandas as pd
+
+        except Exception as e:
+            print( f"无法导入pandas依赖:{e}\n 注意如果要加载excel文件，你需要安装pandas依赖包")
+            return {}
         paper_data = {}
         
         for tag in tags:
