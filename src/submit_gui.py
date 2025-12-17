@@ -774,6 +774,8 @@ class PaperSubmissionGUI:
                 widget.delete(0, tk.END)
         
         self.current_paper_index = -1
+         # 取消列表选择
+        self.paper_tree.selection_remove(self.paper_tree.selection())
     
     def save_all_papers(self):
         """保存所有论文到更新文件"""
