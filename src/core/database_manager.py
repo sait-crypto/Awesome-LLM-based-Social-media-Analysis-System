@@ -66,16 +66,18 @@ class DatabaseManager:
             return self._create_new_database()
     
     def _create_new_database(self) -> pd.DataFrame:
-        """创建新的数据库DataFrame"""
-        # 获取所有激活的标签
+        """创建新的DataFrame结构（根据tag config的列）"""
         active_tags = self.config.get_active_tags()
-        
-        # 创建空的DataFrame，按照order排序
-        active_tags.sort(key=lambda x: x['order'])
-        columns = [tag['table_name'] for tag in active_tags]
-        
-        df = pd.DataFrame(columns=columns)
-        print(f"创建新的数据库文件: {self.core_excel_path}")
+        active_tags.sort(key=lambda x: x.get('order', 0))
+        cols = [t['table_name'] for t in active_tags]
+        df = pd.DataFrame(columns=cols)
+        # 初始化时把 header style 信息存入 DataFrame.attrs，写回时会被应用到Excel
+        header_fill, required_fill, required_font = self._get_header_styles()
+        df.attrs['header_styles'] = {
+            'header_row_fill': header_fill,
+            'required_header_fill': required_fill,
+            'required_font_color': required_font
+        }
         return df
     
     def _ensure_columns_exist(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -134,8 +136,65 @@ class DatabaseManager:
             print(f"保存数据库失败: {e}")
             return False
     
+    def _get_header_styles(self) -> Tuple[str, str, str]:
+        """
+        从 settings 中读取颜色配置（优先支持多种可能的key名称以兼容你的 setting_config）。
+        返回 (header_row_fill, required_header_fill, required_font_color)。
+        提供安全的默认值以避免配置缺失导致错误。
+        """
+        cfg_candidates = (
+            self.settings.get('ui'),
+            self.settings.get('visual'),
+            self.settings.get('setting_config'),
+            self.settings.get('colors'),
+            {}
+        )
+        cfg = {}
+        for c in cfg_candidates:
+            if isinstance(c, dict) and c:
+                cfg = c
+                break
+
+        header = cfg.get('header_row_fill', cfg.get('header_fill', '#D9EEFF'))
+        required = cfg.get('required_header_fill', cfg.get('required_fill', '#0B66C3'))
+        req_font = cfg.get('required_font_color', '#FFFFFF')
+        # 规范化带或不带#的颜色
+        def norm(c): return (c or '').lstrip('#')[:6].upper() if c else ''
+        return ('#' + norm(header), '#' + norm(required), '#' + norm(req_font))
+    
     def _apply_excel_formatting(self, workbook, worksheet, df):
-        """应用Excel格式"""
+        """对Excel应用列宽、表头格式等美化"""
+ 
+        # 获取样式（优先使用 df.attrs 中保存的初始化样式）
+        hs = df.attrs.get('header_styles', None) if hasattr(df, 'attrs') else None
+        if hs:
+            header_row_color = hs.get('header_row_fill', '#D9EEFF')
+            required_color = hs.get('required_header_fill', '#0B66C3')
+            required_font_color = hs.get('required_font_color', '#FFFFFF')
+        else:
+            header_row_color, required_color, required_font_color = self._get_header_styles()
+
+        header_fill = PatternFill(start_color=header_row_color.lstrip('#'), end_color=header_row_color.lstrip('#'), fill_type="solid")
+        header_font = Font(bold=True)
+        required_fill = PatternFill(start_color=required_color.lstrip('#'), end_color=required_color.lstrip('#'), fill_type="solid")
+        required_font = Font(color=required_font_color.lstrip('#'), bold=True)
+
+        # 第一行表头样式
+        for i, col in enumerate(df.columns):
+            col_letter = get_column_letter(i + 1)
+            cell = worksheet[f"{col_letter}1"]
+            cell.fill = header_fill
+            cell.font = header_font
+
+        # 对必填列的表头应用深色标注
+        required_vars = [t['table_name'] for t in self.config.get_required_tags()]
+        for i, col in enumerate(df.columns):
+            if col in required_vars:
+                col_letter = get_column_letter(i + 1)
+                cell = worksheet[f"{col_letter}1"]
+                cell.fill = required_fill
+                cell.font = required_font
+
         # 设置列宽
         for column in df.columns:
             column_letter = get_column_letter(df.columns.get_loc(column) + 1)
@@ -146,26 +205,18 @@ class DatabaseManager:
             adjusted_width = min(max_length + 2, 50)
             worksheet.column_dimensions[column_letter].width = adjusted_width
         
-        # 设置标题行样式
-        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
-        header_font = Font(color="FFFFFF", bold=True)
-        
-        for cell in worksheet[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-        
         # 标记冲突行
         conflict_row_name=self.config.get_tag_field("conflict_marker","table_name")
         if conflict_row_name in df.columns:
             conflict_fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
             
-            for idx, row in df.iterrows():
-                if row.get(conflict_row_name) not in [False,0,None,"False","FALSE","false","","0"]:
-                    for cell in worksheet[idx + 2]:  # +2因为标题行是1，索引从0开始
-                        cell.fill = conflict_fill
-                        #如果列名是doi，就在该cell内容前加冲突标记
-                        if cell.column_letter == get_column_letter(df.columns.get_loc('doi') + 1):
-                            cell.value = f"{self.conflict_marker} {cell.value}"
+            # for idx, row in df.iterrows():
+            #     if row.get(conflict_row_name) not in [False,0,None,"False","FALSE","false","","0"]:
+            #         for cell in worksheet[idx + 2]:  # +2因为标题行是1，索引从0开始
+            #             cell.fill = conflict_fill
+            #             #如果列名是doi，就在该cell内容前加冲突标记
+            #             if cell.column_letter == get_column_letter(df.columns.get_loc('doi') + 1):
+            #                 cell.value = f"{self.conflict_marker} {cell.value}"
         else:
             print(f"添加论文冲突格式时，发现数据库表格没有conflict_marker列")
 

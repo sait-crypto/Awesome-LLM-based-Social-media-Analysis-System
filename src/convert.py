@@ -111,7 +111,7 @@ class ReadmeGenerator:
         
         # 表格头（只保留 Title、Analogy、Pipeline、Summary）
         table_header = "| Title & Authors | Analogy Summary | Pipeline | Summary |\n"
-        table_separator = "|:--| :----: | :---: | :---: |\n"
+        table_separator = "|:--| :---: | :---: | :----: |\n"
         
         table_rows = ""
         
@@ -135,7 +135,7 @@ class ReadmeGenerator:
         # 第4列：一句话总结（小字体显示）
         summary_cell = self._generate_summary_cell(paper)
         if summary_cell:
-            summary_cell = f" <span style=\"font-size: 0.5em\"> {summary_cell}</span>"
+            summary_cell = f" <div style=\"line-height: 1.05;font-size: 0.5em\"> {summary_cell}</div>"
 
         return f"|{title_authors_cell}|{analogy_cell}|{pipeline_cell}|{summary_cell}|\n"
     

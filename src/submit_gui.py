@@ -257,7 +257,12 @@ class PaperSubmissionGUI:
                 label_text = f"* {label_text}"
             
             label = ttk.Label(self.form_frame, text=label_text)
-            label.grid(row=row, column=0, sticky=tk.W, pady=(10, 5))
+            # 默认左对齐，若是多行文本（如 abstract）则顶部对齐
+            label_sticky = tk.W
+            if field_type == 'text' and variable == 'abstract':
+                label_sticky = tk.NW
+            
+            label.grid(row=row, column=0, sticky=label_sticky, pady=(10, 5))
             
             # 工具提示
             if description:
@@ -290,9 +295,12 @@ class PaperSubmissionGUI:
             elif field_type == 'text':
                 # 多行文本框
                 text_frame = ttk.Frame(self.form_frame)
+                # 对于多行文本，把 label 放到左上（占据左侧），输入区顶对齐
                 text_frame.grid(row=row, column=1, sticky="we", pady=(10, 5), padx=(10, 0))
-                
-                text_widget = scrolledtext.ScrolledText(text_frame, height=5, width=40)
+                 
+                # 对 abstract 使用更大的高度以保证可见
+                height = 8 if variable == 'abstract' else 5
+                text_widget = scrolledtext.ScrolledText(text_frame, height=height, width=40)
                 text_widget.grid(row=0, column=0, sticky="nsew")
                 
                 # 配置网格权重
@@ -300,7 +308,10 @@ class PaperSubmissionGUI:
                 text_frame.rowconfigure(0, weight=1)
                 
                 self.form_fields[variable] = text_widget
-                
+                # 当鼠标进入多行文本区域时，启用全局滚轮到 form 的绑定，离开时解绑
+                text_widget.bind("<Enter>", lambda e: self._bind_form_scroll())
+                text_widget.bind("<Leave>", lambda e: self._unbind_form_scroll())
+            
             else:
                 # 单行文本框
                 entry = ttk.Entry(self.form_frame, width=50)
@@ -308,26 +319,57 @@ class PaperSubmissionGUI:
                 
                 self.form_fields[variable] = entry
             
+            # 根据是否为多行文本调整label对齐
+            if field_type == 'text':
+                label.grid(row=row, column=0, sticky=tk.NW, pady=(10, 5))
+            else:
+                label.grid(row=row, column=0, sticky=label_sticky, pady=(10, 5))
+
             row += 1
         
         # 配置表单框架网格权重
         self.form_frame.columnconfigure(1, weight=1)
     
+        # 鼠标进入整个 form_frame 时启用滚轮绑定，离开时解绑（确保在frame任意位置滚动都有效）
+        self.form_frame.bind("<Enter>", lambda e: self._bind_form_scroll())
+        self.form_frame.bind("<Leave>", lambda e: self._unbind_form_scroll())
+    
+    def _bind_form_scroll(self):
+        """在鼠标悬停表单时绑定全局滚轮事件到 form 的滚动处理器"""
+        try:
+            self.root.bind_all("<MouseWheel>", self._on_mousewheel_canvas)
+            self.root.bind_all("<Button-4>", self._on_mousewheel_canvas)
+            self.root.bind_all("<Button-5>", self._on_mousewheel_canvas)
+        except Exception:
+            pass
+
+    def _unbind_form_scroll(self):
+        """在鼠标离开表单时解绑全局滚轮事件"""
+        try:
+            self.root.unbind_all("<MouseWheel>")
+            self.root.unbind_all("<Button-4>")
+            self.root.unbind_all("<Button-5>")
+        except Exception:
+            pass
+
     def create_tooltip(self, widget, text):
         """创建工具提示"""
         def enter(event):
-            x, y, _, _ = widget.bbox("insert")
-            x += widget.winfo_rootx() + 25
-            y += widget.winfo_rooty() + 25
-            
+            try:
+                # 基于 widget 的屏幕坐标定位（兼容 Label、Button 等）
+                x = widget.winfo_rootx() + 20
+                y = widget.winfo_rooty() + widget.winfo_height() + 5
+            except Exception:
+                x, y = widget.winfo_rootx() + 20, widget.winfo_rooty() + 20
+
             self.tooltip = tk.Toplevel(widget)
             self.tooltip.wm_overrideredirect(True)
             self.tooltip.wm_geometry(f"+{x}+{y}")
-            
-            label = ttk.Label(self.tooltip, text=text, background="#ffffe0", 
-                            relief="solid", borderwidth=1, padding=5)
+
+            label = ttk.Label(self.tooltip, text=text, background="#ffffe0",
+                              relief="solid", borderwidth=1, padding=5)
             label.pack()
-        
+
         def leave(event):
             tooltip = getattr(self, 'tooltip', None)
             if tooltip is not None:
@@ -335,7 +377,7 @@ class PaperSubmissionGUI:
                     tooltip.destroy()
                 finally:
                     self.tooltip = None
-        
+
         widget.bind("<Enter>", enter)
         widget.bind("<Leave>", leave)
     

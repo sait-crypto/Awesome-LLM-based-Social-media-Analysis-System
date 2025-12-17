@@ -86,7 +86,16 @@ class ConfigLoader:
                 'deepseek_api_key_path': 'F:\\Files Personal\\BaiduSyncdisk\\Files Personal Sync\\profile\\Keys\\survey_deepseek_api.txt',
                 'api_key_github_secret_name': 'DEEPSEEK_API',
             },
+            # Excel / 表格样式配置（可通过 setting.config 动态修改）
+            # 颜色均使用不带#的16进制 RGB 值
             'excel': {
+                'header_fill_color': 'BDD7EE',          # 表头默认浅蓝
+                'required_header_color': '366092',      # 必填字段表头深蓝
+                'required_column_fill': 'DDEBF7',       # 必填列单元格浅蓝
+                'conflict_fill_color': 'FFCCCC',        # 冲突行红色（优先级高）
+                'header_font_color': 'FFFFFF',          # 表头字体颜色
+            },
+             'excel': {
                 'password_path': 'F:\\Files Personal\\BaiduSyncdisk\\Files Personal Sync\\profile\\Keys\\paper_database_key.txt',
                 'excel_key_github_secret_name': 'EXCEL_KEY',
             },
