@@ -189,7 +189,7 @@ class ReadmeGenerator:
         
         if paper.summary_motivation:
             motivation = paper.summary_motivation.strip()
-            fields.append(f"[{self.config.get_tag_field('summary_motivation', 'display_name')}] {escape_markdown(motivation)}")
+            fields.append(f"**[{self.config.get_tag_field('summary_motivation', 'display_name')}]** {escape_markdown(motivation)}")
         
         if paper.summary_innovation:
             innovation = paper.summary_innovation.strip()
