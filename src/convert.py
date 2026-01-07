@@ -110,8 +110,8 @@ class ReadmeGenerator:
             return ""
         
         # 表格头（只保留 Title、Analogy、Pipeline、Summary）
-        table_header = "| Title & Authors | Analogy Summary | Pipeline | Summary |\n"
-        table_separator = "|:--| :---: | :---: | :----: |\n"
+        table_header = "| Title & Info | Analogy Summary | Pipeline | Summary |\n"
+        table_separator = "|:--| :---: | :----: | :---: |\n"
         
         table_rows = ""
         
@@ -193,19 +193,19 @@ class ReadmeGenerator:
         
         if paper.summary_innovation:
             innovation = paper.summary_innovation.strip()
-            fields.append(f"[{self.config.get_tag_field('summary_innovation', 'display_name')}] {escape_markdown(innovation)}")
+            fields.append(f"**[{self.config.get_tag_field('summary_innovation', 'display_name')}]** {escape_markdown(innovation)}")
         
         if paper.summary_method:
             method = paper.summary_method.strip()
-            fields.append(f"[{self.config.get_tag_field('summary_method', 'display_name')}] {escape_markdown(method)}")
+            fields.append(f"**[{self.config.get_tag_field('summary_method', 'display_name')}]** {escape_markdown(method)}")
         
         if paper.summary_conclusion:
             conclusion = paper.summary_conclusion.strip()
-            fields.append(f"[{self.config.get_tag_field('summary_conclusion', 'display_name')}] {escape_markdown(conclusion)}")
+            fields.append(f"**[{self.config.get_tag_field('summary_conclusion', 'display_name')}]** {escape_markdown(conclusion)}")
         
         if paper.summary_limitation:
             limitation = paper.summary_limitation.strip()
-            fields.append(f"[{self.config.get_tag_field('summary_limitation', 'display_name')}] {escape_markdown(limitation)}")
+            fields.append(f"**[{self.config.get_tag_field('summary_limitation', 'display_name')}]** {escape_markdown(limitation)}")
         
         if not fields:
             return ""
@@ -217,7 +217,7 @@ class ReadmeGenerator:
 
         # 最终展示：显示一个简短的 [summary] 标签，鼠标悬浮显示 title，点击会展开 details 查看完整内容
         # 使用 details/summary 以支持点击展开（GitHub Markdown 支持）
-        summary_label = "[summary]"
+        summary_label = "**[summary]**"
         return f'<details><summary title="{tooltip_text}">{summary_label}</summary><div style="margin-top:6px">{full_html}</div></details>'
     
     def _generate_pipeline_cell(self, paper: Paper) -> str:
