@@ -16,6 +16,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../'))
 from src.core.config_loader import get_config_instance
 from src.core.database_model import Paper
 from src.core.update_file_utils import get_update_file_utils
+from src.utils import validate_figure, normalize_figure_path
+
 
 
 from src.utils import (
@@ -676,7 +678,6 @@ class PaperSubmissionGUI:
         if pipeline:
             fig_dir = self.settings['paths'].get('figure_dir', 'figures')
             # 验证图片格式
-            from src.utils import validate_figure, normalize_figure_path
             if not validate_figure(pipeline, fig_dir):
                 messagebox.showerror("错误", "Pipeline图片格式无效（仅支持常见图片格式，如jpg/png/gif等）")
                 return None
@@ -752,6 +753,22 @@ class PaperSubmissionGUI:
         if paper is None:
             return False
         if not paper:
+            return False
+        
+        
+        # 验证论文字段
+        config = get_config_instance()
+        valid, errors = paper.validate_paper_fields(
+            config,
+            check_required=True,
+            check_non_empty=True
+        )
+        
+        if not valid:
+            error_msg = "以下字段验证失败:\n\n" + "\n".join(errors[:5])
+            if len(errors) > 5:
+                error_msg += f"\n...以及其他 {len(errors)-5} 个错误"
+            messagebox.showerror("错误", error_msg)
             return False
         
         # 获取当前选择的列表项（如果有）
@@ -856,21 +873,34 @@ class PaperSubmissionGUI:
         self.current_paper_index = -1
          # 取消列表选择
         self.paper_tree.selection_remove(self.paper_tree.selection())
-    
+
     def save_all_papers(self):
         """保存所有论文到更新文件"""
         if not self.papers:
             messagebox.showwarning("警告", "没有论文可以保存")
             return
-        if self.save_current_paper()==False:
+        
+        # 先保存当前编辑的论文
+        if not self.save_current_paper():
             return
+        
         # 验证所有论文
+        config = get_config_instance()
+        conflict_marker = config.settings['database'].get('conflict_marker', '[💥冲突]')
         invalid_papers = []
+        
         for i, paper in enumerate(self.papers):
-            #遍历时首先将doi的网址部分清掉
-            paper.doi=clean_doi(paper.doi)
-            errors = paper.is_valid()
-            if errors:
+            # 清理doi（包含冲突标记）
+            paper.doi = clean_doi(paper.doi, conflict_marker) if paper.doi else ""
+            
+            # 验证论文字段
+            valid, errors = paper.validate_paper_fields(
+                config,
+                check_required=True,
+                check_non_empty=True
+            )
+            
+            if not valid:
                 invalid_papers.append((i+1, paper.title[:50], errors[:2]))
         
         if invalid_papers:
@@ -884,20 +914,21 @@ class PaperSubmissionGUI:
         
         # 准备数据（variable-keyed）
         papers_data = [paper.to_dict() for paper in self.papers]
-        # 先用config规范 JSON 内容（只保留 active tags，并规范 category）
-        normalized_json = self.update_utils.normalize_json_papers(papers_data, self.config)
+        
+        # 使用update_utils规范化JSON内容
+        normalized_json = self.update_utils.normalize_json_papers(papers_data, config)
         data = {
             "papers": normalized_json,
             "meta": {
                 "generated_at": get_current_timestamp()
             }
         }
+        
         try:
             self.update_utils.write_json_file(self.update_json_path, data)
         except Exception as e:
             messagebox.showerror("错误", f"保存JSON失败: {e}")
-            return        
-    
+            return
         
         messagebox.showinfo("成功", "所有论文已保存到更新文件")
         self.update_status(f"已保存 {len(self.papers)} 篇论文到更新文件")

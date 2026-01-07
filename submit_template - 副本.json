@@ -1,0 +1,57 @@
+{
+  "papers": [
+    {
+      "doi": "10.48550/arXiv.2407.07061",
+      "title": "Internet of agents: Weaving a web of heterogeneous agents for collaborative intelligence",
+      "authors": "Chen",
+      "date": "2024/10/04",
+      "category": "User Profiling",
+      "summary_motivation": "[AI generated] To integrate diverse third-party agents and simulate distributed environments for effective collaboration.\n[翻译]\n整合多样化的第三方智能体并模拟分布式环境，以实现有效协作。",
+      "summary_innovation": "[AI generated] Introduces an Internet-like framework with a flexible integration protocol and dynamic teaming mechanisms for heterogeneous multi-agent collaboration.\n[翻译]\n提出了一个类互联网框架，通过灵活的智能体集成协议和动态组队机制，实现异构多智能体协作。",
+      "summary_method": "[AI generated] Introduces an agent integration protocol, instant-messaging-like architecture, and dynamic teaming and flow control mechanisms.\n[翻译]\n提出智能体集成协议、类即时通讯架构以及动态组队与流程控制机制。",
+      "summary_conclusion": "[AI generated] IoA consistently outperforms state-of-the-art baselines in collaborative tasks, demonstrating effective heterogeneous agent integration.\n[翻译]\nIoA在协作任务中持续优于现有最佳基线，证明了其异构智能体集成的有效性。",
+      "summary_limitation": "[AI generated] The framework's reliance on LLMs' inherent capabilities may limit its performance in specialized domains requiring deep, non-linguistic reasoning. [翻译]该框架对LLM固有能力依赖，可能在需要深度非语言推理的专业领域受限。",
+      "paper_url": "https://openreview.net/forum?id=o1Et3MogPw",
+      "project_url": "",
+      "conference": "",
+      "title_translation": "[AI generated] **中文标题：** 智能体互联网：异构智能体协同智能的网络编织  \n**论文分类（供参考）：** 用户画像  \n\n**摘要（供参考）：**  \n大语言模型（LLMs）的快速发展为高性能自主智能体的开发铺平了道路。然而，现有的多智能体框架由于依赖其自身生态系统内定义的智能体，往往难以整合多样化的第三方智能体。同时，这些框架在模拟分布式环境方面面临挑战，因为大多数框架仅限于",
+      "analogy_summary": "[AI generated] Internet of Agents weaves a web of diverse AI agents, enabling seamless collaboration like a digital ecosystem. [翻译]智能体互联网编织了一张异构智能体网络，使其能像数字生态系统般无缝协作。",
+      "pipeline_image": "",
+      "abstract": "The rapid advancement of large language models (LLMs) has paved the way for the development of highly capable autonomous agents. However, existing multi-agent frameworks often struggle with integrating diverse capable third-party agents due to reliance on agents defined within their own ecosystems. They also face challenges in simulating distributed environments, as most frameworks are limited to single-device setups. Furthermore, these frameworks often rely on hard-coded communication pipelines, limiting their adaptability to dynamic task requirements. Inspired by the concept of the Internet, we propose the Internet of Agents (IoA), a novel framework that addresses these limitations by providing a flexible and scalable platform for LLM-based multi-agent collaboration. IoA introduces an agent integration protocol, an instant-messaging-like architecture design, and dynamic mechanisms for agent teaming and conversation flow control. Through extensive experiments on general assistant tasks, embodied AI tasks, and retrieval-augmented generation benchmarks, we demonstrate that IoA consistently outperforms state-of-the-art baselines, showcasing its ability to facilitate effective collaboration among heterogeneous agents. IoA represents a step towards linking diverse agents in an Internet-like environment, where agents can seamlessly collaborate to achieve greater intelligence and capabilities. We will release our code to facilitate further research.",
+      "contributor": "anonymous",
+      "notes": "",
+      "show_in_readme": true,
+      "status": "",
+      "submission_time": "",
+      "conflict_marker": false
+    },
+    {
+      "doi": "10.1109/TSP.2004.839932",
+      "title": "Exposing digital forgeries by detecting traces of resampling",
+      "authors": "Popescu",
+      "date": "2005-02",
+      "category": "Topic Modeling",
+      "summary_motivation": "[AI generated] To automatically detect statistical correlations introduced by image resampling, exposing digital forgeries without watermarks.\n[翻译]\n自动检测图像重采样引入的统计相关性，以在无水印情况下揭露数字伪造。",
+      "summary_innovation": "[AI generated] Proposes detecting statistical correlations from resampling as a forensic tool for digital image authentication.\n[翻译]\n提出通过检测重采样引入的统计相关性，作为数字图像鉴伪的取证工具。",
+      "summary_method": "[AI generated] Detecting statistical correlations introduced by resampling operations to expose digital forgeries.\n[翻译]\n通过检测重采样操作引入的统计相关性来揭露数字伪造。",
+      "summary_conclusion": "[AI generated] This technique automatically detects statistical correlations introduced by resampling to expose digital forgeries without watermarks. [翻译]该技术能自动检测重采样引入的统计相关性，从而在无水印情况下揭露数字伪造。",
+      "summary_limitation": "[AI generated] The technique's efficacy is primarily demonstrated on minimally compressed images, and its performance on heavily compressed or complex forgeries remains unverified. [翻译] 该技术的有效性主要在轻度压缩图像上得到验证，其在重度压缩或复杂伪造图像上的性能仍有待检验。",
+      "paper_url": "https://ieeexplore.ieee.org/abstract/document/1381775",
+      "project_url": "https://github.com/sait-crypto/Awesome-Social-media-LLM-based-Analysis",
+      "conference": "",
+      "title_translation": "[AI generated] 中文标题：通过检测重采样痕迹揭露数字伪造  \n论文分类（供参考）：主题建模  \n\n论文摘要（供参考）：  \n照片作为事件确定性记录的独特地位正逐渐削弱，部分原因在于数字图像易于被操纵和篡改。尽管高明的伪造可能不会留下视觉上的篡改痕迹，但它们仍可能改变图像的基础统计特性。例如，本文描述了重采样（如缩放或旋转）如何引入特定的统计相关性，并阐述了如何在图像的任意区域自动检测这些",
+      "analogy_summary": "[AI generated] Detecting resampling traces in images is like finding the unique fingerprint left by a digital scalpel. [翻译]检测图像中的重采样痕迹，如同发现数字手术刀留下的独特指纹。",
+      "pipeline_image": "",
+      "abstract": "The unique stature of photographs as a definitive recording of events is being diminished due, in part, to the ease with which digital images can be manipulated and altered. Although good forgeries may leave no visual clues of having been tampered with, they may, nevertheless, alter the underlying statistics of an image. For example, we describe how resampling (e.g., scaling or rotating) introduces specific statistical correlations, and describe how these correlations can be automatically detected in any portion of an image. This technique works in the absence of any digital watermark or signature. We show the efficacy of this approach on uncompressed TIFF images, and JPEG and GIF images with minimal compression. We expect this technique to be among the first of many tools that will be needed to expose digital forgeries.",
+      "contributor": "anonymous",
+      "notes": "",
+      "show_in_readme": true,
+      "status": "",
+      "submission_time": "",
+      "conflict_marker": false
+    }
+  ],
+  "meta": {
+    "generated_at": "2026-01-07 15:10:00"
+  }
+}

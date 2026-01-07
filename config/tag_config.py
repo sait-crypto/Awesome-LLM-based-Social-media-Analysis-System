@@ -187,7 +187,7 @@ TAGS_CONFIG = {
             "variable": "project_url",
             "order": 11,
             "table_name": "project url",
-            "display_name": "project",      #2个标签在readme列表中共用一列，使用[display_name]分割2个字段
+            "display_name": "project url",      #2个标签在readme列表中共用一列，使用[display_name]分割2个字段
             "description": "项目链接",
             "type": "string",
             "validation": r"^https?://",    # 必须是以http://或https://开头

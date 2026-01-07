@@ -473,73 +473,64 @@ class UpdateFileUtils:
     #===================数据规范化===========================
     def json_to_paper(self, json_data: Union[Dict, List[Dict]], only_non_system: bool = False) -> List[Paper]:
         """
-        数据规范化方法：将JSON数据转换为Paper对象列表（或单个Paper对象）
-        
-        Args:
-            json_data: JSON数据，可以是字典或字典列表
-            only_non_system: 是否只处理非系统字段
-            
-        Returns:
-            返回Paper列表，如果是单个字典则只有唯一一个元素
+        数据规范化方法：将JSON数据转换为Paper对象列表
         """
         # 统一处理为列表
         if isinstance(json_data, dict):
-            input_is_single = True
             data_list = [json_data]
         else:
-            input_is_single = False
             data_list = json_data
-
+        
         # 获取标签配置
         if only_non_system:
             tags = self.config.get_non_system_tags()
         else:
             tags = self.config.get_active_tags()
-
-        data_list = self.normalize_json_papers(data_list, self.config)
+        
+        # 规范化JSON数据
+        normalized_list = self.normalize_json_papers(data_list, self.config)
         
         papers = []
-        for item in data_list:
+        for item in normalized_list:
             try:
+                # 转换为Paper对象
                 paper_data = self._dict_to_paper_data(item, tags)
                 paper = Paper.from_dict(paper_data)
+                
+                # 验证论文字段
+                valid, errors = paper.validate_paper_fields(
+                    self.config,
+                    check_required=False,  # 更新文件可能不完整
+                    check_non_empty=True
+                )
+                
+                if not valid:
+                    print(f"警告: 跳过验证失败的论文: {paper.title[:50]}...")
+                    continue
+                
                 papers.append(paper)
             except Exception as e:
                 print(f"警告: 解析JSON条目失败: {e}")
                 continue
         
-        # # 返回与输入一致的格式
-        # if input_is_single and papers:
-        #     return papers[0]
         return papers
     
     def excel_to_paper(self, df, only_non_system: bool = False) -> List[Paper]:
         """
-        数据规范化方法：将Excel数据（DataFrame或Series）转换为Paper对象列表（或单个Paper对象）
-        
-        Args:
-            df: DataFrame或Series
-            only_non_system: 是否只处理非系统字段
-            
-        Returns:
-            返回Paper列表，如果是Series只有唯一一个元素
+        数据规范化方法：将Excel数据转换为Paper对象列表
         """
         try:
             import pandas as pd
-
-        except Exception as e:
-            print( f"无法导入pandas依赖:{e}\n 注意如果要加载excel文件，你需要安装pandas依赖包")
+        except ImportError:
+            print("警告: pandas未安装，无法处理Excel文件")
             return []
+        
         # 统一处理为DataFrame
         if isinstance(df, pd.Series):
-            input_is_single = True
             df = pd.DataFrame([df])
-            df=self.normalize_dataframe_columns(df, self.config)
-        else:
-            input_is_single = False
         
         if df is None or df.empty:
-            return [] if not input_is_single else None
+            return []
         
         # 获取标签配置
         if only_non_system:
@@ -547,20 +538,29 @@ class UpdateFileUtils:
         else:
             tags = self.config.get_active_tags()
         
-        
         papers = []
         for _, row in df.iterrows():
             try:
+                # 转换为Paper对象
                 paper_data = self._excel_row_to_paper_data(row, tags)
                 paper = Paper.from_dict(paper_data)
+                
+                # 验证论文字段
+                valid, errors = paper.validate_paper_fields(
+                    self.config,
+                    check_required=False,  # Excel文件可能不完整
+                    check_non_empty=True
+                )
+                
+                if not valid:
+                    print(f"警告: 跳过验证失败的论文: {paper.title[:50]}...")
+                    continue
+                
                 papers.append(paper)
             except Exception as e:
                 print(f"警告: 解析Excel行失败: {e}")
                 continue
         
-        # # 返回与输入一致的格式
-        # if input_is_single and papers:
-        #     return papers[0]
         return papers
     
     def paper_to_json(self, papers: Union[Paper, List[Paper]]) -> Union[Dict, List[Dict]]:

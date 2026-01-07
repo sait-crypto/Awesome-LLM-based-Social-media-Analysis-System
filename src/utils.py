@@ -6,9 +6,10 @@ import urllib.parse
 import os
 import re
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional,Tuple
 from datetime import datetime
 from pathlib import Path
+
 
 
 def validate_url(url: str) -> bool:
@@ -18,7 +19,7 @@ def validate_url(url: str) -> bool:
     
     url_pattern = re.compile(
         r'^https?://'  # http:// or https://
-        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'  # domain...
+        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z0-9-]{2,}\.?|'  # domain...
         r'localhost|'  # localhost...
         r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
         r'(?::\d+)?'  # optional port
@@ -27,23 +28,14 @@ def validate_url(url: str) -> bool:
     return bool(re.match(url_pattern, url))
 
 
-def validate_doi(doi: str) -> bool:
-    """验证DOI格式"""
-    if not doi:
-        return False
-    
-    # 清理DOI
-    doi = clean_doi(doi)
-    
-    # DOI正则表达式
-    doi_pattern = re.compile(r'^10\.\d{4,9}/[-._;()/:A-Z0-9]+$', re.IGNORECASE)
-    return bool(re.match(doi_pattern, doi))
-
-
-def clean_doi(doi: str) -> str:
-    """清理DOI，移除URL部分"""
+def clean_doi(doi: str, conflict_marker: str = None) -> str:
+    """清理DOI，移除URL部分和冲突标记"""
     if not doi:
         return ""
+    
+    # 如果提供了冲突标记，先移除
+    if conflict_marker:
+        doi = doi.replace(conflict_marker, "").strip()
     
     doi = doi.strip()
     
@@ -58,6 +50,138 @@ def clean_doi(doi: str) -> str:
             break
     
     return doi
+
+
+def validate_doi(doi: str, check_format: bool = True, conflict_marker: str = None) -> Tuple[bool, str]:
+    """验证DOI格式，返回(是否有效, 清理后的DOI)"""
+    if not doi:
+        return (False, "")
+    
+    # 清理DOI
+    cleaned_doi = clean_doi(doi, conflict_marker)
+    
+    if not cleaned_doi:
+        return (False, "")
+    
+    # 如果不需要格式验证，直接返回
+    if not check_format:
+        return (True, cleaned_doi)
+    
+    # DOI正则表达式
+    doi_pattern = re.compile(r'^10\.\d{4,9}/[-._;()/:A-Z0-9]+$', re.IGNORECASE)
+    
+    if bool(re.match(doi_pattern, cleaned_doi)):
+        return (True, cleaned_doi)
+    else:
+        return (False, cleaned_doi)
+
+
+def format_authors(authors: str, max_length: int = 150) -> str:
+    """格式化作者列表"""
+    if not authors:
+        return ""
+    
+    authors = str(authors)
+    # 清理多余空格和换行
+    authors = ' '.join(authors.split())
+    
+    # 如果作者列表太长，截断
+    if len(authors) > max_length:
+        # 尝试在逗号处截断
+        parts = authors.split(',')
+        truncated = parts[0]
+        
+        for i in range(1, len(parts)):
+            if len(truncated + ', ' + parts[i]) <= max_length - 3:  # 为"..."留空间
+                truncated += ', ' + parts[i]
+            else:
+                truncated += ', ...'
+                break
+        
+        return truncated
+    
+    return authors
+
+
+def validate_authors(authors: str, max_length: int = 150) -> Tuple[bool, str]:
+    """验证作者格式，返回(是否有效, 格式化后的作者)"""
+    if not authors:
+        return (False, "")
+    
+    formatted = format_authors(authors, max_length)
+    return (len(formatted) > 0, formatted)
+
+
+def normalize_pipeline_image(path: str, figure_dir: str = "figures") -> str:
+    """
+    规范化pipeline图片路径
+    输入可以是：1) 文件名 2) 相对路径 3) 绝对路径
+    输出：相对于项目根的路径，如 "figures/image.png"
+    """
+    if not path or not str(path).strip():
+        return ""
+    
+    path_s = str(path).strip()
+    
+    # 统一使用正斜杠
+    path_s = path_s.replace('\\', '/')
+    figure_dir = figure_dir.replace('\\', '/').rstrip('/')
+    # 如果 figure_dir 是绝对路径（来自 setting.config），取其 basename 以保证返回值为相对路径（例如 "figures"）
+    if os.path.isabs(figure_dir):
+        figure_dir = os.path.basename(figure_dir)
+    
+    # 如果是绝对路径，提取文件名并放到相对的 figure_dir 下
+    if os.path.isabs(path_s):
+        filename = os.path.basename(path_s)
+        return f"{figure_dir}/{filename}"
+    
+    # 如果已经是相对路径且以figure_dir开头，直接返回
+    if path_s.startswith(figure_dir + '/'):
+        return path_s
+    
+    # 如果只是文件名（不包含路径分隔符），添加figure_dir前缀
+    if '/' not in path_s and '\\' not in path_s:
+        return f"{figure_dir}/{path_s}"
+    
+    # 其他情况：提取文件名并放到figure_dir下
+    filename = os.path.basename(path_s)
+    return f"{figure_dir}/{filename}"
+
+
+def validate_pipeline_image(path: str, figure_dir: str = "figures") -> Tuple[bool, str]:
+    """
+    验证pipeline图片，返回(是否有效, 规范化后的路径)
+    验证规则：
+    1. 非空
+    2. 扩展名是图片格式
+    3. 路径符合规范
+    """
+    if not path or not str(path).strip():
+        return (True, "")  # 允许为空
+    
+    path_s = str(path).strip()
+    
+    # 先规范化路径
+    normalized = normalize_pipeline_image(path_s, figure_dir)
+    
+    # 检查文件扩展名
+    valid_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'}
+    ext = os.path.splitext(normalized)[1].lower()
+    
+    if ext not in valid_extensions:
+        return (False, normalized)
+    
+    # 检查路径是否在figure_dir下
+    # 规范化 figure_dir，防止 Windows 路径分隔符不一致导致 startswith 失败
+    fig_dir_norm = figure_dir.replace('\\', '/').rstrip('/')
+    # 如果 figure_dir 是绝对路径，使用其 basename 进行比较（确保与 normalize_pipeline_image 返回的相对路径一致）
+    if os.path.isabs(fig_dir_norm):
+        fig_dir_norm = os.path.basename(fig_dir_norm)
+    if not normalized.startswith(fig_dir_norm + '/'):
+        return (False, normalized)
+    
+    return (True, normalized)
+
 
 
 def extract_doi_from_url(url: str) -> Optional[str]:
@@ -102,31 +226,6 @@ def truncate_text(text: str, max_length: int, ellipsis: str = "...") -> str:
     
     return text[:max_length - len(ellipsis)] + ellipsis
 
-
-def format_authors(authors: str, max_length: int = 150) -> str:
-    """格式化作者列表"""
-    if not authors:
-        return ""
-    authors = str(authors)
-    # 清理空格
-    authors = ' '.join(authors.split())
-    
-    # 如果作者列表太长，截断
-    if len(authors) > max_length:
-        # 尝试在逗号处截断
-        parts = authors.split(',')
-        truncated = parts[0]
-        
-        for i in range(1, len(parts)):
-            if len(truncated + ', ' + parts[i]) <= max_length - 3:  # 为"..."留空间
-                truncated += ', ' + parts[i]
-            else:
-                truncated += ', ...'
-                break
-        
-        return truncated
-    
-    return authors
 
 
 def get_current_timestamp() -> str:
@@ -286,7 +385,7 @@ def normalize_figure_path(path: str, figure_dir: str) -> str:
     fig_dir_norm = figure_dir.replace('\\', '/').rstrip('/')
     
     # 如果只是文件名（不包含路径分隔符），添加figure_dir前缀
-    if '/' not in path_s:
+    if '/' not in path_s and '\\' not in path_s:
         return f"{fig_dir_norm}/{path_s}"
     
     # 如果已经以figure_dir开头，直接返回规范化的路径
@@ -302,30 +401,6 @@ def normalize_figure_path(path: str, figure_dir: str) -> str:
     # 其他情况：提取文件名并放到figure_dir下
     return f"{fig_dir_norm}/{os.path.basename(path_s)}"
 
-
-def get_figure_relative_path(paper_path: str, figure_dir: str) -> str:
-    """
-    获取图片相对于README文件的路径
-    - 假设README在项目根目录
-    - paper_path是数据库中存储的路径（经过normalize_figure_path处理）
-    """
-    if not paper_path:
-        return ""
-    
-    # 统一使用正斜杠
-    paper_path = paper_path.replace('\\', '/')
-    
-    # 如果路径已经是相对路径（不以斜杠开头），直接返回
-    if not paper_path.startswith('/'):
-        return paper_path
-    
-    # 如果是绝对路径，转换为相对路径
-    # 这里简单处理，假设项目根目录是当前工作目录
-    try:
-        return os.path.relpath(paper_path, start=os.getcwd()).replace('\\', '/')
-    except:
-        # 如果转换失败，返回原路径
-        return paper_path
 
 
 def figure_exists_in_repo(figure_path: str, project_root: str = None) -> bool:

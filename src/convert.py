@@ -229,7 +229,7 @@ class ReadmeGenerator:
         # 生成Markdown图片标签
         if os.path.exists(full_image_path):
             # 使用相对于项目根目录的路径
-            return f'<img width="300" alt="pipeline" src="{img_path}">'
+            return f'<img width="1000" alt="pipeline" src="{img_path}">'
         else:
             print(f"警告: pipeline图片不存在: {full_image_path}")
             return ""

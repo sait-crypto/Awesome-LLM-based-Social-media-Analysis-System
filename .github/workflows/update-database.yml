@@ -5,6 +5,7 @@ on:
     paths:
       - 'submit_template.json'
       - 'submit_template.xlsx'
+      - 'figures/**'
     branches: [ main ]
     types: [opened, synchronize, labeled, reopened]
   workflow_dispatch:  # 允许手动触发
@@ -136,6 +137,13 @@ jobs:
         # 设置处理模式信息
         echo "PROCESSING_MODE=${{ env.AUTO_PROCESS_MODE }}" >> $GITHUB_ENV
         
+    - name: Validate update templates
+      id: validate-templates
+      run: |
+        echo "🔎 验证更新模板文件（JSON / Excel / figures）..."
+        cd scripts
+        python validate_update_files.py
+
     - name: Run update processor
       id: update-process
       run: |
@@ -154,7 +162,6 @@ jobs:
           echo "result={\"success\": False, \"message\": \"未生成结果文件\"}" >> $GITHUB_OUTPUT
           echo "⚠️  更新处理器未生成结果文件"
         fi
-      continue-on-error: True
     
     - name: Generate README
       if: steps.update-process.outcome == 'success'

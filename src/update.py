@@ -186,13 +186,15 @@ class UpdateProcessor:
         result['conflicts'] = conflicts_list
         
         # 如果配置中开启相关变量，从更新文件中移除已成功处理的论文
-        try:
-            self._remove_processed_papers(added_papers)
-            print(f"已从更新文件中移除 {len(added_papers)} 篇已处理论文")
-        except Exception as e:
-            err = f"清理更新文件失败: {e}"
-            result['errors'].append(err)
-            print(f"警告: {err}")
+        if self.settings['database'].get('remove_added_paper_in_template', True):
+
+            try:
+                self._remove_processed_papers(added_papers)
+                print(f"已从更新文件中移除 {len(added_papers)} 篇已处理论文")
+            except Exception as e:
+                err = f"清理更新文件失败: {e}"
+                result['errors'].append(err)
+                print(f"警告: {err}")
         
         return result
     
