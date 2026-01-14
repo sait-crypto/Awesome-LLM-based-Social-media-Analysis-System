@@ -21,11 +21,15 @@ class AIGenerator:
         self.settings = get_config_instance().settings
         self.update_utils = get_update_file_utils()
 
+        self.ai_generate_mark=self.settings['ai']['ai_generate_mark']
+        self.translation_separator=self.settings['database']['translation_separator']
+        self.value_deprecation_mark=self.settings['database']['value_deprecation_mark']
+
         # 兼容配置项为 bool 或 str 的情况；确保得到布尔值
         enable_val = self.settings['ai'].get('enable_ai_generation', 'true')
         try:
             self.enabled = str(enable_val).lower() == 'true'
-        except:
+        except Exception:
             self.enabled = bool(enable_val)
             
         self.api_key = self._get_api_key()
@@ -72,19 +76,19 @@ class AIGenerator:
         
         if paper.abstract:
             prompt += f"\n论文摘要（供参考）:\n{paper.abstract}"
-        if paper.summary_motivation and (not str(paper.summary_motivation).startswith("[AI generated]")):
+        if paper.summary_motivation and (not str(paper.summary_motivation).startswith(self.ai_generate_mark)):
             prompt += f"\n论文动机（供参考）:\n{paper.summary_motivation}"
-        if paper.summary_innovation and (not str(paper.summary_innovation).startswith("[AI generated]")):
+        if paper.summary_innovation and (not str(paper.summary_innovation).startswith(self.ai_generate_mark)):
             prompt += f"\n论文创新点（供参考）:\n{paper.summary_innovation}"
-        if paper.summary_method and (not str(paper.summary_method).startswith("[AI generated]")):
+        if paper.summary_method and (not str(paper.summary_method).startswith(self.ai_generate_mark)):
             prompt += f"\n论文方法（供参考）:\n{paper.summary_method}"
-        if paper.summary_conclusion and (not str(paper.summary_conclusion).startswith("[AI generated]")):
+        if paper.summary_conclusion and (not str(paper.summary_conclusion).startswith(self.ai_generate_mark)):
             prompt += f"\n论文结论（供参考）:\n{paper.summary_conclusion}"
-        if paper.summary_limitation and (not str(paper.summary_limitation).startswith("[AI generated]")):
+        if paper.summary_limitation and (not str(paper.summary_limitation).startswith(self.ai_generate_mark)):
             prompt += f"\n论文局限性（供参考）:\n{paper.summary_limitation}"
         response = self._call_api(prompt, max_tokens=100)
         if response:
-            return f"[AI generated] {response.strip()}"
+            return f"{self.ai_generate_mark} {response.strip()}"
         return ""
     
     def generate_analogy_summary(self, paper: Paper) -> str:
@@ -104,9 +108,9 @@ class AIGenerator:
 2. 适当使用比喻或类比
 3. 保持学术性但易懂
 4. 长度控制在35字以内，能短尽量短
-5. 提示词中前面标有[AI generated]的字段表示由AI生成，未经人类审核，请谨慎参考
+5. 提示词中前面标有{self.ai_generate_mark}的字段表示由AI生成，未经人类审核，请谨慎参考
 6. 不能出现'|'字符
-7.生成中英双语，先英文再中文，使用"[翻译]"字符串分割
+7.生成中英双语，先英文再中文，使用{self.translation_separator}字符串分割
 
 "
 示例：
@@ -117,20 +121,20 @@ class AIGenerator:
 请直接给出总结，不要添加额外说明。"""
         if paper.abstract:
             prompt += f"\n论文摘要:\n{paper.abstract}"
-        if paper.summary_motivation and (not str(paper.summary_motivation).startswith("[AI generated]")):
+        if paper.summary_motivation and (not str(paper.summary_motivation).startswith(self.ai_generate_mark)):
             prompt += f"\n论文动机:\n{paper.summary_motivation}"
-        if paper.summary_innovation and (not str(paper.summary_innovation).startswith("[AI generated]")):
+        if paper.summary_innovation and (not str(paper.summary_innovation).startswith(self.ai_generate_mark)):
             prompt += f"\n论文创新点:\n{paper.summary_innovation}"
-        if paper.summary_method and (not str(paper.summary_method).startswith("[AI generated]")):
+        if paper.summary_method and (not str(paper.summary_method).startswith(self.ai_generate_mark)):
             prompt += f"\n论文方法:\n{paper.summary_method}"
-        if paper.summary_conclusion and (not str(paper.summary_conclusion).startswith("[AI generated]")):
+        if paper.summary_conclusion and (not str(paper.summary_conclusion).startswith(self.ai_generate_mark)):
             prompt += f"\n论文结论:\n{paper.summary_conclusion}"
-        if paper.summary_limitation and (not str(paper.summary_limitation).startswith("[AI generated]")):
+        if paper.summary_limitation and (not str(paper.summary_limitation).startswith(self.ai_generate_mark)):
             prompt += f"\n论文局限性:\n{paper.summary_limitation}"
         
         response = self._call_api(prompt, max_tokens=100)
         if response:
-            return f"[AI generated] {response.strip()}"
+            return f"{self.ai_generate_mark} {response.strip()}"
         return ""
     
     def generate_summary_fields(self, paper: Paper, field: str) -> str:
@@ -144,9 +148,9 @@ class AIGenerator:
 我在为综述写作收集论文，你需要朝着可供综述直接引用的方向，生成精悍的具体内容
 要求：
 1. 你只是总结分工的一部分，直接给出所要求内容，不要添加任何多余信息，它们由其他人生成
-2. 提示词中前面标有[AI generated]的字段表示由AI生成，未经人类审核，请谨慎参考
+2. 提示词中前面标有{self.ai_generate_mark}的字段表示由AI生成，未经人类审核，请谨慎参考
 3. 不能出现'|'字符
-4. 生成中英双语，先英文再中文，使用"[翻译]"字符串分割
+4. 生成中英双语，先英文再中文，使用{self.translation_separator}字符串分割
 
 
 示例：
@@ -161,15 +165,15 @@ class AIGenerator:
 """
         if paper.abstract:
             preprompt += f"\n论文摘要:\n{paper.abstract}"
-        if paper.summary_motivation and (not str(paper.summary_motivation).startswith("[AI generated]")):
+        if paper.summary_motivation and (not str(paper.summary_motivation).startswith(self.ai_generate_mark)):
             preprompt += f"\n论文动机:\n{paper.summary_motivation}"
-        if paper.summary_innovation and (not str(paper.summary_innovation).startswith("[AI generated]")):
+        if paper.summary_innovation and (not str(paper.summary_innovation).startswith(self.ai_generate_mark)):
             preprompt += f"\n论文创新点:\n{paper.summary_innovation}"
-        if paper.summary_method and (not str(paper.summary_method).startswith("[AI generated]")):
+        if paper.summary_method and (not str(paper.summary_method).startswith(self.ai_generate_mark)):
             preprompt += f"\n论文方法:\n{paper.summary_method}"
-        if paper.summary_conclusion and (not str(paper.summary_conclusion).startswith("[AI generated]")):
+        if paper.summary_conclusion and (not str(paper.summary_conclusion).startswith(self.ai_generate_mark)):
             preprompt += f"\n论文结论:\n{paper.summary_conclusion}"
-        if paper.summary_limitation and (not str(paper.summary_limitation).startswith("[AI generated]")):
+        if paper.summary_limitation and (not str(paper.summary_limitation).startswith(self.ai_generate_mark)):
             preprompt += f"\n论文局限性:\n{paper.summary_limitation}"
 
         # 生成各个字段
@@ -182,7 +186,7 @@ class AIGenerator:
         if  field == 'summary_motivation':
             motivation = self._call_api(motivation_prompt, max_tokens=80)
             if motivation:
-                return f"[AI generated] {motivation.strip()}"
+                return f"{self.ai_generate_mark} {motivation.strip()}"
         
         # 2. 创新点
         innovation_prompt = f"""{preprompt}
@@ -191,7 +195,7 @@ class AIGenerator:
         if field == 'summary_innovation':
             innovation = self._call_api(innovation_prompt, max_tokens=80)
             if innovation:
-                return f"[AI generated] {innovation.strip()}"
+                return f"{self.ai_generate_mark} {innovation.strip()}"
         
         # 3. 方法精炼
         method_prompt = f"""{preprompt}
@@ -200,7 +204,7 @@ class AIGenerator:
         if field == 'summary_method':
             method = self._call_api(method_prompt, max_tokens=80)
             if method:
-                return f"[AI generated] {method.strip()}"
+                return f"{self.ai_generate_mark} {method.strip()}"
         
         # 4. 简要结论
         conclusion_prompt = f"""{preprompt}
@@ -209,7 +213,7 @@ class AIGenerator:
         if field == 'summary_conclusion':
             conclusion = self._call_api(conclusion_prompt, max_tokens=80)
             if conclusion:
-                return f"[AI generated] {conclusion.strip()}"
+                return f"{self.ai_generate_mark} {conclusion.strip()}"
         
         # 5. 重要局限/展望
         limitation_prompt = f"""{preprompt}
@@ -218,7 +222,7 @@ class AIGenerator:
         if field == 'summary_limitation':
             limitation = self._call_api(limitation_prompt, max_tokens=80)
             if limitation:
-                return f"[AI generated] {limitation.strip()}"
+                return f"{self.ai_generate_mark} {limitation.strip()}"
         
         return ""
     
@@ -280,13 +284,13 @@ class AIGenerator:
 
         # 仅在无翻译或有标记已弃用时才覆盖，避免覆盖用户手动填写和ai已经生成的满意总结
         # 1. 生成标题翻译
-        if not enhanced_paper.title_translation or "[Deprecated]" in str(enhanced_paper.title_translation):
+        if not enhanced_paper.title_translation or self.value_deprecation_mark in str(enhanced_paper.title_translation):
             translation = self.generate_title_translation(enhanced_paper)
             if translation:
                 enhanced_paper.title_translation = translation
         
         # 2. 生成类比总结
-        if not enhanced_paper.analogy_summary or "[Deprecated]" in str(enhanced_paper.analogy_summary):
+        if not enhanced_paper.analogy_summary or self.value_deprecation_mark in str(enhanced_paper.analogy_summary):
             summary = self.generate_analogy_summary(
                 enhanced_paper
             )
@@ -298,7 +302,7 @@ class AIGenerator:
                       'summary_conclusion', 'summary_limitation']:
             current_value = getattr(enhanced_paper, field, "")
             # 仅在字段为空或已由 AI 生成时才覆盖
-            if not current_value or "[Deprecated]" in str(current_value):
+            if not current_value or self.value_deprecation_mark in str(current_value):
                 value = self.generate_summary_fields(enhanced_paper, field)
 
                 setattr(enhanced_paper, field, value)

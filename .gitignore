@@ -40,7 +40,7 @@ my_submit.json
 **/*副本*
 **/*冲突*
 **/*~$*
-**/*baiduyun*
+*.baiduyun.downloading
 
 # 日志文件
 *.log

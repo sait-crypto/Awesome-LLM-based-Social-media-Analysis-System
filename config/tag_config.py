@@ -11,8 +11,8 @@
 """
 
 TAGS_CONFIG = {
-    "config_version": "1.0",
-    "last_updated": "2025-01-01",
+    "config_version": "3.0",
+    "last_updated": "2026-01-13",
     
     # 标签列表，按order排序
     "tags": [

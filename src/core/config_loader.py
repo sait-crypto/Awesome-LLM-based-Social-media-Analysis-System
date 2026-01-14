@@ -116,6 +116,7 @@ class ConfigLoader:
                 'enable_ai_generation': 'true',
                 'deepseek_api_key_path': 'key.txt',
                 'api_key_github_secret_name': 'DEEPSEEK_API',
+                'ai_generate_mark':'[AI generated]'
             },
             # Excel / 表格样式配置（可通过 config.ini 动态修改）
             # 颜色均使用不带#的16进制 RGB 值
@@ -131,11 +132,15 @@ class ConfigLoader:
             'database': {
                 'default_contributor': 'anonymous',
                 'conflict_marker': '[冲突]',
+                'translation_separator':'[翻译]',
+                'value_deprecation_mark':'[Deprecated]'
             },
             'readme': {
+                'truncate_translation':'true',
                 'max_title_length': '100',
                 'max_authors_length': '150',
                 'date_format': 'YYYY-MM-DD',
+                'enable_markdown':'false'
             }
         }
         

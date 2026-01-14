@@ -30,14 +30,29 @@ class ReadmeGenerator:
 
         self.max_title_length = int(self.settings['readme'].get('max_title_length', 100))
         self.max_authors_length = int(self.settings['readme'].get('max_authors_length', 150))
-    
+        self.translation_separator=self.settings['database']['translation_separator']
+        
+        # 兼容配置项为 bool 或 str 的情况；确保得到布尔值
+        truncate_val = self.settings['readme'].get('truncate_translation', 'true')
+        try:
+            self.is_truncate_translation = str(truncate_val).lower() == 'true'
+        except Exception:
+            self.is_truncate_translation = bool(truncate_val)
+        # 兼容配置项为 bool 或 str 的情况；确保得到布尔值
+        markdown_val = self.settings['readme'].get('enable_markdown', 'false')
+        try:
+            self.enable_markdown = str(markdown_val).lower() == 'true'
+        except Exception:
+            self.enable_markdown = bool(markdown_val)
+
     def generate_readme_tables(self) -> str:
         """生成README的论文表格部分"""
         # 加载数据库
         df = self.db_manager.load_database()
-        # 在生成 README 之前，确保所有字段在 "[翻译]" 之前截断
-        if df is not None and not df.empty:
-            df = self._truncate_translation_suffix(df)
+        # 若开启翻译截断，在生成 README 之前，确保所有字段在 "翻译分隔符" 之前截断
+        if self.is_truncate_translation==True:
+            if df is not None and not df.empty:
+                df = self._truncate_translation_suffix(df)
         papers = self.update_utils.excel_to_paper(df, only_non_system=False)
         # 排除冲突条目
         papers=[p for p in papers if p.conflict_marker==False]
@@ -144,7 +159,11 @@ class ReadmeGenerator:
         # 清理和格式化
         # 标题不使用过度转义（避免将 '-' 或 '.' 变为 '\\-' 或 '\\.'），交给 create_hyperlink 的内部转义处理
         title = truncate_text(paper.title, self.max_title_length)
-        authors = escape_markdown(format_authors(paper.authors, self.max_authors_length))
+        if self.enable_markdown==False:
+            authors = escape_markdown(format_authors(paper.authors, self.max_authors_length))
+        else:
+            # 通信作者符号*必须保留
+            authors=format_authors(paper.authors, self.max_authors_length).replace('*', '\\' + '*')
         date = paper.date if paper.date else ""
         
         # 如果有会议信息，添加会议徽章
@@ -181,7 +200,9 @@ class ReadmeGenerator:
         
         
         analogy = paper.analogy_summary.strip()
-        return escape_markdown(analogy)
+        if self.enable_markdown==False:
+            analogy=escape_markdown(analogy)
+        return analogy
     
     def _sanitize_field(self, text: str) -> str:
         """将字段文本中的回车换行规范为 HTML <br>，并转义 Markdown 特殊字符"""
@@ -190,7 +211,8 @@ class ReadmeGenerator:
         s = str(text).strip()
         # 统一换行符并替换为 <br>，避免 Markdown 表格被换行符破坏
         s = s.replace('\r\n', '\n').replace('\r', '\n')
-        s = escape_markdown(s)
+        if self.enable_markdown==False:
+            s = escape_markdown(s)
         s = s.replace('\n', '<br>')
         return s
 
@@ -375,7 +397,7 @@ class ReadmeGenerator:
     
     def _truncate_translation_suffix(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        对 DataFrame 中的文本字段进行处理：若单元格包含 "[翻译]" 字符串，
+        对 DataFrame 中的文本字段进行处理：若单元格包含翻译分隔符，
         则截取该字符串之前的内容并去除末尾空白，避免 README 中出现翻译分隔及之后内容。
         仅对字符串/对象列生效，保留其它类型不变。
         """
@@ -386,8 +408,8 @@ class ReadmeGenerator:
                 return ""
             try:
                 s = str(v)
-                if "[翻译]" in s:
-                    return s.split("[翻译]")[0].rstrip()
+                if self.translation_separator in s:
+                    return s.split(self.translation_separator)[0].rstrip()
                 return s
             except Exception:
                 return str(v)

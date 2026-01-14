@@ -8,8 +8,8 @@
 """
 
 CATEGORIES_CONFIG = {
-    "config_version": "1.0",
-    "last_updated": "2025-01-01",
+    "config_version": "2.0",
+    "last_updated": "2026-01-14",
     
     # 分类列表，按order排序
     "categories": [
@@ -21,7 +21,7 @@ CATEGORIES_CONFIG = {
         },
         {
             "unique_name": "Hate Speech Analysis",
-            "order": 1,                     # 排序顺序，0为第一个
+            "order": 1,                     
             "name": "Hate Speech Analysis",  # 显示名称
             "enabled": True,                # 是否启用该分类
         },
@@ -92,15 +92,33 @@ CATEGORIES_CONFIG = {
             "enabled": True,
         },
         {
-            "unique_name": "Analysis of Collective Social Phenomena",
+            "unique_name": "Macrosocial Phenomena Analysis",
             "order": 13,
-            "name": "Analysis of Collective Social Phenomena",
+            "name": "Macrosocial Phenomena Analysis",
             "enabled": True,
         },
         {
             "unique_name": "Social Simulation",
             "order": 14,
             "name": "Social Simulation",
+            "enabled": True,
+        },
+        {
+            "unique_name": "Malicious Bot Detection",
+            "order": 15,
+            "name": "Malicious Bot Detection",
+            "enabled": True,
+        },
+        {
+            "unique_name": "Community Detection",
+            "order": 16,
+            "name": "Community Detection",
+            "enabled": True,
+        },
+        {
+            "unique_name": "Dynamic Community Analysis",
+            "order": 17,
+            "name": "Dynamic Community Analysis",
             "enabled": True,
         },
         {

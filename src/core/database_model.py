@@ -128,7 +128,7 @@ class Paper:
         errors = []
         
         # 获取配置
-        conflict_marker = config_instance.settings['database'].get('conflict_marker', '[💥冲突]')
+        conflict_marker = config_instance.settings['database'].get('conflict_marker')
         required_tags = config_instance.get_required_tags() if check_required else []
         active_tags = config_instance.get_active_tags()
         

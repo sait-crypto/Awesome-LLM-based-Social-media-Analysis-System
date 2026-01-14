@@ -43,12 +43,13 @@ class UpdateProcessor:
 
         #其他配置
         self.default_contributor = self.settings['database']['default_contributor']
+        self.ai_generate_mark=self.settings['ai']['ai_generate_mark']
 
         # 兼容配置项为 bool 或 str 的情况；确保得到布尔值
         remove_val = self.settings['database'].get('remove_added_paper_in_template','false')
         try:
             self.is_remove_added_paper=str(remove_val).lower()=='true'
-        except:
+        except Exception:
             self.is_remove_added_paper=bool(remove_val)
     
     def process_updates(self, conflict_resolution: str = 'mark') -> Dict:
@@ -170,7 +171,7 @@ class UpdateProcessor:
                     ai_count = 0
                     for p in valid_papers:
                         if any(
-                            getattr(p, field, "").startswith("[AI generated]") 
+                            getattr(p, field, "").startswith(self.ai_generate_mark) 
                             for field in ['title_translation', 'analogy_summary', 
                                         'summary_motivation', 'summary_innovation',
                                         'summary_method', 'summary_conclusion', 

@@ -57,7 +57,8 @@ class PaperSubmissionGUI:
         # 更新文件路径
         self.update_json_path = self.settings['paths']['update_json']
         self.update_excel_path = self.settings['paths']['update_excel']
-
+        # 其他配置
+        self.conflict_marker = self.settings['database']['conflict_marker']
         # 表单首次打开？
         self.first_open = True
         
@@ -643,50 +644,6 @@ class PaperSubmissionGUI:
                 # 单行文本框
                 paper_data[variable] = widget.get()
         
-        # 验证必填字段
-        required_tags = self.config.get_required_tags()
-        missing_fields = []
-        
-        for tag in required_tags:
-            variable = tag['variable']
-            value = paper_data.get(variable, "")
-            
-            if not value or str(value).strip() == "":
-                missing_fields.append(tag['display_name'])
-        
-        if missing_fields:
-            messagebox.showerror("错误", f"以下必填字段为空:\n• " + "\n• ".join(missing_fields))
-            return None
-        
-        # 验证DOI格式
-        doi = paper_data.get('doi', '')
-        if doi and not validate_doi(doi):
-            messagebox.showerror("错误", "DOI格式无效")
-            return None
-        
-        # 验证URL格式
-        paper_url = paper_data.get('paper_url', '')
-        if paper_url and not validate_url(paper_url):
-            messagebox.showerror("错误", "论文链接格式无效")
-            return None
-        
-        project_url = paper_data.get('project_url', '')
-        if project_url and not validate_url(project_url):
-            messagebox.showerror("错误", "项目链接格式无效")
-            return None
-        
-         # 验证pipeline_image（支持多图，用分号或中文分号分隔，最多3张）
-        pipeline = paper_data.get('pipeline_image', '')
-        if pipeline:
-            from src.utils import validate_pipeline_image
-            fig_dir = self.settings['paths'].get('figure_dir', 'figures')
-            valid, normalized = validate_pipeline_image(pipeline, fig_dir)
-            if not valid:
-                messagebox.showerror("错误", "Pipeline图片格式无效（仅支持最多3张图片，常见图片格式如jpg/png/gif等）")
-                return None
-            # 使用规范化后的（可能为多图，以分号分隔）值
-            paper_data['pipeline_image'] = normalized
-        
         # 创建Paper对象
         try:
             paper = Paper.from_dict(paper_data)
@@ -749,7 +706,7 @@ class PaperSubmissionGUI:
         """保存当前论文"""
         if self.first_open:
             self.first_open = False
-            return True
+            #return True
         
         paper = self.get_paper_from_form()
         if paper is None:
@@ -759,9 +716,8 @@ class PaperSubmissionGUI:
         
         
         # 验证论文字段 - 使用统一验证函数
-        config = get_config_instance()
         valid, errors = paper.validate_paper_fields(
-            config,
+            self.config,
             check_required=True,
             check_non_empty=True
         )
@@ -881,14 +837,13 @@ class PaperSubmissionGUI:
         """保存所有论文到更新文件（增量更新模式）"""
         if not self.papers:
             messagebox.showwarning("警告", "没有论文可以保存")
-            return
+            return False
         
         # 1. 先保存当前正在编辑的论文（如果存在）
         if not self.save_current_paper():
-            return
+            return False
         
-        config = get_config_instance()
-        conflict_marker = config.settings['database'].get('conflict_marker', '[💥冲突]')
+        
 
         # 2. 读取现有JSON文件内容
         existing_papers = []
@@ -897,7 +852,7 @@ class PaperSubmissionGUI:
                 existing_papers = self.update_utils.load_papers_from_json(self.update_json_path)
         except Exception as e:
             messagebox.showerror("错误", f"读取现有JSON文件失败: {e}")
-            return
+            return False
 
         # 3. 逐条处理合并与冲突
         merged_papers = list(existing_papers) # 创建副本
@@ -910,7 +865,7 @@ class PaperSubmissionGUI:
 
         for paper in self.papers:
             # 清理doi
-            paper.doi = clean_doi(paper.doi, conflict_marker) if paper.doi else ""
+            paper.doi = clean_doi(paper.doi, self.conflict_marker) if paper.doi else ""
             
             key = paper.get_key()
             
@@ -923,7 +878,7 @@ class PaperSubmissionGUI:
                 
                 if choice is None: # Cancel
                     self.update_status("保存操作已取消")
-                    return
+                    return False
                 elif choice: # Yes, Overwrite
                     # 在 merged_papers 中找到并替换
                     for i, mp in enumerate(merged_papers):
@@ -940,7 +895,7 @@ class PaperSubmissionGUI:
         invalid_papers = []
         for i, paper in enumerate(merged_papers):
              valid, errors = paper.validate_paper_fields(
-                config,
+                self.config,
                 check_required=True,
                 check_non_empty=True
             )
@@ -954,32 +909,34 @@ class PaperSubmissionGUI:
             
             error_msg += "\n请检查并修正错误后再保存。"
             messagebox.showerror("验证错误", error_msg)
-            return
+            return False
 
         # 5. 保存到文件 (使用新封装的方法，自动处理 meta)
         try:
             self.update_utils.save_papers_to_json(self.update_json_path, merged_papers)
         except Exception as e:
             messagebox.showerror("错误", f"保存JSON文件失败: {e}")
-            return
+            return False
         
         messagebox.showinfo("成功", f"成功保存 {len(merged_papers)} 篇论文到更新文件")
         self.update_status(f"已更新文件: {self.update_json_path}")
+        return True
     
     def submit_pr(self):
         """提交PR（模拟）"""
         messagebox.showinfo("须知", f"将自动通过pull request提交论文，具体进行以下操作:\n  1.如果当前在main分支，将进行自动创建并切换到新分支\n  2.自动提交PR\n  3.如果根目录中的submit_template.xlsx或submit_template.json已按规范填写，且没有项目中任何其他更改，您提交的论文会自动更新到仓库论文列表\n  4. 提交完成后，程序会自动切回您之前所在的分支（不会保留本次临时分支）\n\n")
         
-        # 检查是否有论文
-        if not self.papers:
-            messagebox.showwarning("警告", "两个submit_template文件中没有论文可以提交")
-            return
+        # # 检查是否有论文
+        # if not self.papers:
+        #     messagebox.showwarning("警告", "两个submit_template文件中没有论文可以提交")
+        #     return
+        # 逻辑错误
         
         # 检查是否已保存
         if not os.path.exists(self.update_json_path):
             if  messagebox.askyesno("确认", "表单内容尚未保存到submit_template.json，是否先保存？取消保存将不会提交表单内容"):
-            
-                self.save_all_papers()
+                if self.save_all_papers()==False:
+                    return
 
         # 确认提交
         if not messagebox.askyesno("确认", f"确定要提交submit_template.xlsx和submit_template.json中的论文吗？"):
@@ -1312,7 +1269,10 @@ GitHub CLI未安装或配置，无法自动创建PR。
         
         if not filepath:
             return
-        
+        if self.papers:
+            if messagebox.askyesno("确认", "有未保存的论文，是否保存？如果取消当前表单内容会丢失"):
+                if self.save_all_papers()==False:
+                    return
         try:
             if filepath.endswith('.json'):
                 data = self.update_utils.read_json_file(filepath)
@@ -1364,8 +1324,10 @@ GitHub CLI未安装或配置，无法自动创建PR。
     def on_closing(self):
         """关闭窗口时的处理"""
         if self.papers:
-            if messagebox.askyesno("确认", "有未保存的论文，是否保存？"):
-                self.save_all_papers()
+            if messagebox.askyesno("确认", "有未保存的论文，是否保存？如果取消当前表单内容会丢失"):
+                if self.save_all_papers()==False:
+                    return
+                    
         
         self.root.destroy()
 
