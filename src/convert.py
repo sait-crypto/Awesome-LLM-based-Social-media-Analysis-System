@@ -104,7 +104,7 @@ class ReadmeGenerator:
                 continue
 
             # 添加一级分类标题（包含计数）
-            markdown_output += f"\n### | {parent_name} ({parent_count} papers)\n\n"
+            markdown_output += f"\n### | {parent_name}  ({parent_count} papers)\n\n"
 
             # 若父类本身有论文，先显示父类表格
             if parent_papers:
@@ -176,7 +176,7 @@ class ReadmeGenerator:
             except Exception:
                 parent_count = 0
 
-            lines.append(f"  - [{name}](#{anchor}) ({parent_count} papers)")
+            lines.append(f"  - [{name}](#{anchor})  ({parent_count} papers)")
             # 添加二级分类（若有），每个子项换行并缩进（再加两个空格）
             for child in children_map.get(parent.get('unique_name'), []):
                 child_name = child.get('name', child.get('unique_name'))
