@@ -92,17 +92,18 @@ class ReadmeGenerator:
             child_list = children_map.get(parent.get('order'), [])
 
             # 先检查是否有任何论文需要显示（父或子有任意一个有论文则显示此父分组）
-            has_any = bool(parent_papers)
+            # 计算父类计数（包括其子类的论文）
+            parent_count = len(parent_papers)
             for child in child_list:
-                if papers_by_category.get(child.get('unique_name')):
-                    has_any = True
-                    break
+                parent_count += len(papers_by_category.get(child.get('unique_name'), []))
+
+            has_any = parent_count > 0
 
             if not has_any:
                 continue
 
-            # 添加一级分类标题
-            markdown_output += f"\n### | {parent_name}\n\n"
+            # 添加一级分类标题（包含计数）
+            markdown_output += f"\n### | {parent_name} ({parent_count} papers)\n\n"
 
             # 若父类本身有论文，先显示父类表格
             if parent_papers:
@@ -114,7 +115,9 @@ class ReadmeGenerator:
                 child_papers = papers_by_category.get(child.get('unique_name'), [])
                 if not child_papers:
                     continue
-                markdown_output += f"\n### {child_name}\n\n"
+                # 子类计数
+                child_count = len(child_papers)
+                markdown_output += f"\n### {child_name} ({child_count} papers)\n\n"
                 markdown_output += self._generate_category_table(child_papers)
 
         return markdown_output
@@ -156,12 +159,33 @@ class ReadmeGenerator:
             name = parent.get('name', parent.get('unique_name'))
             anchor = self._slug(name)
             # 顶级分类前置两个空格以保持与历史样式一致
-            lines.append(f"  - [{name}](#{anchor})")
+            # 计算父类及其子类的论文数量（包含子类的论文）
+            try:
+                # 加载论文并按分类分组以获取计数
+                df = self.db_manager.load_database()
+                if self.is_truncate_translation and df is not None and not df.empty:
+                    df = self._truncate_translation_suffix(df)
+                papers = self.update_utils.excel_to_paper(df, only_non_system=False)
+                papers = [p for p in papers if p.conflict_marker == False and p.show_in_readme]
+                papers_by_category = self._group_papers_by_category(papers)
+                parent_key = parent.get('unique_name')
+                parent_count = len(papers_by_category.get(parent_key, []))
+                for child in children_map.get(parent.get('order'), []):
+                    parent_count += len(papers_by_category.get(child.get('unique_name'), []))
+            except Exception:
+                parent_count = 0
+
+            lines.append(f"  - [{name}](#{anchor}) ({parent_count} papers)")
             # 添加二级分类（若有），每个子项换行并缩进（再加两个空格）
             for child in children_map.get(parent.get('order'), []):
                 child_name = child.get('name', child.get('unique_name'))
                 child_anchor = self._slug(child_name)
-                lines.append(f"    - [{child_name}](#{child_anchor})")
+                # 子类计数
+                try:
+                    child_count = len(papers_by_category.get(child.get('unique_name'), []))
+                except Exception:
+                    child_count = 0
+                lines.append(f"    - [{child_name}](#{child_anchor}) ({child_count} papers)")
 
         return "\n".join(lines)
     
