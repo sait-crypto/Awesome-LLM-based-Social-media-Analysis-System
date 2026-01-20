@@ -93,10 +93,14 @@ class ReadmeGenerator:
             child_list = children_map.get(parent.get('unique_name'), [])
 
             # 先检查是否有任何论文需要显示（父或子有任意一个有论文则显示此父分组）
-            # 计算父类计数（包括其子类的论文）
-            parent_count = len(parent_papers)
+            # 计算父类计数（包括其子类的论文），使用论文 key 去重避免多分类重复计算
+            unique_paper_keys = set()
+            for paper in parent_papers:
+                unique_paper_keys.add(paper.get_key())
             for child in child_list:
-                parent_count += len(papers_by_category.get(child.get('unique_name'), []))
+                for paper in papers_by_category.get(child.get('unique_name'), []):
+                    unique_paper_keys.add(paper.get_key())
+            parent_count = len(unique_paper_keys)
 
             has_any = parent_count > 0
 
@@ -160,7 +164,7 @@ class ReadmeGenerator:
             name = parent.get('name', parent.get('unique_name'))
             anchor = self._slug(name)
             # 顶级分类前置两个空格以保持与历史样式一致
-            # 计算父类及其子类的论文数量（包含子类的论文）
+            # 计算父类及其子类的论文数量（包含子类的论文），使用论文 key 去重避免多分类重复计算
             try:
                 # 加载论文并按分类分组以获取计数
                 df = self.db_manager.load_database()
@@ -170,9 +174,13 @@ class ReadmeGenerator:
                 papers = [p for p in papers if p.conflict_marker == False and p.show_in_readme]
                 papers_by_category = self._group_papers_by_category(papers)
                 parent_key = parent.get('unique_name')
-                parent_count = len(papers_by_category.get(parent_key, []))
+                unique_paper_keys = set()
+                for paper in papers_by_category.get(parent_key, []):
+                    unique_paper_keys.add(paper.get_key())
                 for child in children_map.get(parent.get('unique_name'), []):
-                    parent_count += len(papers_by_category.get(child.get('unique_name'), []))
+                    for paper in papers_by_category.get(child.get('unique_name'), []):
+                        unique_paper_keys.add(paper.get_key())
+                parent_count = len(unique_paper_keys)
             except Exception:
                 parent_count = 0
 

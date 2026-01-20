@@ -195,7 +195,7 @@ class DatabaseManager:
     
     
     #唯一对外接口
-    def add_papers(self, new_papers: List[Paper], conflict_resolution: str = 'mark') -> Tuple[List[Paper], List[Paper],List[Paper] ]:
+    def add_papers(self, new_papers: List[Paper], conflict_resolution: str = 'mark') -> Tuple[List[Paper], List[Paper],List[str] ]:
         """
         添加新论文到数据库，同时验证冲突
         
@@ -204,7 +204,7 @@ class DatabaseManager:
             conflict_resolution: 冲突解决策略 ('mark', 'skip', 'replace')
         
         返回:
-            Tuple[成功添加的论文列表, 冲突论文列表（被标记后需要加入数据库的）,验证失败论文列表]
+            Tuple[成功添加的论文列表, 冲突论文列表（被标记后需要加入数据库的）,验证失败消息列表]
         """
         # 加载现有数据库
         df = self.load_database()
