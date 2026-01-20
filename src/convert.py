@@ -87,6 +87,7 @@ class ReadmeGenerator:
         for parent in parents:
             parent_name = parent.get('name', parent.get('unique_name'))
             parent_key = parent.get('unique_name')
+            parent_anchor = self._slug(parent_name)
             # 收集该父类以及其所有子类是否有论文
             parent_papers = papers_by_category.get(parent_key, [])
             # children_map 的键现在是父类的 unique_name
@@ -107,8 +108,8 @@ class ReadmeGenerator:
             if not has_any:
                 continue
 
-            # 添加一级分类标题（包含计数）
-            markdown_output += f"\n### | {parent_name}  ({parent_count} papers)\n\n"
+            # 添加一级分类标题（包含锚点标记）
+            markdown_output += f"\n### {parent_name} ({parent_count} papers) {{#{parent_anchor}}}\n\n"
 
             # 若父类本身有论文，先显示父类表格
             if parent_papers:
@@ -162,7 +163,7 @@ class ReadmeGenerator:
         lines = ["### Quick Links", ""]
         for parent in parents:
             name = parent.get('name', parent.get('unique_name'))
-            anchor = self._slug(name)
+            anchor = self._slug(name).lower()
             # 顶级分类前置两个空格以保持与历史样式一致
             # 计算父类及其子类的论文数量（包含子类的论文），使用论文 key 去重避免多分类重复计算
             try:
@@ -188,7 +189,7 @@ class ReadmeGenerator:
             # 添加二级分类（若有），每个子项换行并缩进（再加两个空格）
             for child in children_map.get(parent.get('unique_name'), []):
                 child_name = child.get('name', child.get('unique_name'))
-                child_anchor = self._slug(child_name)
+                child_anchor = self._slug(child_name).lower()
                 # 子类计数
                 try:
                     child_count = len(papers_by_category.get(child.get('unique_name'), []))
