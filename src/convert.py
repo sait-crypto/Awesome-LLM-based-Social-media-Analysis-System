@@ -4,6 +4,7 @@
 import os
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 # 添加 src 目录到 Python 路径（使 `core` 包可被导入）
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -322,7 +323,10 @@ class ReadmeGenerator:
         # 如果有会议信息，添加会议徽章
         conference_badge = ""
         if paper.conference:
-            conference_badge = f" [![Publish](https://img.shields.io/badge/Conference-{paper.conference.replace(' ', '_')}-blue)]()"
+            # 对conference值进行URL编码以处理特殊字符（如"-"）
+            #conference_encoded = quote(paper.conference, safe='')
+            conference_encoded =quote(paper.conference, safe='').replace('-', '--')
+            conference_badge = f" [![Publish](https://img.shields.io/badge/Conference-{conference_encoded}-blue)]()"
         
         # 如果有项目链接，添加项目标：GitHub 使用 Star 徽章，否则使用简单 Project 徽章
         project_badge = ""
