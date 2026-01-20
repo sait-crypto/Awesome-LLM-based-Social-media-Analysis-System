@@ -102,7 +102,7 @@ class ReadmeGenerator:
 
             
             # 添加一级分类标题（包含计数）
-            markdown_output += f"\n### | {parent_name}  ({parent_count} papers)\n\n"
+            markdown_output += f"\n### | {parent_name} ({parent_count} papers)\n\n"
 
             # 若父类本身有论文，先显示父类表格
             if parent_papers:
