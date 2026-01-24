@@ -27,7 +27,7 @@ paper = Paper(
 
 print(f"Paper category before validation: {paper.category}\n")
 
-valid, errors = paper.validate_paper_fields(config, check_required=True, check_non_empty=True)
+valid, errors , _= paper.validate_paper_fields(config, check_required=True, check_non_empty=True)
 
 print(f"Validation result: {valid}")
 print(f"Paper category after validation: {paper.category}")

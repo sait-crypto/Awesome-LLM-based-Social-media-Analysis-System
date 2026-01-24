@@ -103,7 +103,7 @@ def test_paper_validation_with_multi_category():
     }
     
     paper = Paper.from_dict(paper_data)
-    valid, errors = paper.validate_paper_fields(config, check_required=True)
+    valid, errors, _ = paper.validate_paper_fields(config, check_required=True)
     
     assert valid, f"Paper validation failed: {errors}"
     print(f"  [OK] Multi-category paper validation passed: {paper.category}")

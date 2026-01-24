@@ -308,6 +308,8 @@ class ReadmeGenerator:
     
     def _generate_title_authors_cell(self, paper: Paper) -> str:
         """生成标题和作者单元格"""
+        if not paper.title:
+            return "Authors (to fill)"
         if not hasattr(self, 'enable_markdown'):
             self.enable_markdown = False
         # 清理和格式化

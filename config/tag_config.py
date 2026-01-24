@@ -28,7 +28,7 @@ TAGS_CONFIG = {
             "show_in_readme": True,         # 是否在README中显示
             "enabled": True,                # 对于immutable标签，此设置被忽略
             "immutable": True,              # 不可禁用，必填项
-            "required": True,               # 必须填写
+            "required": True,               # 必须填写（保证该值一定规范存在）
             "system_var": False,            #控制字段，为真时只在数据库中显示               
         },
         #以下3个标签在readme列表中共用一列，使用"title&authors&date"作为列名，使用"[display_name]"分割5个字段
@@ -57,7 +57,7 @@ TAGS_CONFIG = {
             "show_in_readme": True,
             "enabled": True,
             "immutable": True,
-            "required": True,               # 必须填写
+            "required": False,               # 必须填写
             "system_var": False,            #控制字段，为真时只在数据库中显示               
 
         },
@@ -66,7 +66,7 @@ TAGS_CONFIG = {
             "order": 3,                     # 不可更改，必须是3
             "table_name": "publish date",
             "display_name": "publish date",         #3个标签在readme列表中共用一列，使用[display_name]分割3个字段
-            "description": "论文发布时间，年-月-日、年/月/日、年-月-日、年.月.日、YYYYMMDD格式，支持day缺省，或month与day均缺省",
+            "description": "论文发布时间，年-月-日、年/月/日、年-月-日、年.月.日、YYYYMMDD格式，支持day缺省，或month与day均缺省。示例：201409，2012-10-2,2014",
             "type": "string",
             "validation": None,
             "show_in_readme": True,
@@ -97,8 +97,8 @@ TAGS_CONFIG = {
             "order": 5,
             "table_name": "summary motivation",
             "display_name": "motivation",          #5个标签在readme列表中共用一列，使用[display_name]分割5个字段
-            "description": "论文的研究目标或动机",
-            "type": "string",
+            "description": "简要：论文的研究目标或动机",
+            "type": "text",
             "validation": None,
             "show_in_readme": True,
             "enabled": True,
@@ -112,8 +112,8 @@ TAGS_CONFIG = {
             "order": 6,
             "table_name": "summary innovation",
             "display_name": "innovation",             #5个标签在readme列表中共用一列，使用[display_name]分割5个字段
-            "description": "论文的主要创新点，即为什么值得收集/放进综述",
-            "type": "string",
+            "description": "简要：论文的主要创新点，即为什么值得收集/放进综述",
+            "type": "text",
             "validation": None,
             "show_in_readme": True,
             "enabled": True,
@@ -127,8 +127,8 @@ TAGS_CONFIG = {
             "order": 7, 
             "table_name": "summary method",
             "display_name": "method",           #5个标签在readme列表中共用一列，使用[display_name]分割5个字段
-            "description": "核心方法总结",
-            "type": "string",
+            "description": "简要：核心方法总结",
+            "type": "text",
             "validation": None,
             "show_in_readme": True,
             "enabled": True,
@@ -142,8 +142,8 @@ TAGS_CONFIG = {
             "order": 8,
             "table_name": "summary conclusion",
             "display_name": "conclusion/contribution",      #5个标签在readme列表中共用一列，使用[display_name]分割5个字段
-            "description": "论文的主要结论/贡献",
-            "type": "string",
+            "description": "简要：论文的主要结论/贡献",
+            "type": "text",
             "validation": None,
             "show_in_readme": True,
             "enabled": True,
@@ -157,8 +157,8 @@ TAGS_CONFIG = {
             "order": 9,
             "table_name": "summary limitation",
             "display_name": "limitation/future",      #5个标签在readme列表中共用一列，使用[display_name]分割5个字段
-            "description": "论文的局限性或未来工作",
-            "type": "string",
+            "description": "简要：论文的局限性或未来工作",
+            "type": "text",
             "validation": None,
             "show_in_readme": True,
             "enabled": True,
@@ -235,7 +235,7 @@ TAGS_CONFIG = {
             "table_name": "analogy summary",
             "display_name": "类比总结",
             "description": "一句话类比总结",
-            "type": "string",
+            "type": "text",
             "validation": None,
             "show_in_readme": True,
             "enabled": True,
@@ -250,7 +250,7 @@ TAGS_CONFIG = {
             "order": 15,
             "table_name": "pipeline figure",
             "display_name": "Pipeline图",
-            "description": "请将Pipeline图片放到figures文件夹下，在此填写图片全名或相对路径；可用`;`或`；`分隔，最多3张图片",  #直接在readme的论文列表中根据路径显示图片
+            "description": "请将引用图片放到figures文件夹下，在此填写图片全名或相对路径（带后缀）；多张图片可用`;`或`；`分隔，最多3张",  #直接在readme的论文列表中根据路径显示图片
             "type": "string",
             "validation": None,
             "show_in_readme": True,
@@ -305,7 +305,7 @@ TAGS_CONFIG = {
             "system_var": False,            #控制字段，为真时只在数据库中显示               
 
         },
-        # ==================== 数据库内部控制标签，不供提交时手动填写 ====================
+        # ==================== 数据库内部控制标签，大多数不供提交时手动填写 ====================
         {
             "variable": "show_in_readme",
             "order": 19,
@@ -326,7 +326,7 @@ TAGS_CONFIG = {
             "order": 20,
             "table_name": "status",
             "display_name": "阅读状态",
-            "description": "论文的阅读状态", #unread，reading、done、adopted
+            "description": "论文的阅读状态", #unread，reading、done、adopted、skimmed
             "type": "enum",
             "validation": None,
             "show_in_readme": False,
@@ -379,6 +379,37 @@ TAGS_CONFIG = {
             "required": False,     
             "system_var": True,            #控制字段，为真时只在数据库中显示           
         },
+        #占位符论文发生冲突事件时无脑将其替换（暂未实现），需要在更新流程中可见，
+        {
+            "variable": "is_placeholder",
+            "order": 22,
+            "table_name": "is placeholder",
+            "display_name": "is placeholder",
+            "description": "该论文是否为占位符论文（用于1.测试；2.暂时占位，后续待完善信息）",
+            "type": "bool",
+            "validation": None,
+            "show_in_readme": False,
+            "enabled": False,
+            "immutable": True,
+            "required": False,     #默认为False，对于空值会被自动填充为False
+            "system_var": True,            #控制字段，为真时只在数据库中显示           
+        },
+        # {
+        #     "variable": "is_placeholder",
+        #     "order": 22,
+        #     "table_name": "is placeholder",
+        #     "display_name": "is placeholder",
+        #     "description": "该论文是否为占位符论文（用于1.测试；2.暂时占位，后续待完善信息）",
+        #     "type": "bool",
+        #     "validation": None,
+        #     "show_in_readme": False,
+        #     "enabled": False,#暂未实现功能
+        #     "immutable": True,
+        #     "required": True,     #默认为False，对于空值会被自动填充为False
+        #     "system_var": True,            #控制字段，为真时只在数据库中显示           
+        # },
+
+        #需要将逻辑调整为类似category_config的结构，通过唯一名称识别，variable和table_name合并，order变为可以自由调整的项（更新时自动）
     ]
 }
 

@@ -1,3 +1,5 @@
+
+
 """
 数据库模型
 定义论文数据模型
@@ -62,6 +64,8 @@ class Paper:
     conflict_marker: bool = False
     # 验证相关字段：记录不规范字段的 order 列表（逗号分隔）
     invalid_fields: str = ""
+    is_placeholder: bool = False  # 占位符标记，用于表示存在但填写不完整的论文条目
+    
     
     def __post_init__(self):
         """初始化后处理"""
@@ -113,8 +117,10 @@ class Paper:
         self, 
         config_instance,
         check_required: bool = True,
-        check_non_empty: bool = True
-    ) -> Tuple[bool, List[str]]:
+        check_non_empty: bool = True,
+        variable: str = None,
+        no_normalize: bool = False
+    ) -> Tuple[bool, List[str], List[str]]:
         """
         统一的论文字段验证函数
         流程：统一规范化->验证
@@ -123,9 +129,11 @@ class Paper:
             config_instance: 配置实例
             check_required: 是否检查必填字段
             check_non_empty: 是否检查非空字段（包括类型验证和validation字段验证）
+            variable: 指定只验证该字段（变量名）。若为None，则验证所有字段。
+            no_normalize: 若为True，则仅进行验证，不更新对象的属性值（不规范化）。
         
         返回:
-            (是否有效, 错误信息列表)
+            (是否有效, 错误信息列表, 验证未通过的字段变量名列表)
         """
         errors = []
         invalid_vars = set()
@@ -134,18 +142,31 @@ class Paper:
         conflict_marker = config_instance.settings['database'].get('conflict_marker')
         required_tags = config_instance.get_required_tags() if check_required else []
         active_tags = config_instance.get_active_tags()
+        
+        # 0. 辅助函数：判断是否需要验证当前字段
+        def should_check(var_name):
+            if variable is not None and variable != var_name:
+                return False
+            return True
 
         # 规范化 category 字段：支持多分类（用 ; 或 中文； 分隔），去重并限制最大数量
-        try:
-            if getattr(self, 'category', None):
-                raw_cat = str(self.category)
+        # 注意：如果 no_normalize=True，我们不应该修改 self.category，
+        # 但验证逻辑可能依赖规范化后的形式（例如查重），这里为了验证逻辑统一，
+        # 若 no_normalize=True，使用临时变量进行检查。
+        
+        temp_category = getattr(self, 'category', "")
+        
+        if should_check('category'):
+            try:
+                raw_cat = str(temp_category) if temp_category else ""
                 # 使用 update_file_utils 的方法进行统一规范化（若可用）
+                normalized_cat = raw_cat
                 try:
                     from src.core.update_file_utils import UpdateFileUtils
                     ufu = UpdateFileUtils()
-                    normalized = ufu.normalize_category_value(raw_cat, config_instance)
+                    normalized_cat = ufu.normalize_category_value(raw_cat, config_instance)
                 except Exception:
-                    # 回退实现：手动分割并映射到 unique_name（保守处理）
+                    # 回退实现
                     parts = [p.strip() for p in re.split(r'[;；]', raw_cat) if p.strip()]
                     seen = set()
                     out = []
@@ -161,69 +182,100 @@ class Paper:
                             out.append(uname)
                         if len(out) >= max_allowed:
                             break
-                    normalized = ";".join(out)
-                # 写回规范化结果
-                self.category = normalized
-        except Exception:
-            # 规范化失败不阻断后续验证
-            pass
+                    normalized_cat = ";".join(out)
+                
+                # 如果不是纯验证模式，回写
+                if not no_normalize:
+                    self.category = normalized_cat
+                else:
+                    # 验证模式下使用规范化后的值进行后续检查（如重复检查）
+                    temp_category = normalized_cat
+            except Exception:
+                pass
         
         # 1. 特殊字段验证
+        
         # 验证 invalid_fields 字段格式
-        if self.invalid_fields:
-            invalid_fields_valid, invalid_fields_error = validate_invalid_fields(self.invalid_fields)
-            if not invalid_fields_valid:
-                errors.append(f"invalid_fields 字段格式无效: {invalid_fields_error}")
-                invalid_vars.add('invalid_fields')
+        if should_check('invalid_fields'):
+            if self.invalid_fields:
+                invalid_fields_valid, invalid_fields_error = validate_invalid_fields(self.invalid_fields)
+                if not invalid_fields_valid:
+                    errors.append(f"invalid_fields 字段格式无效: {invalid_fields_error}")
+                    invalid_vars.add('invalid_fields')
         
         # DOI验证
-        if self.doi:
-            doi_valid, cleaned_doi = validate_doi(self.doi, check_format=True, conflict_marker=conflict_marker)
-            if not doi_valid and check_non_empty:
-                errors.append(f"DOI格式无效: {self.doi}")
-                invalid_vars.add('doi')
-        
+        if should_check('doi'):
+            if self.doi:
+                doi_valid, cleaned_doi = validate_doi(self.doi, check_format=True, conflict_marker=conflict_marker)
+                if not doi_valid and check_non_empty:
+                    errors.append(f"DOI格式无效: {self.doi}")
+                    invalid_vars.add('doi')
+                # 即使 check_format 失败，validate_doi 也会返回尝试 clean 后的值
+                # 只有当 no_normalize=False 时才写回
+                if not no_normalize: 
+                     self.doi = cleaned_doi
+
         # 作者验证
-        if self.authors:
-            authors_valid, formatted_authors = validate_authors(self.authors)
-            if not authors_valid and check_non_empty:
-                errors.append(f"作者格式无效")
-                invalid_vars.add('authors')
+        if should_check('authors'):
+            if self.authors:
+                authors_valid, formatted_authors = validate_authors(self.authors)
+                if not authors_valid and check_non_empty:
+                    errors.append(f"作者格式无效")
+                    invalid_vars.add('authors')
+                elif not no_normalize:
+                    self.authors = formatted_authors
         
         # Pipeline图片验证
-        if self.pipeline_image:
-            figure_dir = config_instance.settings['paths'].get('figure_dir', 'figures')
-            pipeline_valid, normalized_path = validate_pipeline_image(self.pipeline_image, figure_dir)
-            if not pipeline_valid and check_non_empty:
-                errors.append(f"Pipeline图片格式无效: {self.pipeline_image}")
-                invalid_vars.add('pipeline_image')
-            elif pipeline_valid:
-                # 更新规范化后的路径
-                self.pipeline_image = normalized_path
+        if should_check('pipeline_image'):
+            if self.pipeline_image:
+                figure_dir = config_instance.settings['paths'].get('figure_dir', 'figures')
+                pipeline_valid, normalized_path = validate_pipeline_image(self.pipeline_image, figure_dir)
+                if not pipeline_valid and check_non_empty:
+                    errors.append(f"Pipeline图片格式无效: {self.pipeline_image}")
+                    invalid_vars.add('pipeline_image')
+                elif pipeline_valid:
+                    if not no_normalize:
+                        self.pipeline_image = normalized_path
         
         # URL验证
-        if self.paper_url and not validate_url(self.paper_url) and check_non_empty:
-            errors.append(f"论文链接格式无效: {self.paper_url}")
-            invalid_vars.add('paper_url')
+        if should_check('paper_url'):
+            if self.paper_url and not validate_url(self.paper_url) and check_non_empty:
+                errors.append(f"论文链接格式无效: {self.paper_url}")
+                invalid_vars.add('paper_url')
         
-        if self.project_url and not validate_url(self.project_url) and check_non_empty:
-            errors.append(f"项目链接格式无效: {self.project_url}")
-            invalid_vars.add('project_url')
+        if should_check('project_url'):
+            if self.project_url and not validate_url(self.project_url) and check_non_empty:
+                errors.append(f"项目链接格式无效: {self.project_url}")
+                invalid_vars.add('project_url')
         
         # 日期验证
-        if self.date:
-            date_valid, formatted_date = validate_date(self.date)
-            if not date_valid and check_non_empty:
-                errors.append(f"日期格式无效: {self.date} (应为 YYYY-MM-DD)")
-                invalid_vars.add('date')
+        if should_check('date'):
+            if self.date:
+                date_valid, formatted_date = validate_date(self.date)
+                if not date_valid and check_non_empty:
+                    errors.append(f"日期格式无效: {self.date} (应为 YYYY-MM-DD)")
+                    invalid_vars.add('date')
+                elif not no_normalize:
+                    self.date = formatted_date
                 
         # 2. 必填字段检查
         if check_required:
             for tag in required_tags:
                 var_name = tag['variable']
+                if not should_check(var_name):
+                    continue
+                    
                 display_name = tag.get('display_name', var_name)
-                value = getattr(self, var_name, "")
+                # 使用 self 中的值 (注意 category 可能在 temp_category 中)
+                value = temp_category if var_name == 'category' and no_normalize else getattr(self, var_name, "")
                 
+                # 在验证前忽略 conflict_marker
+                try:
+                    if isinstance(value, str) and conflict_marker:
+                        value = value.replace(conflict_marker, '').strip()
+                except Exception:
+                    pass
+
                 if not value or str(value).strip() == "":
                     errors.append(f"必填字段为空: {display_name} ({var_name})")
                     invalid_vars.add(var_name)
@@ -232,12 +284,22 @@ class Paper:
         if check_non_empty:
             for tag in active_tags:
                 var_name = tag['variable']
+                if not should_check(var_name):
+                    continue
+                    
                 display_name = tag.get('display_name', var_name)
                 tag_type = tag.get('type', 'string')
                 validation_pattern = tag.get('validation')
-                value = getattr(self, var_name, "")
                 
-                # 跳过空值（除非是必填字段）
+                value = temp_category if var_name == 'category' and no_normalize else getattr(self, var_name, "")
+                
+                # 跳过空值（除非是必填字段，已经在上面检查过了）
+                try:
+                    if isinstance(value, str) and conflict_marker:
+                        value = value.replace(conflict_marker, '').strip()
+                except Exception:
+                    pass
+
                 if not value or str(value).strip() == "":
                     continue
                 
@@ -248,10 +310,11 @@ class Paper:
                         invalid_vars.add(var_name)
                 elif (str(tag_type).startswith('enum')) and var_name == 'category':
                     # 支持多分类，先按 ';' 分割
+                    val_str = str(value)
                     try:
-                        parts = [p.strip() for p in re.split(r'[;；]', str(value)) if p.strip()]
+                        parts = [p.strip() for p in re.split(r'[;；]', val_str) if p.strip()]
                     except Exception:
-                        parts = [str(value).strip()]
+                        parts = [val_str.strip()]
 
                     valid_categories = {cat['unique_name'] for cat in config_instance.get_active_categories()}
 
@@ -297,9 +360,10 @@ class Paper:
                         # 如果正则表达式有问题，跳过验证
                         pass
 
-        # 根据 invalid_vars 生成 invalid_fields 字段内容（使用 order），多个用逗号分隔
-        if invalid_vars:
-            # 将 active_tags 按 order 排序，收集变量到 order 映射
+        # 处理 invalid_fields 字段更新
+        # 仅当 no_normalize=False (即允许更新对象状态) 时，才更新 self.invalid_fields
+        if not no_normalize:
+            # 准备映射：变量名 -> Order
             var_to_order = {}
             for tag in active_tags:
                 var = tag.get('variable')
@@ -307,18 +371,40 @@ class Paper:
                 if var is not None and order is not None:
                     var_to_order[var] = str(order)
 
-            orders = []
-            for v in sorted(invalid_vars):
-                if v in var_to_order:
-                    orders.append(var_to_order[v])
-            self.invalid_fields = ",".join(orders)
-        else:
-            # 验证完全通过，清空 invalid_fields
-            self.invalid_fields = ""
+            # 解析当前的 invalid_fields
+            current_invalid_orders = set()
+            if self.invalid_fields:
+                parts = str(self.invalid_fields).split(',')
+                for p in parts:
+                    if p.strip():
+                        current_invalid_orders.add(p.strip())
 
-        return (len(errors) == 0, errors)
+            if variable is None:
+                # 全量验证模式：重置 invalid_fields 为当前 invalid_vars 对应的 order
+                orders = []
+                for v in sorted(invalid_vars):
+                    if v in var_to_order:
+                        orders.append(var_to_order[v])
+                self.invalid_fields = ",".join(orders)
+            else:
+                # 单字段验证模式：更新当前字段的状态
+                target_order = var_to_order.get(variable)
+                if target_order:
+                    if variable in invalid_vars:
+                        # 验证失败，添加 order
+                        current_invalid_orders.add(target_order)
+                    else:
+                        # 验证通过，移除 order
+                        if target_order in current_invalid_orders:
+                            current_invalid_orders.remove(target_order)
+                    
+                    # 重新生成字符串，保持排序以便一致性
+                    # 将字符串转int排序再转回str
+                    sorted_orders = sorted(current_invalid_orders, key=lambda x: int(x) if x.isdigit() else 0)
+                    self.invalid_fields = ",".join(sorted_orders)
+
+        return (len(errors) == 0, errors, list(invalid_vars))
         
-        return (len(errors) == 0, errors)
     
     # 检查时，注意看看和这个函数有没有必要存在
     def is_valid(self, config_instance = None) -> List[str]:
@@ -329,10 +415,11 @@ class Paper:
             from src.core.config_loader import get_config_instance
             config_instance = get_config_instance()
         
-        valid, errors = self.validate_paper_fields(
+        valid, errors, _ = self.validate_paper_fields(
             config_instance, 
             check_required=True,
-            check_non_empty=True
+            check_non_empty=True,
+            no_normalize=False # 默认保持原行为，更新对象
         )
         return errors
 
@@ -366,7 +453,7 @@ def is_same_identity(a: Union[Paper, Dict[str, Any]], b: Union[Paper, Dict[str, 
     return False
 
 def _papers_fields_equal(new: Union[Paper, Dict[str, Any]], exist: Union[Paper, Dict[str, Any]],
-                         complete_compare=False, ignore_fields: Optional[List[str]] = None) -> bool:
+                         complete_compare=False, ignore_fields: Optional[List[str]] = None) -> Tuple[bool,str]:
     """
     精确比较两个论文条目的字段（用于判定是否"完全相同"）。
     参数：
@@ -434,7 +521,7 @@ def _papers_fields_equal(new: Union[Paper, Dict[str, Any]], exist: Union[Paper, 
         
         if not a_keys_set.issubset(b_keys_set):
             # new的非空域集合不是exist的子集，直接返回False
-            return False
+            return False,'新论文集合更大'
         
         # 比较new中的所有非空字段
         for k in a_non_empty:
@@ -447,12 +534,12 @@ def _papers_fields_equal(new: Union[Paper, Dict[str, Any]], exist: Union[Paper, 
             # 统一转换为字符串比较（保持 bool/int 的语义）
             if isinstance(va, bool) or isinstance(vb, bool):
                 if bool(va) != bool(vb):
-                    return False
+                    return False,k
             
             else:
                 if str(va).strip() != str(vb).strip():
-                    return False
-        return True
+                    return False,k
+        return True,''
     
     else:
         # complete_compare=True：除忽略ignore_fields外，比较全部字段
@@ -469,21 +556,23 @@ def _papers_fields_equal(new: Union[Paper, Dict[str, Any]], exist: Union[Paper, 
             # 统一转换为字符串比较（保持 bool/int 的语义）
             if isinstance(va, bool) or isinstance(vb, bool):
                 if bool(va) != bool(vb):
-                    return False
+                    return False,k
             else:
                 if str(va).strip() != str(vb).strip():
-                    return False
-        return True
-def is_duplicate_paper(existing_papers: List[Paper], new_paper: Paper,complete_compare=False) -> bool:
+                    return False,k
+        return True,''
+def is_duplicate_paper(existing_papers: List[Paper], new_paper: Paper,complete_compare=False) -> Tuple[bool, str]:
     """
     判断新提交是否为重复论文条目：
     - 在 existing_papers 中找出与 new_paper 表示相同论文（一致 identity）的条目集合；
-    - 如果该集合中存在任一条目的所有字段都与 new_paper 完全一致，则为重复paper，返回 True。
+    - 如果该集合中存在任一条目的所有字段都与 new_paper 完全一致（除忽略字段），则为重复paper，返回 True。
     """
     same_identity_entries = [p for p in existing_papers if is_same_identity(p, new_paper)]
     if not same_identity_entries:
-        return False
+        return False,''
+    first_conflict_field = ''
     for ex in same_identity_entries:
-        if _papers_fields_equal(ex, new_paper,complete_compare):
-            return True
-    return False
+        equal,first_conflict_field = _papers_fields_equal(ex, new_paper,complete_compare)
+        if equal:
+            return True,''
+    return False,first_conflict_field

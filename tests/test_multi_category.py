@@ -55,7 +55,7 @@ paper = Paper(
     summary_method="test",
     summary_conclusion="test"
 )
-valid, errors = paper.validate_paper_fields(config, check_required=True, check_non_empty=True)
+valid, errors , _= paper.validate_paper_fields(config, check_required=True, check_non_empty=True)
 print(f"验证结果: {'✓ 通过' if valid else '✗ 失败'}")
 if errors:
     print(f"错误: {errors}")
@@ -89,7 +89,7 @@ paper_invalid = Paper(
     summary_method="test",
     summary_conclusion="test"
 )
-valid, errors = paper_invalid.validate_paper_fields(config, check_required=True, check_non_empty=True)
+valid, errors, _ = paper_invalid.validate_paper_fields(config, check_required=True, check_non_empty=True)
 print(f"验证结果: {'✓ 通过' if valid else '✗ 失败（预期）'}")
 if errors:
     print(f"错误信息: {errors[0]}\n")
@@ -108,7 +108,7 @@ paper_dup = Paper(
     summary_method="test",
     summary_conclusion="test"
 )
-valid, errors = paper_dup.validate_paper_fields(config, check_required=True, check_non_empty=True)
+valid, errors, _ = paper_dup.validate_paper_fields(config, check_required=True, check_non_empty=True)
 print(f"输入category（含重复）: NLP;NLP;CV")
 print(f"验证结果: {'通过（去重后）' if valid else '失败'}")
 print(f"规范化后: {paper_dup.category}")

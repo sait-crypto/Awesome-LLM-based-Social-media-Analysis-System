@@ -37,7 +37,7 @@ if len(cat_names) >= 2:
         summary_method="Method description",
         summary_conclusion="Conclusion statement"
     )
-    valid, errors = paper.validate_paper_fields(config, check_required=True, check_non_empty=True)
+    valid, errors , _= paper.validate_paper_fields(config, check_required=True, check_non_empty=True)
     print(f"输入分类: {multi_cat}")
     print(f"验证结果: {'✓ 通过' if valid else '✗ 失败'}")
     if not valid:

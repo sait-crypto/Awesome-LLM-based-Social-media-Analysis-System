@@ -59,7 +59,7 @@ paper = Paper(
     summary_method="Method text",
     summary_conclusion="Conclusion text"
 )
-valid3, errors3 = paper.validate_paper_fields(config, check_required=True, check_non_empty=True)
+valid3, errors3, _ = paper.validate_paper_fields(config, check_required=True, check_non_empty=True)
 print(f"  Category: {paper.category}")
 print(f"  Valid: {valid3}")
 if errors3:

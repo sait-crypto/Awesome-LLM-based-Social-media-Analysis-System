@@ -321,7 +321,9 @@ class AIGenerator:
         enhanced_papers = []
         for i, paper in enumerate(papers):
             print(f"AI处理论文 {i+1}/{len(papers)}: {paper.title[:50]}...")
-            enhanced_paper, is_enhanced = self.enhance_paper_with_ai(paper)
+            enhanced_paper, _is_enhanced = self.enhance_paper_with_ai(paper)
+            if _is_enhanced:
+                is_enhanced=True
             enhanced_papers.append(enhanced_paper)
             # 避免API频率限制
             time.sleep(1)

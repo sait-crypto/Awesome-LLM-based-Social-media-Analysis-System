@@ -17,7 +17,7 @@ from src.core.config_loader import get_config_instance
 from src.core.database_manager import DatabaseManager
 from src.core.database_model import Paper, is_duplicate_paper
 from src.ai_generator import AIGenerator
-from src.utils import  get_current_timestamp
+from src.utils import  get_current_timestamp,backup_file
 from src.core.update_file_utils import get_update_file_utils
 import pandas as pd
 
@@ -255,7 +255,7 @@ class UpdateProcessor:
         unique_papers = []
         
         for paper in papers:
-            if is_duplicate_paper(unique_papers, paper,complete_compare=False):
+            if is_duplicate_paper(unique_papers, paper,complete_compare=False)[0]:
                 continue
             unique_papers.append(paper)
 
@@ -296,7 +296,7 @@ class UpdateProcessor:
             if result['conflicts']:
                 print(f"⚠ 发现 {len(result['conflicts'])} 处冲突需要手动处理，已添加到数据库，请尽快处理并运行convert.py更新到readme")
                 for i, conflict in enumerate(result['conflicts'], 1):
-                    new_title = conflict['new'].get('title', '未知标题')[:50] if conflict['new'] else '未知标题'
+                    new_title = conflict['new'].get('title', '未知标题')[:80] if conflict['new'] else '未知标题'
                     print(f"  {i}. 冲突论文: {new_title}...")
             
             if result['errors']:
@@ -325,7 +325,7 @@ def main():
     
     # 发送通知
     processor.print_result(result)
-    
+    backup_file("figures","backups")
     # 如果更新成功，重新生成README
     if result['success']:  #and result['new_papers'] > 0
         print("\n重新生成README...")

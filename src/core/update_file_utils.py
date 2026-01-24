@@ -29,7 +29,7 @@ from typing import List, Dict, Any, Optional,Union,Tuple
 from dataclasses import asdict
 
 from src.core.config_loader import get_config_instance
-from src.core.database_model import Paper,is_same_identity, is_duplicate_paper
+from src.core.database_model import Paper,is_same_identity
 # 导入统一的备份函数
 from src.utils import ensure_directory, backup_file, get_current_timestamp
 
@@ -707,7 +707,7 @@ class UpdateFileUtils:
                 paper = Paper.from_dict(paper_data)
                 
                 # 验证论文字段
-                valid, errors = paper.validate_paper_fields(
+                valid, errors ,_= paper.validate_paper_fields(
                     self.config,
                     check_required=False,  # 更新文件可能不完整
                     check_non_empty=True
@@ -765,7 +765,7 @@ class UpdateFileUtils:
                 paper = Paper.from_dict(paper_data)
                 
                 # 验证论文字段
-                valid, errors = paper.validate_paper_fields(
+                valid, errors , _= paper.validate_paper_fields(
                     self.config,
                     check_required=False,  # Excel文件可能不完整
                     check_non_empty=True

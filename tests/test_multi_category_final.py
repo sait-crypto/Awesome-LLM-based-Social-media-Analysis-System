@@ -36,7 +36,7 @@ if len(cat_names) >= 2:
         summary_method="Method description",
         summary_conclusion="Conclusion statement"
     )
-    valid, errors = paper.validate_paper_fields(config, check_required=True, check_non_empty=True)
+    valid, errors, _ = paper.validate_paper_fields(config, check_required=True, check_non_empty=True)
     print(f"Input category: {multi_cat}")
     print(f"Validation result: {'[OK] PASS' if valid else '[FAIL] FAIL'}")
     if not valid:

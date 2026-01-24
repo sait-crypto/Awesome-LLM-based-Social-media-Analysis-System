@@ -131,7 +131,7 @@ def validate_json_file(uf: UpdateFileUtils, path: str) -> List[str]:
     for idx, item in enumerate(normalized):
         paper_data = uf._dict_to_paper_data(item, tags)
         paper = Paper.from_dict(paper_data)
-        valid, es = paper.validate_paper_fields(uf.config, check_required=True, check_non_empty=True)
+        valid, es, _ = paper.validate_paper_fields(uf.config, check_required=True, check_non_empty=True)
         if not valid:
             errors.append(f"JSON entry #{idx}: {paper.title[:50]} - {es}")
     return errors
@@ -152,7 +152,7 @@ def validate_excel_file(uf: UpdateFileUtils, path: str) -> List[str]:
     for idx, row in df.iterrows():
         paper_data = uf._excel_row_to_paper_data(row, tags)
         paper = Paper.from_dict(paper_data)
-        valid, es = paper.validate_paper_fields(uf.config, check_required=True, check_non_empty=True)
+        valid, es, _ = paper.validate_paper_fields(uf.config, check_required=True, check_non_empty=True)
         if not valid:
             errors.append(f"Excel row #{idx}: {paper.title[:50]} - {es}")
     return errors

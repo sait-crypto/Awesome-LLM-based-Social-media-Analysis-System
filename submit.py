@@ -30,8 +30,9 @@ def main():
     print()
     print("功能:")
     print("1. 启动图形界面提交论文")
-    print("2. 保存论文到更新文件")
-    print("3. 自动提交Pull Request")
+    print("2. 规范化保存论文到更新文件")
+    print("3. 规范化处理更新文件中的论文")
+    print("4. 自动提交Pull Request")
     print()
     
     if not check_dependencies():

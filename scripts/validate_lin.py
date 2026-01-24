@@ -23,6 +23,6 @@ for i,item in enumerate(papers):
     normalized = uf.normalize_json_papers([item], uf.config)
     pd = uf._dict_to_paper_data(normalized[0], tags)
     paper = Paper.from_dict(pd)
-    valid, errors = paper.validate_paper_fields(uf.config, check_required=False, check_non_empty=True)
+    valid, errors, _ = paper.validate_paper_fields(uf.config, check_required=False, check_non_empty=True)
     print('  valid=', valid, 'errors=', errors)
     print('  normalized pipeline_image in Paper.__post_init__:', paper.pipeline_image)
