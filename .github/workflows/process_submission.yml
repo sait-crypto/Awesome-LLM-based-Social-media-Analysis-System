@@ -3,23 +3,16 @@ name: Process Paper Submission
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
-    branches:    
-      - main     # 表示只有目标是 main 分支的 PR 才触发
+    branches:
+      - main
 
 jobs:
   process-submission:
     runs-on: ubuntu-latest
-    # 权限设置：允许提交代码和读取 Actions 变量
     permissions:
       contents: write
       pull-requests: write
     
-    # 逻辑控制：
-    # 1. 必须不是 main 分支的直接 push (由 on 限制)
-    # 2. 要么 AUTO_PROCESS_SUBMISSIONS 为 true
-    # 3. 要么 Label 包含 'Action: Process'
-    # 第4行防止维护者在主仓库分支操作时意外触发（可选，视你工作流而定）
-    # && github.event.pull_request.head.repo.full_name != github.repository 
     if: >
       (vars.AUTO_PROCESS_SUBMISSIONS == 'true' || 
        contains(github.event.pull_request.labels.*.name, 'Action: Process')) 
@@ -30,7 +23,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-          fetch-depth: 0 # 获取完整历史以进行 diff 对比。（必须设置为 0 才能获取所有历史以访问 origin/main）
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
@@ -43,61 +36,89 @@ jobs:
       - name: Install Dependencies
         run: uv sync --frozen
 
-      # 步骤 1: 验证提交 (Validate)
-      # 修改点：增加 id，开启 pipefail，并使用 tee 同时输出到屏幕和文件
+      # --- 步骤 1: 验证 ---
       - name: Validate Submission
         id: validate
         env:
           PYTHONPATH: .
         shell: bash
         run: |
-          # 获取变更文件列表
           git diff --name-only origin/main...HEAD > changed_files.txt
-          
-          # set -o pipefail 确保如果 python 脚本失败，整个步骤也会被标记为失败
           set -o pipefail
-          
-          # 运行脚本，同时将输出显示在控制台并保存到 validation_log.txt
           uv run python scripts/validate_submission.py 2>&1 | tee validation_log.txt
 
-      # 新增步骤: 验证失败时评论 (Comment on Failure)
       - name: Comment on Validation Failure
-        if: failure() && steps.validate.outcome == 'failure'  # 仅在 Validate 步骤失败时运行
+        if: failure() && steps.validate.outcome == 'failure'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            
-            // 读取验证脚本的日志文件
             let logContent = '';
-            try {
-              logContent = fs.readFileSync('validation_log.txt', 'utf8');
-            } catch (e) {
-              logContent = 'Failed to read validation log.';
+            try { logContent = fs.readFileSync('validation_log.txt', 'utf8'); } catch(e) { logContent = 'Log missing'; }
+            const author = context.payload.pull_request.user.login;
+            const body = `### ❌ Validation Failed\nHi @${author}, please fix the following issues:\n<details><summary>Log</summary>\n\n\`\`\`text\n${logContent}\n\`\`\`\n</details>`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+      # --- 步骤 2: 处理图片 ---
+      - name: Update Figures
+        if: success()
+        env:
+          PYTHONPATH: .
+        run: uv run python scripts/update_submission_figures.py
+
+      # --- 步骤 3: 核心更新 ---
+      - name: Run Core Update
+        id: core_update
+        if: success()
+        env:
+          PYTHONPATH: .
+          DEEPSEEK_API: ${{ secrets.DEEPSEEK_API }}
+          EXCEL_KEY: ${{ secrets.EXCEL_KEY }}
+        run: |
+          # 运行 update.py 并保存全量日志
+          # 注意：update.py 内部会调用 convert.py，输出都会被捕获
+          set -o pipefail
+          uv run python src/update.py 2>&1 | tee update_log.txt
+
+      # --- 新增: 无论 Update 成功失败，都评论日志 (需求 1) ---
+      - name: Comment Update Log
+        if: steps.core_update.conclusion != 'skipped' # 只要 Core Update 运行过（无论 success 或 failure）
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            let logContent = '';
+            try { 
+              // 读取更新日志
+              logContent = fs.readFileSync('update_log.txt', 'utf8'); 
+            } catch (e) { 
+              logContent = 'Log missing or update script failed silently.'; 
             }
 
-            // 截取最后 2000 个字符以防日志过长，或者保留关键错误信息
-            // 这里我们直接放全部，通常验证错误信息不会太长
-            
             const author = context.payload.pull_request.user.login;
+            const statusIcon = '${{ steps.core_update.outcome }}' === 'success' ? '✅' : '⚠️';
+            const title = '${{ steps.core_update.outcome }}' === 'success' ? 'Update Successful' : 'Update Finished with Errors';
+            
             const body = `
-            ### ❌ Submission Validation Failed
+            ### ${statusIcon} Core Update Execution Log
             
-            Hi @${author}, thank you for your contribution! 
-            
-            However, our automated validation script detected some issues with your submission. Please check the error log below and update your PR template or files accordingly.
+            Hi @${author}, the update script has executed. Here is the full output (including README generation):
             
             <details>
-            <summary><b>Click to see error details</b></summary>
+            <summary><b>Click to view full log</b></summary>
             
             \`\`\`text
             ${logContent}
             \`\`\`
             
             </details>
-            
-            Once you fix these issues and push the changes, the validation will run again automatically.
             `;
 
             await github.rest.issues.createComment({
@@ -107,57 +128,51 @@ jobs:
               body: body
             });
 
-      # 步骤 2: 处理图片 (Process Figures)
-      - name: Update Figures and Templates
+      # --- 步骤 4: 提交 (精准控制) ---
+      - name: Commit and Push
         if: success()
         env:
           PYTHONPATH: .
-        run: uv run python scripts/update_submission_figures.py
-
-      # 步骤 3: 更新数据库和 README (Core Update)
-      - name: Run Core Update
-        if: success()
-        env:
-          PYTHONPATH: .
-          # 传入必要的 Secrets (配置中涉及 Excel 密码或 API Key)
-          DEEPSEEK_API: ${{ secrets.DEEPSEEK_API }}
-          EXCEL_KEY: ${{ secrets.EXCEL_KEY }}
-        run: |
-          # 捕获输出用于邮件通知
-          uv run python src/update.py > update_log.txt 2>&1
-          cat update_log.txt
-
-      # 步骤 4: 提交更改并清理 (Commit & Clean)
-      - name: Commit and Push Changes
-        if: success()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 1. 添加生成的文件和图片
-          git add paper_database.xlsx README.md figures/
+          # 1. 动态获取 Core Excel 的路径 (需求 3)
+          # 使用 python 从 config 中读取路径
+          CORE_EXCEL_PATH=$(uv run python -c "from src.core.config_loader import get_config_instance; print(get_config_instance().settings['paths']['core_excel'])")
+          echo "Core Excel Path detected: $CORE_EXCEL_PATH"
           
-          # 2. 强制还原模板文件 (丢弃 PR 中对模板的修改)
+          # 2. 添加核心文件
+          # paper_database.xlsx (动态路径)
+          git add "$CORE_EXCEL_PATH"
+          # README
+          git add README.md
+          # Figures 文件夹 (包含新增图片)
+          git add figures/
+          
+          # 3. 强制还原模板文件 (需求 3: 拒绝更新文件变更)
+          # 这会将 submit_template.xlsx/json 恢复到 origin/main 的状态
           git checkout origin/main -- submit_template.xlsx submit_template.json || true
           
-          # 3. 提交
+          # 4. 提交
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "Auto-process: Update database, readme and figures [skip ci]"
+            git commit -m "Auto-process: Update database ($CORE_EXCEL_PATH), readme and figures [skip ci]"
             git push
           fi
 
-      # 步骤 5: 发送通知 (Notify)
+      # --- 步骤 5: 邮件通知 ---
       - name: Send Notification
-        if: always() # 无论成功失败都发送
+        if: always()
         env:
           PYTHONPATH: .
           NOTIFICATION_EMAIL: ${{ vars.NOTIFICATION_EMAIL }}
-          # 需要在仓库 Secrets 中配置发送邮件的 SMTP 信息
           SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           workflow_status: ${{ job.status }}
+          # 传入 PR 分支名 (需求 0)
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: uv run python scripts/send_notification.py

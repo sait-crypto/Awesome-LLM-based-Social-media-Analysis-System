@@ -1126,7 +1126,8 @@ class PaperSubmissionGUI:
         return True
     
     def submit_pr(self):
-        messagebox.showinfo("须知", f"将自动通过pull request提交论文...")
+        if not messagebox.askyesno("须知", f"将自动通过pull request提交论文...\n\n1.若当前在main分支，将创建新分支提交PR；\n2.提交PR后将切回原分支；\n3.收到PR后github action将自动读取submit_template.xlsx和submit_template.json中的论文进行更新\n"):
+            return
         
         if not os.path.exists(self.update_json_path):
              if messagebox.askyesno("确认", "注意！是否保存当前所有论文？如果否，当前工作区内容将不会提交PR"):
@@ -1223,7 +1224,7 @@ class PaperSubmissionGUI:
         threading.Thread(target=submit_thread, daemon=True).start()
     
     def show_github_cli_guide(self, branch_name):
-        guide = f"请打开项目的github页面，手动创建PR。分支: {branch_name}"
+        guide = f"请打开项目的github页面，按照引导手动创建PR。分支: {branch_name}"
         messagebox.showinfo("手动创建PR指引", guide)
 
     def show_pr_result(self, pr_url=None):

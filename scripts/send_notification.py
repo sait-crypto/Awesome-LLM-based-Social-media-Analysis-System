@@ -11,6 +11,7 @@ def send_email():
     smtp_port = os.environ.get('SMTP_PORT')
     
     status = os.environ.get('workflow_status', 'Unknown')
+    pr_branch = os.environ.get('PR_BRANCH', 'Unknown Branch') # 获取分支名
     
     if not all([sender, password, receiver, smtp_server]):
         print("Skipping email: Missing SMTP configuration.")
@@ -25,13 +26,14 @@ def send_email():
     subject = f"Paper Submission Process Result: {status}"
     
     body = f"""
-    GitHub Action Workflow Status: {status}
+GitHub Action Workflow Status: {status}
+PR Source Branch: {pr_branch}
     
-    === Update Script Logs ===
+======== Update Script Logs ========
     {log_content}
     
-    ==========================
-    Please check the repository for details.
+====================================
+Please check the repository for details.
     """
 
     message = MIMEText(body, 'plain', 'utf-8')

@@ -1,5 +1,6 @@
 import os
 import sys
+import hashlib
 import configparser
 import pandas as pd
 import json
@@ -7,66 +8,82 @@ import shutil
 import re
 from pathlib import Path
 
-# 添加 src 到路径以便复用逻辑
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 from src.core.config_loader import get_config_instance
 
-# 使用统一的配置加载器
+# 加载配置
 config_instance = get_config_instance()
 settings = config_instance.settings
-
-# 获取配置路径 (ConfigLoader 已经将它们处理为绝对路径)
 UPDATE_EXCEL = settings['paths']['update_excel']
 UPDATE_JSON = settings['paths']['update_json']
 FIGURE_DIR = settings['paths']['figure_dir']
 PROJECT_ROOT = config_instance.project_root
 
+def calculate_file_hash(filepath):
+    """计算文件的 MD5 哈希值"""
+    hasher = hashlib.md5()
+    try:
+        with open(filepath, 'rb') as f:
+            buf = f.read(65536)
+            while len(buf) > 0:
+                hasher.update(buf)
+                buf = f.read(65536)
+        return hasher.hexdigest()
+    except Exception:
+        return None
+
 def get_clean_title_hash(title):
     if not title or pd.isna(title):
         return "untitled"
-    # 取前8个字符，去除非法文件名字符
     clean_prefix = re.sub(r'[^a-zA-Z0-9]', '', str(title)[:8])
     return clean_prefix
 
-def get_unique_filename(original_path, title):
+def get_smart_unique_filename(original_path, title):
     """
-    生成规则: 原名-{题目前8字符}-{不冲突最小正整数}
+    智能获取文件名：
+    1. 如果目标文件名已存在且哈希相同 -> 直接复用 (不重命名)
+    2. 如果目标文件名已存在且哈希不同 -> 增加计数器重命名
     """
     dirname, basename = os.path.split(original_path)
     filename, ext = os.path.splitext(basename)
-    
     title_part = get_clean_title_hash(title)
+    
+    # 计算原始文件的哈希（用于对比）
+    source_hash = calculate_file_hash(original_path)
     
     counter = 1
     while True:
+        # 构建目标文件名
         new_basename = f"{filename}-{title_part}-{counter}{ext}"
         new_full_path = os.path.join(FIGURE_DIR, new_basename)
-        if not os.path.exists(new_full_path):
+        
+        if os.path.exists(new_full_path):
+            # 如果文件存在，对比内容
+            target_hash = calculate_file_hash(new_full_path)
+            if source_hash and target_hash and source_hash == target_hash:
+                print(f"  [Info] Duplicate image detected (Hash match). Reuse: {new_basename}")
+                return new_full_path
+            
+            # 哈希不同，说明是冲突，继续增加计数器
+            counter += 1
+        else:
+            # 文件不存在，可以使用该名字
             return new_full_path
-        counter += 1
 
 def process_figures():
     print(f"Processing figures in: {FIGURE_DIR}")
-    
-    # 确保 figures 目录存在
     if not os.path.exists(FIGURE_DIR):
         os.makedirs(FIGURE_DIR)
 
-    # 1. 处理 Excel
+    # --- 处理 Excel ---
     if os.path.exists(UPDATE_EXCEL):
         try:
             print(f"Checking Excel template: {UPDATE_EXCEL}")
             df = pd.read_excel(UPDATE_EXCEL, engine='openpyxl')
             updated = False
             
-            # 获取配置中的列名
-            # 在 tag_config.py 中 table_name 是 "pipeline figure"
-            # variable 是 "pipeline_image"
             target_col = "pipeline figure" 
             title_col = "title"
-
-            # 兼容性检查：如果找不到 pipeline figure，尝试找 pipeline_image
             if target_col not in df.columns and "pipeline_image" in df.columns:
                 target_col = "pipeline_image"
 
@@ -78,66 +95,51 @@ def process_figures():
                     if pd.isna(img_path_raw) or str(img_path_raw).strip() == "":
                         continue
 
-                    img_path_str = str(img_path_raw).strip()
-                    
-                    # 支持多图 ; 分隔
-                    paths = [p.strip() for p in re.split(r'[;；]', img_path_str) if p.strip()]
+                    paths = [p.strip() for p in re.split(r'[;；]', str(img_path_raw).strip()) if p.strip()]
                     new_paths = []
                     row_updated = False
                         
                     for p in paths:
-                        # 构造可能的绝对路径
-                        # 1. 如果 p 已经是绝对路径（不太可能，但防御性编程）
+                        # 解析路径
                         if os.path.isabs(p):
                             full_current_path = p
                         else:
-                            # 2. 尝试相对于项目根目录
                             full_current_path = os.path.join(PROJECT_ROOT, p)
-                            # 3. 如果找不到，尝试相对于 figures 目录 (用户可能只写了文件名)
                             if not os.path.exists(full_current_path):
                                 full_current_path = os.path.join(FIGURE_DIR, os.path.basename(p))
                         
-                        # 检查文件是否存在
                         if os.path.exists(full_current_path):
-                            # 生成新名字 (绝对路径)
-                            new_full_path = get_unique_filename(full_current_path, title)
+                            # 获取智能目标路径
+                            new_full_path = get_smart_unique_filename(full_current_path, title)
                             
-                            # 重命名文件
-                            os.rename(full_current_path, new_full_path)
-                            print(f"Renamed: {os.path.basename(full_current_path)} -> {os.path.basename(new_full_path)}")
+                            # 如果源路径和目标路径不一样，则重命名(移动)
+                            if os.path.abspath(full_current_path) != os.path.abspath(new_full_path):
+                                os.rename(full_current_path, new_full_path)
+                                print(f"Renamed: {os.path.basename(full_current_path)} -> {os.path.basename(new_full_path)}")
                             
-                            # 计算相对路径写入 Excel (相对于项目根目录，例如 figures/new_name.png)
-                            rel_path = os.path.relpath(new_full_path, PROJECT_ROOT)
-                            new_paths.append(rel_path.replace('\\', '/'))
+                            # 关键：生成相对于 Project Root 的路径，并强制使用正斜杠
+                            rel_path = os.path.relpath(new_full_path, PROJECT_ROOT).replace('\\', '/')
+                            new_paths.append(rel_path)
                             row_updated = True
                             updated = True
                         else:
-                            print(f"Warning: Image not found: {p} (looked at {full_current_path})")
-                            new_paths.append(p) # 保持原样
+                            print(f"Warning: Image not found: {p}")
+                            new_paths.append(p)
                     
-                    # 如果有更新，写回该行
                     if row_updated:
-                        df.at[loc, target_col] = ";".join(new_paths)
+                        df.at[idx, target_col] = ";".join(new_paths)
             
             if updated:
-                # 保持表头样式（尝试保留）
-                try:
-                    from src.core.update_file_utils import get_update_file_utils
-                    ufu = get_update_file_utils()
-                    ufu.write_excel_file(UPDATE_EXCEL, df)
-                    print("Excel template updated with new image paths.")
-                except Exception:
-                    # 回退到普通保存
-                    df.to_excel(UPDATE_EXCEL, index=False, engine='openpyxl')
-                    print("Excel template updated (simple save).")
+                from src.core.update_file_utils import get_update_file_utils
+                get_update_file_utils().write_excel_file(UPDATE_EXCEL, df)
+                print("Excel template updated with new image paths.")
 
         except Exception as e:
             print(f"Error processing Excel figures: {e}")
-            # 不阻断流程，可能只是没图
             import traceback
             traceback.print_exc()
 
-    # 2. 处理 JSON
+    # --- 处理 JSON ---
     if os.path.exists(UPDATE_JSON):
         try:
             print(f"Checking JSON template: {UPDATE_JSON}")
@@ -145,16 +147,9 @@ def process_figures():
                 data = json.load(f)
             
             json_updated = False
-            
-            # 标准化 papers 列表
-            papers = []
-            if isinstance(data, list):
-                papers = data
-            elif isinstance(data, dict) and 'papers' in data:
-                papers = data['papers']
+            papers = data if isinstance(data, list) else data.get('papers', [])
             
             for paper in papers:
-                # JSON 中的键通常是 variable 名: pipeline_image
                 if 'pipeline_image' in paper and paper['pipeline_image']:
                     img_path_str = str(paper['pipeline_image']).strip()
                     if not img_path_str: continue
@@ -165,7 +160,6 @@ def process_figures():
                     row_updated = False
 
                     for p in paths:
-                        # 路径逻辑同上
                         if os.path.isabs(p):
                             full_current_path = p
                         else:
@@ -174,12 +168,13 @@ def process_figures():
                                 full_current_path = os.path.join(FIGURE_DIR, os.path.basename(p))
                         
                         if os.path.exists(full_current_path):
-                            new_full_path = get_unique_filename(full_current_path, title)
-                            os.rename(full_current_path, new_full_path)
-                            print(f"Renamed (JSON): {os.path.basename(full_current_path)} -> {os.path.basename(new_full_path)}")
+                            new_full_path = get_smart_unique_filename(full_current_path, title)
                             
-                            rel_path = os.path.relpath(new_full_path, PROJECT_ROOT)
-                            new_paths.append(rel_path.replace('\\', '/'))
+                            if os.path.abspath(full_current_path) != os.path.abspath(new_full_path):
+                                os.rename(full_current_path, new_full_path)
+                            
+                            rel_path = os.path.relpath(new_full_path, PROJECT_ROOT).replace('\\', '/')
+                            new_paths.append(rel_path)
                             row_updated = True
                             json_updated = True
                         else:
