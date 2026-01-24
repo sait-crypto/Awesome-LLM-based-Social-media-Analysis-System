@@ -1164,14 +1164,18 @@ class PaperSubmissionGUI:
                         raise Exception(f"创建分支失败: {e.stderr}")
                 else:
                     branch_name = current_branch
-                
+                have_update_files = False
                 try:
-                    subprocess.run(["git", "add", self.update_json_path], 
-                                 check=True, capture_output=True, cwd=os.getcwd())
+                    if os.path.exists(self.update_json_path):
+                        have_update_files = True
+                        subprocess.run(["git", "add", self.update_json_path], 
+                                     check=True, capture_output=True, cwd=os.getcwd())
                     if os.path.exists(self.update_excel_path):
+                        have_update_files = True
                         subprocess.run(["git", "add", self.update_excel_path], 
                                      check=True, capture_output=True, cwd=os.getcwd())
-                    
+                    if not have_update_files:
+                        raise Exception("没有找到可提交的更新文件！本次PR不会有任何论文更新") 
                     subprocess.run(["git", "commit", "-m", f"Add {len(self.papers)} papers via GUI"], 
                                    check=True, capture_output=True, cwd=os.getcwd())
                     self.root.after(0, lambda: self.update_status("已提交更改到本地仓库"))

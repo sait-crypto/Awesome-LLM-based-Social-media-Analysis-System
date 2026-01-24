@@ -116,6 +116,14 @@ def main():
 
     total_valid_submissions = 0
 
+    # 如果 update_excel_path 不存在，创建空文件
+    if not os.path.exists(update_excel_path):
+        open(update_excel_path, 'w').close()
+
+    # 如果 update_json_path 不存在，创建空文件
+    if not os.path.exists(update_json_path):
+        open(update_json_path, 'w').close()
+
     # 创建临时目录用于存放原始模版
     with tempfile.TemporaryDirectory() as temp_dir:
         # ==================== 1. 验证 Excel ====================
@@ -142,6 +150,8 @@ def main():
                 original_excel_papers, 
                 "Excel Template"
             )
+        else:
+            
 
         # ==================== 2. 验证 JSON ====================
         if os.path.exists(update_json_path):
