@@ -3,8 +3,8 @@ name: Process Paper Submission
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
-    branches-ignore:
-      - main  # 忽略维护者直接推送到 main 的情况（通常 PR 目标是 main，源是其他）
+    branches:    
+      - main     # 表示只有目标是 main 分支的 PR 才触发
 
 jobs:
   process-submission:

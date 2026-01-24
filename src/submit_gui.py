@@ -1222,7 +1222,7 @@ class PaperSubmissionGUI:
         threading.Thread(target=submit_thread, daemon=True).start()
     
     def show_github_cli_guide(self, branch_name):
-        guide = f"请手动创建PR。分支: {branch_name}"
+        guide = f"请打开项目的github页面，手动创建PR。分支: {branch_name}"
         messagebox.showinfo("手动创建PR指引", guide)
 
     def show_pr_result(self, pr_url=None):
