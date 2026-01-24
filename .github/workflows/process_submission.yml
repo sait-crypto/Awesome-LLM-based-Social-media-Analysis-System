@@ -19,10 +19,10 @@ jobs:
     # 2. 要么 AUTO_PROCESS_SUBMISSIONS 为 true
     # 3. 要么 Label 包含 'Action: Process'
     # 第4行防止维护者在主仓库分支操作时意外触发（可选，视你工作流而定）
+    # && github.event.pull_request.head.repo.full_name != github.repository 
     if: >
       (vars.AUTO_PROCESS_SUBMISSIONS == 'true' || 
-       contains(github.event.pull_request.labels.*.name, 'Action: Process')) &&
-      github.event.pull_request.head.repo.full_name != github.repository 
+       contains(github.event.pull_request.labels.*.name, 'Action: Process')) 
 
     steps:
       - name: Checkout Code
