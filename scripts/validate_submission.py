@@ -150,7 +150,6 @@ def main():
                 original_excel_papers, 
                 "Excel Template"
             )
-        else:
             
 
         # ==================== 2. 验证 JSON ====================
