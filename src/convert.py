@@ -453,67 +453,67 @@ class ReadmeGenerator:
         else:
             return notes_html
     
-def _generate_pipeline_cell(self, paper: Paper) -> str:
-        """生成Pipeline图单元格（支持最多3张图片，显示在同一格内）"""
-        if not paper.pipeline_image:
-            return ""
+    def _generate_pipeline_cell(self, paper: Paper) -> str:
+            """生成Pipeline图单元格（支持最多3张图片，显示在同一格内）"""
+            if not paper.pipeline_image:
+                return ""
 
-        # 可能为多图（以分号分隔）
-        parts = [p.strip() for p in str(paper.pipeline_image).split(';') if p.strip()]
-        if not parts:
-            return ""
+            # 可能为多图（以分号分隔）
+            parts = [p.strip() for p in str(paper.pipeline_image).split(';') if p.strip()]
+            if not parts:
+                return ""
 
-        # 修改点：使用 ConfigLoader 获取准确的 Project Root
-        # 即使 sys.path 没有设置好，ConfigLoader 也会基于文件定位
-        from src.core.config_loader import get_config_instance
-        project_root = str(get_config_instance().project_root)
+            # 修改点：使用 ConfigLoader 获取准确的 Project Root
+            # 即使 sys.path 没有设置好，ConfigLoader 也会基于文件定位
+            from src.core.config_loader import get_config_instance
+            project_root = str(get_config_instance().project_root)
 
-        existing_imgs = []
-        for p in parts[:3]:
-            # 这里的 p 已经是 scripts/update_submission_figures.py 生成的相对路径 (e.g. "figures/abc.png")
-            # 组合成绝对路径进行检查
-            full_image_path = os.path.join(project_root, p)
-            
-            if os.path.exists(full_image_path):
-                # 只有文件存在时才放入链接
-                # 在 Markdown 中我们直接使用相对路径 p 即可，因为 README 就在根目录
-                existing_imgs.append(p)
-            else:
-                # 尝试修复路径：有时候 p 可能还是文件名
-                # 如果 p 不包含 figures/ 前缀，尝试加上
-                possible_path = os.path.join("figures", os.path.basename(p))
-                full_possible_path = os.path.join(project_root, possible_path)
+            existing_imgs = []
+            for p in parts[:3]:
+                # 这里的 p 已经是 scripts/update_submission_figures.py 生成的相对路径 (e.g. "figures/abc.png")
+                # 组合成绝对路径进行检查
+                full_image_path = os.path.join(project_root, p)
                 
-                if os.path.exists(full_possible_path):
-                     existing_imgs.append(possible_path)
+                if os.path.exists(full_image_path):
+                    # 只有文件存在时才放入链接
+                    # 在 Markdown 中我们直接使用相对路径 p 即可，因为 README 就在根目录
+                    existing_imgs.append(p)
                 else:
-                    print(f"警告: pipeline图片不存在: {full_image_path}")
+                    # 尝试修复路径：有时候 p 可能还是文件名
+                    # 如果 p 不包含 figures/ 前缀，尝试加上
+                    possible_path = os.path.join("figures", os.path.basename(p))
+                    full_possible_path = os.path.join(project_root, possible_path)
+                    
+                    if os.path.exists(full_possible_path):
+                        existing_imgs.append(possible_path)
+                    else:
+                        print(f"警告: pipeline图片不存在: {full_image_path}")
 
-        if not existing_imgs:
-            return ""
+            if not existing_imgs:
+                return ""
 
-        # 生成图片标签：如果只有一张，保留原来的大图；多张则并列显示并缩小宽度
-        n = len(existing_imgs)
-        if n == 1:
-            return f'<img width="1200" alt="pipeline" src="{existing_imgs[0]}">' 
-        else:
-            # 多张图片垂直堆叠，适当缩小，保持长宽比
-            imgs_html = ''.join([f'<img width="1000" style="display:block;margin:6px auto" alt="pipeline" src="{p}">' for p in existing_imgs])
-            return f'<div style="display:flex;flex-direction:column;gap:6px;align-items:center">{imgs_html}</div>'
-    
+            # 生成图片标签：如果只有一张，保留原来的大图；多张则并列显示并缩小宽度
+            n = len(existing_imgs)
+            if n == 1:
+                return f'<img width="1200" alt="pipeline" src="{existing_imgs[0]}">' 
+            else:
+                # 多张图片垂直堆叠，适当缩小，保持长宽比
+                imgs_html = ''.join([f'<img width="1000" style="display:block;margin:6px auto" alt="pipeline" src="{p}">' for p in existing_imgs])
+                return f'<div style="display:flex;flex-direction:column;gap:6px;align-items:center">{imgs_html}</div>'
+        
     def _generate_links_cell(self, paper: Paper) -> str:
-        """生成链接单元格"""
-        links = []
-        
-        if paper.paper_url:
-            paper_link = create_hyperlink("Paper", paper.paper_url)
-            links.append(paper_link)
-        
-        if paper.project_url:
-            project_link = create_hyperlink("Github", paper.project_url)
-            links.append(project_link)
-        
-        return "<br>".join(links)
+            """生成链接单元格"""
+            links = []
+            
+            if paper.paper_url:
+                paper_link = create_hyperlink("Paper", paper.paper_url)
+                links.append(paper_link)
+            
+            if paper.project_url:
+                project_link = create_hyperlink("Github", paper.project_url)
+                links.append(project_link)
+            
+            return "<br>".join(links)
     
     def update_readme_file(self, readme_path: str = None) -> bool:
         """更新README文件"""
