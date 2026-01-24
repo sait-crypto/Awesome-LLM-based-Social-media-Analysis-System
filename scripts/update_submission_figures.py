@@ -41,34 +41,41 @@ def get_clean_title_hash(title):
 def get_smart_unique_filename(original_path, title):
     """
     智能获取文件名：
-    1. 如果目标文件名已存在且哈希相同 -> 直接复用 (不重命名)
-    2. 如果目标文件名已存在且哈希不同 -> 增加计数器重命名
+    1. 如果目标文件名不存在 -> 直接用原文件名
+    2. 如果目标文件名已存在且哈希相同 -> 直接复用 (不重命名)
+    3. 如果目标文件名已存在且哈希不同 -> 增加 title_part 后缀
+    4. 如果还冲突 -> 增加计数器
     """
     dirname, basename = os.path.split(original_path)
     filename, ext = os.path.splitext(basename)
     title_part = get_clean_title_hash(title)
-    
     # 计算原始文件的哈希（用于对比）
     source_hash = calculate_file_hash(original_path)
-    
-    counter = 1
-    while True:
-        # 构建目标文件名
-        new_basename = f"{filename}-{title_part}-{counter}{ext}"
-        new_full_path = os.path.join(FIGURE_DIR, new_basename)
-        
-        if os.path.exists(new_full_path):
-            # 如果文件存在，对比内容
-            target_hash = calculate_file_hash(new_full_path)
-            if source_hash and target_hash and source_hash == target_hash:
-                print(f"  [Info] Duplicate image detected (Hash match). Reuse: {new_basename}")
-                return new_full_path
-            
-            # 哈希不同，说明是冲突，继续增加计数器
-            counter += 1
-        else:
-            # 文件不存在，可以使用该名字
+
+    # 1. 目标文件名（无后缀）不存在，直接用
+    target_path = os.path.join(FIGURE_DIR, f"{filename}{ext}")
+    if not os.path.exists(target_path):
+        return target_path
+    # 2. 存在且内容相同，直接复用
+    target_hash = calculate_file_hash(target_path)
+    if source_hash and target_hash and source_hash == target_hash:
+        print(f"  [Info] Duplicate image detected (Hash match). Reuse: {os.path.basename(target_path)}")
+        return target_path
+    # 3. 存在但内容不同，加 title_part
+    counter = 2
+    new_basename = f"{filename}_{title_part}{ext}"
+    new_full_path = os.path.join(FIGURE_DIR, new_basename)
+    while os.path.exists(new_full_path):
+        # 再判断内容是否相同
+        target_hash = calculate_file_hash(new_full_path)
+        if source_hash and target_hash and source_hash == target_hash:
+            print(f"  [Info] Duplicate image detected (Hash match). Reuse: {os.path.basename(new_full_path)}")
             return new_full_path
+        # 还冲突，加数字
+        new_basename = f"{filename}_{title_part}_{counter}{ext}"
+        new_full_path = os.path.join(FIGURE_DIR, new_basename)
+        counter += 1
+    return new_full_path
 
 def process_figures():
     print(f"Processing figures in: {FIGURE_DIR}")

@@ -153,6 +153,7 @@ jobs:
           # 先添加所有 figures 变动
           git add figures/
           
+          
           # 5. 处理模板文件：
           # 我们不希望提交模板的变动（因为 update.py 会清空或修改它们）
           # 使用 git restore --staged 将它们移出暂存区，并还原到 main 状态
@@ -171,6 +172,25 @@ jobs:
             git push
           fi
 
+      # --- 步骤 4.5: 覆盖 main 分支指定文件 ---
+      - name: Overwrite main branch with selected files
+        if: success()
+        env:
+          CORE_EXCEL_PATH: ${{ env.CORE_EXCEL_PATH }}
+        run: |
+          # 拉取 main 分支到本地
+          git fetch origin main
+          git checkout main
+
+          # 用 PR 分支的最新文件覆盖 main
+          git checkout ${{ github.event.pull_request.head.ref }} -- "$CORE_EXCEL_PATH" README.md figures/
+
+          # 添加并提交
+          git add "$CORE_EXCEL_PATH" README.md figures/
+          git commit -m "Auto-overwrite: Sync selected files from PR branch to main [skip ci]" || echo "Nothing to commit"
+
+          # 推送到 main 分支
+          git push origin main
       # --- 步骤 5: 邮件通知 (修正发件人显示) ---
       - name: Send Notification
         if: always()
