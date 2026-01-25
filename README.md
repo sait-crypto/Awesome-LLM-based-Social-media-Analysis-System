@@ -4,7 +4,8 @@
 >
 > If you want to add your paper or update details like conference info or code URLs, please submit a pull request. You can generate the necessary markdown for each paper by filling out `generate_item.py` and running `python generate_item.py`. We greatly appreciate your contributions. Alternatively, you can email me ([Gmail](fscnkucs@gmail.com)) the links to your paper and code, and I will add your paper to the list as soon as possible.
 
-https://zotero-chinese.com/plugins/#search=Zutilo%20Utility%20for%20Zotero
+>[点击这里下载文件](https://github.com/用户名/仓库名/raw/main/文件夹/文件.zip)
+>https://zotero-chinese.com/plugins/#search=Zutilo%20Utility%20for%20Zotero
 ---
 <p align="center">
 <img src="assets/taxonomy.png" width = "95%" alt="" align=center />

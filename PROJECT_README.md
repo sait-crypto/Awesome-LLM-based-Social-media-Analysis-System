@@ -1,3 +1,4 @@
+```
 project/
 ├── .github/
 │   └── workflows/
@@ -33,3 +34,4 @@ project/
 ├── submit_template.json
 ├── submit.py
 └── SurveyPaperSubmitGUI.exe
+```
