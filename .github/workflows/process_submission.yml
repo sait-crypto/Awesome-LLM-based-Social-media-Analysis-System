@@ -143,7 +143,7 @@ jobs:
             try { logContent = fs.readFileSync('update_log.txt', 'utf8'); } catch(e) { logContent = 'Log missing.'; }
             const author = context.payload.pull_request.user.login;
             const statusIcon = '${{ steps.core_update.outcome }}' === 'success' ? '✅' : '⚠️';
-            const body = `### ${statusIcon} Core Update Log\nHi @${author}, update executed.\n<details><summary>Full Log</summary>\n\n\`\`\`text\n${logContent}\n\`\`\`\n</details>`;
+            const body = `### ${statusIcon} Core Update Log\nHi! @${author}, update executed.\n<details><summary>Full Log</summary>\n\n\`\`\`text\n${logContent}\n\`\`\`\n</details>`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -175,7 +175,7 @@ jobs:
           
           # 提交到本地 (HEAD 目前指向 main 的某个 commit)
           PR_USER="${{ github.event.pull_request.user.login }}"
-          git commit -m "Auto-process: Update database & figures by @$PR_USER [skip ci]" || echo "No changes to commit"
+          git commit -m "@$PR_USER,Thank for Contribution--Auto-process papers submission [skip ci]" || echo "No changes to commit"
           
           # --- 动作 A: 推送到 Main 分支 ---
           # 还原 template 到 main 原始状态 (保持 main 的模板干净)
