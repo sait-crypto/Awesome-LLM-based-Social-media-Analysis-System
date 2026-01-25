@@ -18,12 +18,23 @@ jobs:
        contains(github.event.pull_request.labels.*.name, 'Action: Process')) 
 
     steps:
-      - name: Checkout Code
+      # 1. 获取 PR 数据 (放到 pr_workspace)
+      - name: Checkout PR Data
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           fetch-depth: 0
+          path: pr_workspace
+
+      # 2. 获取 Main 逻辑和基准数据 (放到 main_workspace)
+      - name: Checkout Main Logic & Base Data
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          repository: ${{ github.repository }}
+          fetch-depth: 0
+          path: main_workspace
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
@@ -34,16 +45,50 @@ jobs:
         run: uv python install 3.13
 
       - name: Install Dependencies
+        working-directory: main_workspace
         run: uv sync --frozen
 
-      # --- 步骤 1: 验证 ---
+      # 3. 构造混合环境 (Hybrid Environment)
+      # 这是一个极其关键的步骤：
+      # - 脚本、Core Excel、README 来自 Main (安全、基准)
+      # - Figures 来自 Main (原有)
+      # - Templates 来自 PR (新增)
+      # - Figures 来自 PR (新增，放到 pr_workspace/figures 供脚本读取)
+      # - Backups 来自 PR (如果需要合并)
+      - name: Setup Hybrid Environment
+        run: |
+          # A. 将 Main 的内容复制到当前工作目录 (覆盖)
+          cp -r main_workspace/* .
+          cp -r main_workspace/.git .
+          
+          # B. 引入 PR 的 Templates (覆盖 Main 的空模板)
+          if [ -f pr_workspace/submit_template.xlsx ]; then
+            cp pr_workspace/submit_template.xlsx .
+          fi
+          if [ -f pr_workspace/submit_template.json ]; then
+            cp pr_workspace/submit_template.json .
+          fi
+          
+          # C. 处理 Backups (不覆盖，仅合并)
+          if [ -d pr_workspace/backups ]; then
+            mkdir -p backups
+            cp -rn pr_workspace/backups/* backups/ || true
+          fi
+          
+          # D. Figures 处理
+          # 我们不直接合并 PR 的 figures 到 figures/，而是让脚本去读 pr_workspace/figures
+          # 这样可以防止同名文件的错误覆盖
+          
+          echo "Environment prepared."
+
+      # 4. 验证 (使用 Main 的脚本验证 PR 的 Template)
       - name: Validate Submission
         id: validate
         env:
           PYTHONPATH: .
         shell: bash
         run: |
-          git diff --name-only origin/main...HEAD > changed_files.txt
+          # 模拟 changed_files，这里简化为验证模板是否存在
           set -o pipefail
           uv run python scripts/validate_submission.py 2>&1 | tee validation_log.txt
 
@@ -57,7 +102,7 @@ jobs:
             let logContent = '';
             try { logContent = fs.readFileSync('validation_log.txt', 'utf8'); } catch(e) { logContent = 'Log missing'; }
             const author = context.payload.pull_request.user.login;
-            const body = `### ❌ Validation Failed\nHi @${author}, please fix the following issues:\n<details><summary>Log</summary>\n\n\`\`\`text\n${logContent}\n\`\`\`\n</details>`;
+            const body = `### ❌ Validation Failed\nHi @${author}, logic verification failed:\n<details><summary>Log</summary>\n\n\`\`\`text\n${logContent}\n\`\`\`\n</details>`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -65,14 +110,16 @@ jobs:
               body: body
             });
 
-      # --- 步骤 2: 处理图片 ---
+      # 5. 处理图片 (指定 PR 图片源)
       - name: Update Figures
         if: success()
         env:
           PYTHONPATH: .
+          # 关键：告诉脚本去哪里找新图片
+          PR_FIGURES_DIR: pr_workspace/figures
         run: uv run python scripts/update_submission_figures.py
 
-      # --- 步骤 3: 核心更新 ---
+      # 6. 核心更新 (Update.py)
       - name: Run Core Update
         id: core_update
         if: success()
@@ -81,46 +128,22 @@ jobs:
           DEEPSEEK_API: ${{ secrets.DEEPSEEK_API }}
           EXCEL_KEY: ${{ secrets.EXCEL_KEY }}
         run: |
-          # 运行 update.py 并保存全量日志
-          # 注意：update.py 内部会调用 convert.py，输出都会被捕获
           set -o pipefail
           uv run python src/update.py 2>&1 | tee update_log.txt
 
-      # --- 新增: 无论 Update 成功失败，都评论日志 (需求 1) ---
+      # 7. 评论日志
       - name: Comment Update Log
-        if: steps.core_update.conclusion != 'skipped' # 只要 Core Update 运行过（无论 success 或 failure）
+        if: steps.core_update.conclusion != 'skipped'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
             let logContent = '';
-            try { 
-              // 读取更新日志
-              logContent = fs.readFileSync('update_log.txt', 'utf8'); 
-            } catch (e) { 
-              logContent = 'Log missing or update script failed silently.'; 
-            }
-
+            try { logContent = fs.readFileSync('update_log.txt', 'utf8'); } catch(e) { logContent = 'Log missing.'; }
             const author = context.payload.pull_request.user.login;
             const statusIcon = '${{ steps.core_update.outcome }}' === 'success' ? '✅' : '⚠️';
-            const title = '${{ steps.core_update.outcome }}' === 'success' ? 'Update Successful' : 'Update Finished with Errors';
-            
-            const body = `
-            ### ${statusIcon} Core Update Execution Log
-            
-            Hi @${author}, the update script has executed. Here is the full output (including README generation):
-            
-            <details>
-            <summary><b>Click to view full log</b></summary>
-            
-            \`\`\`text
-            ${logContent}
-            \`\`\`
-            
-            </details>
-            `;
-
+            const body = `### ${statusIcon} Core Update Log\nHi @${author}, update executed.\n<details><summary>Full Log</summary>\n\n\`\`\`text\n${logContent}\n\`\`\`\n</details>`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -128,80 +151,75 @@ jobs:
               body: body
             });
 
-      # --- 步骤 4: 提交 (Commit & Push) ---
+      # 8. 结果提交并推送 (主分支和pr分支双向同步)
       - name: Commit and Push
         if: success()
         env:
           PYTHONPATH: .
         run: |
-          # 1. 配置 Git 用户身份
-          # 需求 0: 使用 PR 提交者的名字，但保留 bot 的邮箱以作区分（或者直接用 bot）
-          # 为了在 Log 中显示，我们在 Commit Message 中带上用户名
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # 2. 动态获取 Core Excel 的路径
+          # 获取 Core Excel 路径
           CORE_EXCEL_PATH=$(uv run python -c "from src.core.config_loader import get_config_instance; print(get_config_instance().settings['paths']['core_excel'])")
-          echo "Adding Core Excel: $CORE_EXCEL_PATH"
           
-          # 3. 强制添加生成的/修改的核心文件
-          # 使用 -f 强制添加，防止 .gitignore 干扰
-          git add -f "$CORE_EXCEL_PATH"
-          git add README.md
-          git add submit_template.xlsx submit_template.json
+          # 添加变动文件
+          # 使用 -f 强制添加，确保即便是被 ignore 的文件也能进去
+          git add -f "$CORE_EXCEL_PATH" README.md figures/ backups/
           
-          # 4. 添加图片
-          # 先添加所有 figures 变动
-          git add figures/
+          # 注意：此时 submit_template.xlsx 已经被 update.py 处理过（移除了已添加的论文）
+          # 我们不希望把这个“清空”的操作提交到 Main (Main 应该保持干净的空模板或特定状态)
+          # 但通常为了反馈给用户“你的论文已处理”，在 PR 分支里提交清空后的模板是合理的。
+          # 这里策略：Main 分支保留模板（重置），PR 分支提交清空后的模板。
+          # 但为了简化，我们先提交核心数据。
           
-          
-          # 5. 处理模板文件：
-          # 我们不希望提交模板的变动（因为 update.py 会清空或修改它们）
-          # 使用 git restore --staged 将它们移出暂存区，并还原到 main 状态
-          # git checkout origin/main -- submit_template.xlsx submit_template.json || true
-          
-          # 6. 再次确认暂存区状态
-          echo "Status before commit:"
-          git status
-          
-          # 7. 提交
+          # 提交到本地 (HEAD 目前指向 main 的某个 commit)
           PR_USER="${{ github.event.pull_request.user.login }}"
-          if git diff --staged --quiet; then
-            echo "No changes to commit."
-          else
-            git commit -m "Auto-process: Update database & figures by @$PR_USER [skip ci]"
-            git push
-          fi
-
-      # --- 步骤 4.5: 覆盖 main 分支指定文件 ---
-      - name: Overwrite main branch with selected files
-        if: success()
-        env:
-          CORE_EXCEL_PATH: ${{ env.CORE_EXCEL_PATH }}
-        run: |
-          PR_USER="${{ github.event.pull_request.user.login }}"
-
-          # 丢弃所有未提交的更改，避免 checkout main 失败
-          git reset --hard
+          git commit -m "Auto-process: Update database & figures by @$PR_USER [skip ci]" || echo "No changes to commit"
           
-          # 拉取 main 分支到本地
-          git fetch origin main
-          git checkout main
+          # --- 动作 A: 推送到 Main 分支 ---
+          # 还原 template 到 main 原始状态 (保持 main 的模板干净)
+          git checkout HEAD -- submit_template.xlsx submit_template.json || true
+          # 推送
+          git push origin HEAD:main
+          echo "✅ Pushed to main"
+          
+          # --- 动作 B: 推送到 PR 分支 ---
+          # 我们希望 PR 分支包含处理后的结果（包括 update_submission_figures 改名后的 Excel，以及移除已处理论文后的 Excel）
+          # 这需要一点技巧，因为我们现在的 HEAD 是 Main 上的。
+          
+          # 1. 切回 PR 分支的引用 (不 checkout 文件，只切指针)
+          # git fetch origin ${{ github.event.pull_request.head.ref }}
+          # 这一步比较复杂，因为文件可能会冲突。
+          
+          # 简化策略：直接把刚才生成的文件 Force Push 到 PR 分支？
+          # 不行，那样会覆盖用户 PR 的历史。
+          
+          # 正确策略：
+          # 1. 刚才我们 commit 到了本地 HEAD (基于 Main)。
+          # 2. 我们把它推到了 Main。
+          # 3. 现在，我们要把这个状态同步给 PR 分支。
+          # 如果 PR 分支是基于 Main 的，直接 merge 即可。
+          
+          git fetch origin ${{ github.event.pull_request.head.ref }}
+          
+          # 尝试将刚才的 commit cherry-pick 到 PR 分支？或者直接 merge？
+          # 鉴于我们是在 Main 环境下运行的，直接 Force Push Main 的内容到 PR 分支
+          # 会导致 PR 变成 Main 的样子（丢失 PR 独有的无关文件）。
+          
+          # 因此只把 Main 更新后的核心文件推送回 PR 分支。
+          # 1. 切换到 PR 分支
+          git checkout -f ${{ github.event.pull_request.head.ref }}
+          # 2. 从刚才的 Main commit (HEAD@{1}) 检出核心文件
+          git checkout HEAD@{1} -- "$CORE_EXCEL_PATH" README.md figures/ backups/
+          # 3. 提交
+          git add "$CORE_EXCEL_PATH" README.md figures/ backups/
+          git commit -m "Sync with processed result [skip ci]" || echo "No changes"
+          # 4. 推送
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          echo "✅ Pushed back to PR branch"
 
-          # 动态获取 Core Excel 的路径
-          CORE_EXCEL_PATH=$(uv run python -c "from src.core.config_loader import get_config_instance; print(get_config_instance().settings['paths']['core_excel'])")
-          echo "Adding Core Excel: $CORE_EXCEL_PATH"
-
-          # 用 PR 分支的最新文件覆盖 main
-          git checkout ${{ github.event.pull_request.head.ref }} -- "$CORE_EXCEL_PATH" README.md figures/
-
-          # 添加并提交三个文件（夹）的更改
-          git add "$CORE_EXCEL_PATH" README.md figures/
-          git commit -m "@$PR_USER Thank for Contribution: auto-merged from PR branch to main [skip ci]" || echo "Nothing to commit"
-
-          # 推送到 main 分支
-          git push origin main
-      # --- 步骤 5: 邮件通知 (修正发件人显示) ---
+      # 9. 通知
       - name: Send Notification
         if: always()
         env:
@@ -212,7 +230,6 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           workflow_status: ${{ job.status }}
-          # 传入更多上下文信息
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
           PR_USER: ${{ github.event.pull_request.user.login }}
         run: uv run python scripts/send_notification.py

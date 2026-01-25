@@ -1,0 +1,218 @@
+name: Process Paper Submission
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    branches:
+      - main
+
+jobs:
+  process-submission:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    
+    if: >
+      (vars.AUTO_PROCESS_SUBMISSIONS == 'true' || 
+       contains(github.event.pull_request.labels.*.name, 'Action: Process')) 
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install Dependencies
+        run: uv sync --frozen
+
+      # --- 步骤 1: 验证 ---
+      - name: Validate Submission
+        id: validate
+        env:
+          PYTHONPATH: .
+        shell: bash
+        run: |
+          git diff --name-only origin/main...HEAD > changed_files.txt
+          set -o pipefail
+          uv run python scripts/validate_submission.py 2>&1 | tee validation_log.txt
+
+      - name: Comment on Validation Failure
+        if: failure() && steps.validate.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            let logContent = '';
+            try { logContent = fs.readFileSync('validation_log.txt', 'utf8'); } catch(e) { logContent = 'Log missing'; }
+            const author = context.payload.pull_request.user.login;
+            const body = `### ❌ Validation Failed\nHi @${author}, please fix the following issues:\n<details><summary>Log</summary>\n\n\`\`\`text\n${logContent}\n\`\`\`\n</details>`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+      # --- 步骤 2: 处理图片 ---
+      - name: Update Figures
+        if: success()
+        env:
+          PYTHONPATH: .
+        run: uv run python scripts/update_submission_figures.py
+
+      # --- 步骤 3: 核心更新 ---
+      - name: Run Core Update
+        id: core_update
+        if: success()
+        env:
+          PYTHONPATH: .
+          DEEPSEEK_API: ${{ secrets.DEEPSEEK_API }}
+          EXCEL_KEY: ${{ secrets.EXCEL_KEY }}
+        run: |
+          # 运行 update.py 并保存全量日志
+          # 注意：update.py 内部会调用 convert.py，输出都会被捕获
+          set -o pipefail
+          uv run python src/update.py 2>&1 | tee update_log.txt
+
+      # --- 新增: 无论 Update 成功失败，都评论日志 (需求 1) ---
+      - name: Comment Update Log
+        if: steps.core_update.conclusion != 'skipped' # 只要 Core Update 运行过（无论 success 或 failure）
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            let logContent = '';
+            try { 
+              // 读取更新日志
+              logContent = fs.readFileSync('update_log.txt', 'utf8'); 
+            } catch (e) { 
+              logContent = 'Log missing or update script failed silently.'; 
+            }
+
+            const author = context.payload.pull_request.user.login;
+            const statusIcon = '${{ steps.core_update.outcome }}' === 'success' ? '✅' : '⚠️';
+            const title = '${{ steps.core_update.outcome }}' === 'success' ? 'Update Successful' : 'Update Finished with Errors';
+            
+            const body = `
+            ### ${statusIcon} Core Update Execution Log
+            
+            Hi @${author}, the update script has executed. Here is the full output (including README generation):
+            
+            <details>
+            <summary><b>Click to view full log</b></summary>
+            
+            \`\`\`text
+            ${logContent}
+            \`\`\`
+            
+            </details>
+            `;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+      # --- 步骤 4: 提交 (Commit & Push) ---
+      - name: Commit and Push
+        if: success()
+        env:
+          PYTHONPATH: .
+        run: |
+          # 1. 配置 Git 用户身份
+          # 需求 0: 使用 PR 提交者的名字，但保留 bot 的邮箱以作区分（或者直接用 bot）
+          # 为了在 Log 中显示，我们在 Commit Message 中带上用户名
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 2. 动态获取 Core Excel 的路径
+          CORE_EXCEL_PATH=$(uv run python -c "from src.core.config_loader import get_config_instance; print(get_config_instance().settings['paths']['core_excel'])")
+          echo "Adding Core Excel: $CORE_EXCEL_PATH"
+          
+          # 3. 强制添加生成的/修改的核心文件
+          # 使用 -f 强制添加，防止 .gitignore 干扰
+          git add -f "$CORE_EXCEL_PATH"
+          git add README.md
+          git add submit_template.xlsx submit_template.json
+          
+          # 4. 添加图片
+          # 先添加所有 figures 变动
+          git add figures/
+          
+          
+          # 5. 处理模板文件：
+          # 我们不希望提交模板的变动（因为 update.py 会清空或修改它们）
+          # 使用 git restore --staged 将它们移出暂存区，并还原到 main 状态
+          # git checkout origin/main -- submit_template.xlsx submit_template.json || true
+          
+          # 6. 再次确认暂存区状态
+          echo "Status before commit:"
+          git status
+          
+          # 7. 提交
+          PR_USER="${{ github.event.pull_request.user.login }}"
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Auto-process: Update database & figures by @$PR_USER [skip ci]"
+            git push
+          fi
+
+      # --- 步骤 4.5: 覆盖 main 分支指定文件 ---
+      - name: Overwrite main branch with selected files
+        if: success()
+        env:
+          CORE_EXCEL_PATH: ${{ env.CORE_EXCEL_PATH }}
+        run: |
+          PR_USER="${{ github.event.pull_request.user.login }}"
+
+          # 丢弃所有未提交的更改，避免 checkout main 失败
+          git reset --hard
+          
+          # 拉取 main 分支到本地
+          git fetch origin main
+          git checkout main
+
+          # 动态获取 Core Excel 的路径
+          CORE_EXCEL_PATH=$(uv run python -c "from src.core.config_loader import get_config_instance; print(get_config_instance().settings['paths']['core_excel'])")
+          echo "Adding Core Excel: $CORE_EXCEL_PATH"
+
+          # 用 PR 分支的最新文件覆盖 main
+          git checkout ${{ github.event.pull_request.head.ref }} -- "$CORE_EXCEL_PATH" README.md figures/
+
+          # 添加并提交三个文件（夹）的更改
+          git add "$CORE_EXCEL_PATH" README.md figures/
+          git commit -m "@$PR_USER Thank for Contribution: auto-merged from PR branch to main [skip ci]" || echo "Nothing to commit"
+
+          # 推送到 main 分支
+          git push origin main
+      # --- 步骤 5: 邮件通知 (修正发件人显示) ---
+      - name: Send Notification
+        if: always()
+        env:
+          PYTHONPATH: .
+          NOTIFICATION_EMAIL: ${{ vars.NOTIFICATION_EMAIL }}
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          workflow_status: ${{ job.status }}
+          # 传入更多上下文信息
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_USER: ${{ github.event.pull_request.user.login }}
+        run: uv run python scripts/send_notification.py
