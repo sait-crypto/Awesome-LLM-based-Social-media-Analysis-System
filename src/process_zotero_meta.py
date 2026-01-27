@@ -85,7 +85,7 @@ class ZoteroProcessor:
         # 3. Conference (按优先级)
         # series -> journalAbbreviation -> conferenceName (Zotero raw) -> proceedingsTitle -> publicationTitle
         conference = ""
-        priority_keys = ["series", "journalAbbreviation", "conferenceName", "proceedingsTitle", "publicationTitle"]
+        priority_keys = ["journalAbbreviation", "conferenceName", "proceedingsTitle", "publicationTitle","bookTitle","series"]
         for key in priority_keys:
             val = item.get(key)
             if val and str(val).strip():

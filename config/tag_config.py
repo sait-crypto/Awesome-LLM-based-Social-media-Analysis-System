@@ -36,7 +36,7 @@ TAGS_CONFIG = {
             "variable": "title",            # 不可更改
             "order": 1,                     # 不可更改，必须是1
             "table_name": "title",
-            "display_name": "标题",         #3个标签在readme列表中共用一列，使用[display_name]分割3个字段
+            "display_name": "title",         #3个标签在readme列表中共用一列，使用[display_name]分割3个字段
             "description": "论文的完整标题",
             "type": "string",
             "validation": None,             # 无特殊验证规则
