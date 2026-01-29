@@ -2,7 +2,7 @@
 
 > **Contributions**
 >
-> If you want to add your paper or update details like conference info or code URLs, please submit a pull request. You can generate the necessary markdown for each paper by filling out `generate_item.py` and running `python generate_item.py`. We greatly appreciate your contributions. Alternatively, you can email me ([Gmail](fscnkucs@gmail.com)) the links to your paper and code, and I will add your paper to the list as soon as possible.
+> If you want to add your own paper or update paper details, please follow the [contributor_manual](./docs/contributor_manual_chs.md)  for the relevant operations. We greatly appreciate your contributions. Alternatively, you can email me  ([Gmail](lixiajie2182712226@gmail.com))with the links to your paper and project, and I will manually add your paper to the list.
 
 ### **technical and manual documentation guide**
 [contributor_manual](./docs/contributor_manual_chs.md) 

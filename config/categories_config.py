@@ -43,9 +43,13 @@ CATEGORIES_CHANGE_LIST = [
     #     "old_unique_name": "Base Techniques",
     #     "new_unique_name": "Hate Speech Analysis",
     # },
-        {
+    {
         "old_unique_name": "Social Content Generation",   # 旧的唯一标识符（被替换）
         "new_unique_name": "Comment Generation",   # 新的唯一标识符（替换目标）
+    },
+    {
+        "old_unique_name": "Malicious Bot Detection",   # 旧的唯一标识符（被替换）
+        "new_unique_name": "Malicious User Detection",   # 新的唯一标识符（替换目标）
     }
 ]
 
@@ -182,12 +186,12 @@ CATEGORIES_CONFIG = {
             "description": "[二级分类]（Perception and Classification） —  用户立场检测",
         },
         {
-            "unique_name": "Malicious Bot Detection",
+            "unique_name": "Malicious User Detection",
             "order": 8,
-            "name": "Malicious Bot Detection",
+            "name": "Malicious User Detection",
             "primary_category": "Perception and Classification",
             "enabled": True,
-            "description": "[二级分类]（Perception and Classification） —  恶意机器人检测",
+            "description": "[二级分类]（Perception and Classification） —  恶意用户检测",
         },
         {
             "unique_name": "Event Extraction",

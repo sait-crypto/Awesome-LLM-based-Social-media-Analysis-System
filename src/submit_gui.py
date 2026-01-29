@@ -996,7 +996,7 @@ class PaperSubmissionGUI:
             'conference': '',
             'contributor': '',
             'notes': '',
-            'status': '' 
+            'status': ''
         }
         try:
             placeholder = Paper.from_dict(placeholder_data)
