@@ -19,14 +19,14 @@
 <img src="assets/taxonomy.png" width = "95%" alt="" align=center />
 </p>
 
->For complete paper information, please refer to the paper_database.xlsx file.
-><br>完整论文信息可以查看paper_database.xlsx文件
+
 
 ### Key Points for Table Usage
 - <b>Paper Link</b>: Please click the paper title
 - <b>Paper Project Link</b>: Please click the GitHub icon or Project icon above the paper title
 - <b>Summary</b> and <b>Notes</b> can be expanded by clicking
-
+>For complete paper information, please refer to the paper_database.xlsx file.
+><br>完整论文信息可以查看paper_database.xlsx文件
 ## Full paper list (27 papers)
 ### Quick Links
 
