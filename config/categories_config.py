@@ -266,8 +266,16 @@ CATEGORIES_CONFIG = {
             "description": "[二级分类]（Understanding） —  信息扩散分析",
         },
         {
-            "unique_name": "Comment Generation",
+            "unique_name": "Recommender System",
             "order": 18,
+            "name": "Recommender System",
+            "primary_category": "Understanding",
+            "enabled": True,
+            "description": "[二级分类]（Understanding） —  推荐系统",
+        },
+        {
+            "unique_name": "Comment Generation",
+            "order": 19,
             "name": "Comment Generation",
             "primary_category": "Generation",
             "enabled": True,
@@ -275,7 +283,7 @@ CATEGORIES_CONFIG = {
         },
         {
             "unique_name": "Debate Generation",
-            "order": 19,
+            "order": 20,
             "name": "Debate Generation",
             "primary_category": "Generation",
             "enabled": True,
@@ -284,7 +292,7 @@ CATEGORIES_CONFIG = {
 
         {
             "unique_name": "Rumor Refutation Generation",
-            "order": 20,
+            "order": 21,
             "name": "Rumor Refutation Generation",
             "primary_category": "Generation",
             "enabled": True,
@@ -292,7 +300,7 @@ CATEGORIES_CONFIG = {
         },
         {
             "unique_name": "Psychological Healing",
-            "order": 21,
+            "order": 22,
             "name": "Psychological Healing",
             "primary_category": "Generation",
             "enabled": True,
@@ -300,7 +308,7 @@ CATEGORIES_CONFIG = {
         },
         {
             "unique_name": "Misinformation Generation",
-            "order": 22,
+            "order": 23,
             "name": "Misinformation Generation",
             "primary_category": "Generation",
             "enabled": True,
@@ -308,7 +316,7 @@ CATEGORIES_CONFIG = {
         },
         {
             "unique_name": "Humor Generation",
-            "order": 23,
+            "order": 24,
             "name": "Humor Generation",
             "primary_category": "Generation",
             "enabled": True,
@@ -316,7 +324,7 @@ CATEGORIES_CONFIG = {
         },
         {
             "unique_name": "Social Bots",
-            "order": 24,
+            "order": 25,
             "name": "Social Bots",
             "primary_category": "Generation",
             "enabled": True,
@@ -324,7 +332,7 @@ CATEGORIES_CONFIG = {
         },
         {
             "unique_name": "Social Simulation",
-            "order": 25,
+            "order": 26,
             "name": "Social Simulation",
             "primary_category": "Simulation and Deduction",
             "enabled": True,
@@ -332,7 +340,7 @@ CATEGORIES_CONFIG = {
         },
         {
             "unique_name": "Social Network Simulation",
-            "order": 26,
+            "order": 27,
             "name": "Social Network Simulation",
             "primary_category": "Simulation and Deduction",
             "enabled": True,
@@ -340,7 +348,7 @@ CATEGORIES_CONFIG = {
         },
         {
             "unique_name": "Town/Community Simulation",
-            "order": 27,
+            "order": 28,
             "name": "Town/Community Simulation",
             "primary_category": "Simulation and Deduction",
             "enabled": True,
@@ -348,7 +356,7 @@ CATEGORIES_CONFIG = {
         },
         {
             "unique_name": "Game Simulation",
-            "order": 28,
+            "order": 29,
             "name": "Game Simulation",
             "primary_category": "Simulation and Deduction",
             "enabled": True,
@@ -356,7 +364,7 @@ CATEGORIES_CONFIG = {
         },
         {
             "unique_name": "Family Simulation",
-            "order": 29,
+            "order": 30,
             "name": "Family Simulation",
             "primary_category": "Simulation and Deduction",
             "enabled": True,
@@ -364,7 +372,7 @@ CATEGORIES_CONFIG = {
         },
         {
             "unique_name": "Macrosocial Phenomena Analysis",
-            "order": 30,
+            "order": 31,
             "name": "Macrosocial Phenomena Analysis",
             "primary_category": "Simulation and Deduction",
             "enabled": True,
@@ -372,7 +380,7 @@ CATEGORIES_CONFIG = {
         },
         {
             "unique_name": "Frontier Applications",
-            "order": 31,
+            "order": 32,
             "name": "Frontier Applications",
             "primary_category": "Simulation and Deduction",
             "enabled": True,

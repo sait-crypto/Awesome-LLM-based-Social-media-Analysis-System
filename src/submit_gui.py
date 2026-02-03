@@ -283,7 +283,7 @@ class PaperSubmissionGUI:
                 text_frame = ttk.Frame(self.form_frame)
                 text_frame.grid(row=row, column=1, sticky="we", pady=(2, 2), padx=(5, 0))
                 
-                height = 5 if variable in ['abstract', 'notes'] else 3
+                height = 4 if variable in ['abstract', 'notes'] else 2#最小貌似就是4行
                 text_widget = scrolledtext.ScrolledText(text_frame, height=height, width=50, undo=True, maxundo=-1)
                 text_widget.grid(row=0, column=0, sticky="nsew")
                 
