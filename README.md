@@ -1,4 +1,5 @@
-# Awesome Social Media Analysis with LLM Method
+# Awesome Social Media Analysis with LLM Method(csv version)
+> A version that supports Excel processing, where the GUI lacks an administrator mode and is instead managed by manually modifying an Excel-formatted database. [excel version](https://github.com/sait-crypto/Awesome-LLM-based-Social-media-Analysis-System/branches)(This version is no longer maintained.)
 
 > **Contributions**
 >
