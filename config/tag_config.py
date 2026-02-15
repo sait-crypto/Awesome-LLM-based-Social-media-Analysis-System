@@ -2,8 +2,8 @@
 标签配置文件
 
 重要说明：
-1. variable字段是标签的唯一标识符，一旦设置不可更改
-2. order字段决定标签在Excel中的列位置，必须唯一且不可更改
+1. id字段是标签的唯一标识符，一旦设置不可更改
+2. order字段决定标签在CSV/README中的默认显示顺序
 3. immutable=true的标签是不可更改的，即使enabled=false也会被强制启用，他们往往有独特的处理方式
 4. 修改此文件后需要重启系统才能生效
 5. show_in_readme=false的标签不会出现在README的论文表格中
@@ -11,14 +11,14 @@
 """
 
 TAGS_CONFIG = {
-    "config_version": "3.0",
-    "last_updated": "2026-01-13",
+    "config_version": "4.0",
+    "last_updated": "2026-02-15",
     
     # 标签列表，按order排序
     "tags": [
         # ==================== 不可禁用标签 (immutable=true) ====================
         {
-            "variable": "doi",
+            "id": "doi",
             "order": 0,                     # 不可更改，必须是0
             "table_name": "doi",            # 在Excel中的列名，可更改
             "display_name": "DOI",          # 在README中显示的列名，可更改
@@ -33,7 +33,7 @@ TAGS_CONFIG = {
         },
         #以下3个标签在readme列表中共用一列，使用"title&authors&date"作为列名，使用"[display_name]"分割5个字段
         {
-            "variable": "title",            # 不可更改
+            "id": "title",            # 不可更改
             "order": 1,                     # 不可更改，必须是1
             "table_name": "title",
             "display_name": "title",         #3个标签在readme列表中共用一列，使用[display_name]分割3个字段
@@ -47,7 +47,7 @@ TAGS_CONFIG = {
             "system_var": False,            #控制字段，为真时只在数据库中显示               
         },
         {
-            "variable": "title_translation",
+            "id": "title_translation",
             "order": 13,
             "table_name": "title translation",
             "display_name": "标题翻译",
@@ -62,7 +62,7 @@ TAGS_CONFIG = {
 
         },
         {
-            "variable": "authors",          # 不可更改
+            "id": "authors",          # 不可更改
             "order": 2,                     # 不可更改，必须是2
             "table_name": "authors",
             "display_name": "authors",         #3个标签在readme列表中共用一列，使用[display_name]分割3个字段
@@ -77,7 +77,7 @@ TAGS_CONFIG = {
 
         },
         {
-            "variable": "date",          # 不可更改
+            "id": "date",          # 不可更改
             "order": 3,                     # 不可更改，必须是3
             "table_name": "publish date",
             "display_name": "publish date",         #3个标签在readme列表中共用一列，使用[display_name]分割3个字段
@@ -92,7 +92,7 @@ TAGS_CONFIG = {
 
         },
         {
-            "variable": "category",         # 不可更改
+            "id": "category",         # 不可更改
             "order": 4,                     # 不可更改，必须是4
             "table_name": "category",
             "display_name": "category",
@@ -108,7 +108,7 @@ TAGS_CONFIG = {
         },
         #以下5个标签在readme列表中共用一列，它们5个是写综述时直接引用的一句话总结。使用"summary"作为列名，使用"[display_name]"分割5个字段
         {
-            "variable": "summary_motivation",
+            "id": "summary_motivation",
             "order": 5,
             "table_name": "summary motivation",
             "display_name": "motivation",          #5个标签在readme列表中共用一列，使用[display_name]分割5个字段
@@ -123,7 +123,7 @@ TAGS_CONFIG = {
 
         },
         {
-            "variable": "summary_innovation",
+            "id": "summary_innovation",
             "order": 6,
             "table_name": "summary innovation",
             "display_name": "innovation",             #5个标签在readme列表中共用一列，使用[display_name]分割5个字段
@@ -138,7 +138,7 @@ TAGS_CONFIG = {
 
         },
         {
-            "variable": "summary_method",
+            "id": "summary_method",
             "order": 7, 
             "table_name": "summary method",
             "display_name": "method",           #5个标签在readme列表中共用一列，使用[display_name]分割5个字段
@@ -153,7 +153,7 @@ TAGS_CONFIG = {
 
         },
         {
-            "variable": "summary_conclusion",
+            "id": "summary_conclusion",
             "order": 8,
             "table_name": "summary conclusion",
             "display_name": "conclusion/contribution",      #5个标签在readme列表中共用一列，使用[display_name]分割5个字段
@@ -168,7 +168,7 @@ TAGS_CONFIG = {
 
         },
         {
-            "variable": "summary_limitation",
+            "id": "summary_limitation",
             "order": 9,
             "table_name": "summary limitation",
             "display_name": "limitation/future",      #5个标签在readme列表中共用一列，使用[display_name]分割5个字段
@@ -184,7 +184,7 @@ TAGS_CONFIG = {
         },
         #以下2个标签在readme列表中共用一列，使用"links"作为列名，使用"[display_name]"分割2个字段
         {
-            "variable": "paper_url",        
+            "id": "paper_url",        
             "order": 10,
             "table_name": "paper url",
             "display_name": "paper link",     #2个标签在readme列表中共用一列，使用[display_name]分割2个字段
@@ -199,7 +199,7 @@ TAGS_CONFIG = {
 
         },
         {
-            "variable": "project_url",
+            "id": "project_url",
             "order": 11,
             "table_name": "project url",
             "display_name": "project url",      #2个标签在readme列表中共用一列，使用[display_name]分割2个字段
@@ -214,7 +214,7 @@ TAGS_CONFIG = {
 
         },
         {
-            "variable": "conference",
+            "id": "conference",
             "order": 12,
             "table_name": "conference",
             "display_name": "conference",
@@ -231,7 +231,7 @@ TAGS_CONFIG = {
     # ==================== 可禁用标签 (immutable=false) ====================
 
         {
-            "variable": "analogy_summary",
+            "id": "analogy_summary",
             "order": 14,
             "table_name": "analogy summary",
             "display_name": "类比总结",
@@ -247,7 +247,7 @@ TAGS_CONFIG = {
         },
          #直接在readme的论文列表中根据路径显示图片
         {
-            "variable": "pipeline_image",
+            "id": "pipeline_image",
             "order": 15,
             "table_name": "pipeline figure",
             "display_name": "Pipeline图",
@@ -263,7 +263,7 @@ TAGS_CONFIG = {
         },
         
         {
-            "variable": "paper_file",
+            "id": "paper_file",
             "order": 23,
             "table_name": "paper file",
             "display_name": "论文文件",
@@ -277,7 +277,7 @@ TAGS_CONFIG = {
             "system_var": False,
         },
         {
-            "variable": "abstract",
+            "id": "abstract",
             "order": 16,
             "table_name": "abstract",
             "display_name": "摘要",
@@ -292,7 +292,7 @@ TAGS_CONFIG = {
 
         },
         {
-            "variable": "contributor",
+            "id": "contributor",
             "order": 17,
             "table_name": "contributor",
             "display_name": "提供者",
@@ -307,7 +307,7 @@ TAGS_CONFIG = {
 
         },
         {
-            "variable": "notes",
+            "id": "notes",
             "order": 18,
             "table_name": "notes",
             "display_name": "notes",
@@ -322,7 +322,7 @@ TAGS_CONFIG = {
 
         },
         {
-            "variable": "status",
+            "id": "status",
             "order": 20,
             "table_name": "status",
             "display_name": "阅读状态",
@@ -338,7 +338,7 @@ TAGS_CONFIG = {
         },
         #占位符论文发生冲突事件时无脑将其替换（暂未实现），需要在更新流程中可见，
         {
-            "variable": "is_placeholder",
+            "id": "is_placeholder",
             "order": 22,
             "table_name": "is placeholder",
             "display_name": "is placeholder",
@@ -354,7 +354,7 @@ TAGS_CONFIG = {
         
         # ==================== 数据库内部控制标签，不供提交时手动填写，供系统使用!! ====================
         {
-            "variable": "show_in_readme",
+            "id": "show_in_readme",
             "order": 19,
             "table_name": "show in readme",
             "display_name": "显示控制",
@@ -370,7 +370,7 @@ TAGS_CONFIG = {
         },
 
         {
-            "variable": "submission_time",
+            "id": "submission_time",
             "order": 21,
             "table_name": "submission time",
             "display_name": "submission time",
@@ -384,7 +384,7 @@ TAGS_CONFIG = {
             "system_var": True,                      
         },
         {
-            "variable": "conflict_marker",
+            "id": "conflict_marker",
             "order": 22,
             "table_name": "conflict marker",
             "display_name": "conflict marker",
@@ -398,7 +398,7 @@ TAGS_CONFIG = {
             "system_var": True,                     
         },
         {
-            "variable": "invalid_fields",
+            "id": "invalid_fields",
             "order": 22,
             "table_name": "invalid fields",
             "display_name": "invalid fields",
@@ -411,13 +411,24 @@ TAGS_CONFIG = {
             "required": False,     
             "system_var": True,                     
         },
+        {
+            "id": "uid",  # 唯一资源ID，用于关联 assets/{uid} 文件夹
+            "order": 23,
+            "table_name": "UID",
+            "display_name": "UID",
+            "description": "系统生成的唯一ID，用于关联资源文件",
+            "type": "string",
+            "show_in_readme": False,
+            "enabled": True,
+            "immutable": True,
+            "required": False,
+            "system_var": True,
+        },
 
-
-        #需要将逻辑调整为类似category_config的结构，通过唯一名称识别，variable和table_name合并，order变为可以自由调整的项（更新时自动）
     ]
 }
 
-required_variables = ['doi', 'title', 'authors', 'category', 'paper_url', 'abstract', 'date']
+required_ids = ['doi', 'title', 'authors', 'category', 'paper_url', 'abstract', 'date']
 # 验证函数
 def validate_tags_config():
     """
@@ -428,10 +439,10 @@ def validate_tags_config():
     errors = []
     
     # 检查必填标签
-    for req_var in required_variables:
+    for req_var in required_ids:
         found = False
         for tag in TAGS_CONFIG["tags"]:
-            if tag["variable"] == req_var:
+            if tag["id"] == req_var:
                 found = True
                 if not tag.get("required", False):
                     errors.append(f"必填标签 {req_var} 必须设置 required=true")
@@ -447,13 +458,13 @@ def validate_tags_config():
     for tag in TAGS_CONFIG["tags"]:
         order = tag.get("order")
         if order is None:
-            errors.append(f"标签 {tag.get('variable')} 缺少order字段")
+            errors.append(f"标签 {tag.get('id')} 缺少order字段")
             continue
             
         if order in orders:
-            errors.append(f"order {order} 重复: {orders[order]} 和 {tag['variable']}")
+            errors.append(f"order {order} 重复: {orders[order]} 和 {tag['id']}")
         else:
-            orders[order] = tag["variable"]
+            orders[order] = tag["id"]
     
     # 检查order连续性
     max_order = max(orders.keys()) if orders else -1
@@ -461,23 +472,23 @@ def validate_tags_config():
         if i not in orders:
             errors.append(f"order {i} 缺失")
     
-    # 检查variable唯一性
-    variables = {}
+    # 检查id唯一性
+    ids = {}
     for tag in TAGS_CONFIG["tags"]:
-        var = tag.get("variable")
+        var = tag.get("id")
         if var is None:
-            errors.append(f"标签缺少variable字段: {tag}")
+            errors.append(f"标签缺少id字段: {tag}")
             continue
             
-        if var in variables:
-            errors.append(f"variable {var} 重复")
+        if var in ids:
+            errors.append(f"id {var} 重复")
         else:
-            variables[var] = True
+            ids[var] = True
     
     # 检查immutable标签的enabled设置
     for tag in TAGS_CONFIG["tags"]:
         if tag.get("immutable", False) and not tag.get("enabled", True):
-            errors.append(f"不可变标签 {tag['variable']} 不能设置 enabled=false")
+            errors.append(f"不可变标签 {tag['id']} 不能设置 enabled=false")
     
     # 检查required字段一致性
     required_count = 0
@@ -485,10 +496,10 @@ def validate_tags_config():
         if tag.get("required", False):
             required_count += 1
             if not tag.get("immutable", False):
-                errors.append(f"required=true的标签 {tag['variable']} 必须设置 immutable=true")
+                errors.append(f"required=true的标签 {tag['id']} 必须设置 immutable=true")
     
-    if required_count != len(required_variables):
-        errors.append(f"应该只有{len(required_variables)}个required=true的标签，当前有{required_count}个，请检查")
+    if required_count != len(required_ids):
+        errors.append(f"应该只有{len(required_ids)}个required=true的标签，当前有{required_count}个，请检查")
     
     return len(errors) == 0, errors
 
@@ -498,7 +509,7 @@ if __name__ == "__main__":
     if is_valid:
         print("✅ 标签配置验证通过")
         print(f"   - 共配置 {len(TAGS_CONFIG['tags'])} 个标签")
-        print(f"   - 必填标签:{required_variables}")
+        print(f"   - 必填标签:{required_ids}")
         print(f"   - order范围: 0-{len(TAGS_CONFIG['tags'])-1}")
     else:
         print("❌ 标签配置验证失败:")

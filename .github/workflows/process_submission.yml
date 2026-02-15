@@ -13,6 +13,7 @@ jobs:
       contents: write
       pull-requests: write
     
+    # 只有当变量 AUTO_PROCESS_SUBMISSIONS 为 true 或者 PR 被打上 'Action: Process' 标签时才运行
     if: >
       (vars.AUTO_PROCESS_SUBMISSIONS == 'true' || 
        contains(github.event.pull_request.labels.*.name, 'Action: Process')) 
@@ -37,30 +38,33 @@ jobs:
       # --- 步骤 1: 构造混合安全环境 ---
       - name: Setup Hybrid Environment
         run: |
-          # 1. 基础环境全是 Main 的 (包含脚本、Core Excel、README、现有的 Figures 和 Backups)
+          # 1. 基础环境全是 Main 的 (包含脚本、Core CSV、README、现有的 Assets 和 Backups)
           cp -r main_workspace/* .
           cp -r main_workspace/.git .
           
           # [安全加固] 清理 PR 空间中的潜在恶意符号链接
           find pr_workspace -type l -delete
           
-          # 2. 只从 PR workspace 拿特定的数据文件 (Templates)
-          if [ -f pr_workspace/submit_template.xlsx ]; then
-            cp pr_workspace/submit_template.xlsx .
+          # 2. 只从 PR workspace 拿特定的数据文件 (Templates - CSV/JSON)
+          # 注意：现在支持 CSV 和 JSON
+          if [ -f pr_workspace/submit_template.csv ]; then
+            cp pr_workspace/submit_template.csv .
           fi
           if [ -f pr_workspace/submit_template.json ]; then
             cp pr_workspace/submit_template.json .
           fi
           
-          # 3. Figures 暂存 (供脚本读取，稍后智能合并)
+          # 3. Assets 暂存 (供脚本读取，稍后智能合并)
+          # 新逻辑：支持 assets/ 目录结构
+          if [ -d pr_workspace/assets ]; then
+            mkdir -p pr_workspace_assets
+            cp -r pr_workspace/assets/* pr_workspace_assets/ || true
+          fi
+          # 兼容旧逻辑 figures/
           if [ -d pr_workspace/figures ]; then
             mkdir -p pr_workspace_figures
             cp -r pr_workspace/figures/* pr_workspace_figures/ || true
           fi
-          
-          # [已修改] 移除了从 PR 复制 backups 的逻辑
-          # 现在的 backups/ 目录只包含 main 分支原有的内容
-          # 新的备份将由后续的 update.py 脚本在此目录中生成
           
           echo "Secure Hybrid Environment Ready."
 
@@ -79,12 +83,19 @@ jobs:
       # --- 步骤 3: 基础完整性检查 ---
       - name: Validate File Integrity
         run: |
-          if [ -f pr_workspace/submit_template.xlsx ]; then
-            file_size=$(stat -c%s "pr_workspace/submit_template.xlsx")
+          # 检查 CSV 大小
+          if [ -f pr_workspace/submit_template.csv ]; then
+            file_size=$(stat -c%s "pr_workspace/submit_template.csv")
             if [ $file_size -gt 5242880 ]; then
-              echo "Error: Excel file too large ($file_size bytes)" && exit 1
+              echo "Error: CSV file too large ($file_size bytes)" && exit 1
             fi
-            uv run python -c "import openpyxl; wb=openpyxl.load_workbook('submit_template.xlsx', data_only=True); print('Excel structure valid')"
+          fi
+          # 检查 JSON 大小
+          if [ -f pr_workspace/submit_template.json ]; then
+             file_size=$(stat -c%s "pr_workspace/submit_template.json")
+             if [ $file_size -gt 5242880 ]; then
+               echo "Error: JSON file too large ($file_size bytes)" && exit 1
+             fi
           fi
 
       # --- 步骤 4: 业务逻辑验证 ---
@@ -92,11 +103,14 @@ jobs:
         id: validate
         env:
           PYTHONPATH: .
+          # 传递暂存的资产目录给脚本
+          PR_ASSETS_DIR: pr_workspace_assets
           PR_FIGURES_DIR: pr_workspace_figures
         shell: bash
         run: |
           set -o pipefail
-          uv run python scripts/validate_submission.py 2>&1 | tee validation_log.txt
+          # 使用新的验证脚本入口
+          uv run scripts/validate.py 2>&1 | tee validation_log.txt
 
       - name: Comment on Validation Failure
         if: failure() && steps.validate.outcome == 'failure'
@@ -116,13 +130,15 @@ jobs:
               body: body
             });
 
-      # --- 步骤 5: 处理图片 ---
-      - name: Update Figures
+      # --- 步骤 5: 处理图片/资产 ---
+      # 注意：需要在新的 update_submission_figures.py 或类似脚本中处理 assets 移动逻辑
+      - name: Update Assets
         if: success()
         env:
           PYTHONPATH: .
+          PR_ASSETS_DIR: pr_workspace_assets
           PR_FIGURES_DIR: pr_workspace_figures
-        run: uv run python scripts/update_submission_figures.py
+        run: uv run scripts/update_submission_figures.py
 
       # --- 步骤 6: 核心更新 (生成新备份) ---
       - name: Run Core Update
@@ -131,11 +147,11 @@ jobs:
         env:
           PYTHONPATH: .
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
-          EXCEL_KEY: ${{ secrets.EXCEL_KEY }}
+          # 移除 EXCEL_KEY，改用数据库密码（如果需要）
         run: |
           set -o pipefail
           # update.py 运行成功后，会在 backups/ 目录生成新的备份文件
-          uv run python src/update.py 2>&1 | tee update_log.txt
+          uv run src/update.py 2>&1 | tee update_log.txt
 
       - name: Comment Update Log
         if: steps.core_update.conclusion != 'skipped'
@@ -169,12 +185,13 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          CORE_EXCEL_PATH=$(uv run python -c "from src.core.config_loader import get_config_instance; print(get_config_instance().settings['paths']['core_excel'])")
+          # 获取核心数据库路径 (CSV)
+          CORE_DB_PATH=$(uv run python -c "from src.core.config_loader import get_config_instance; print(get_config_instance().settings['paths']['database'])")
           
           # 强制添加文件
           # git add backups/ 会添加 Main 原有的备份 + 本次 update.py 新生成的备份
-          # PR 中用户自己上传到 backups/ 的文件因为没有被 cp 过来，所以不会被添加
-          git add -f "$CORE_EXCEL_PATH" README.md figures/ backups/
+          # assets/ 也会被添加
+          git add -f "$CORE_DB_PATH" README.md assets/ backups/
           
           commit_msg=$(printf "@%s,Thank for Contribution--Auto-process papers submission [skip ci]" "$PR_USER")
           
@@ -198,11 +215,13 @@ jobs:
         env:
           PYTHONPATH: .
           NOTIFICATION_EMAIL: ${{ vars.NOTIFICATION_EMAIL }}
-          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
+          # 修改点：从 vars 获取 Server, Port, User
+          SMTP_SERVER: ${{ vars.SMTP_SERVER }}
+          SMTP_PORT: ${{ vars.SMTP_PORT }}
+          SMTP_USER: ${{ vars.SMTP_USER }}
+          # 密码保持在 secrets 中
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           workflow_status: ${{ job.status }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
           PR_USER: ${{ github.event.pull_request.user.login }}
-        run: uv run python scripts/send_notification.py
+        run: uv run scripts/send_notification.py

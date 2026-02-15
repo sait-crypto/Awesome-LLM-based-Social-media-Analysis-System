@@ -1,24 +1,20 @@
 """
-数据库管理器
-处理Excel数据库的读写操作
+数据库管理器 (Refactored for CSV/JSON)
+处理核心数据库的读写、冲突检测与合并
+完全移除 Pandas/OpenPyXL 依赖
 """
-import os,sys,re
-import pandas as pd
-import openpyxl
-from openpyxl.styles import PatternFill, Font
-from openpyxl.utils import get_column_letter
-from typing import Dict, List, Optional, Any, Tuple
+import os
+import sys
 import shutil
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
-import warnings
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
 
-# 导入配置和模型
 from src.core.config_loader import get_config_instance
-from src.core.database_model import Paper, is_same_identity, is_duplicate_paper
+from src.core.database_model import Paper, is_same_identity
 from src.core.update_file_utils import get_update_file_utils
 from src.utils import backup_file
-
 
 class DatabaseManager:
     """数据库管理器"""
@@ -26,379 +22,229 @@ class DatabaseManager:
     def __init__(self):
         self.config = get_config_instance()
         self.settings = get_config_instance().settings
-        self.core_excel_path = self.settings['paths']['core_excel']
+        
+        # 数据库路径 (CSV 或 JSON)
+        self.database_path = self.settings['paths']['database']
         self.backup_dir = self.settings['paths']['backup_dir']
         self.conflict_marker = self.settings['database']['conflict_marker']
         
         self.update_utils = get_update_file_utils()
 
         # 确保目录存在
-        os.makedirs(os.path.dirname(self.core_excel_path), exist_ok=True)
+        os.makedirs(os.path.dirname(self.database_path), exist_ok=True)
         os.makedirs(self.backup_dir, exist_ok=True)
-    
 
-    
-    def load_database(self) -> pd.DataFrame:
-        """加载数据库到DataFrame"""
-        if not os.path.exists(self.core_excel_path):
-            # 创建新的数据库文件
-            return self._create_new_database()
-        
-        try:
-            # 尝试读取Excel文件
-            df = pd.read_excel(self.core_excel_path, engine='openpyxl')
-            
-            # 确保所有必需的列都存在
-            return self._ensure_columns_exist(df)
-        except Exception as e:
-            print(f"加载数据库失败: {e}")
-            # 创建新的数据库文件
-            return self._create_new_database()
-    
-    def _create_new_database(self) -> pd.DataFrame:
-        """创建新的DataFrame结构（根据tag config的列）"""
-        active_tags = self.config.get_active_tags()
-        active_tags.sort(key=lambda x: x.get('order', 0))
-        cols = [t['table_name'] for t in active_tags]
-        df = pd.DataFrame(columns=cols)
-        # 初始化时把 header style 信息存入 DataFrame.attrs，写回时会被应用到Excel
-        header_fill, required_fill, required_font = self.update_utils.get_header_styles()
-        df.attrs['header_styles'] = {
-            'header_row_fill': header_fill,
-            'required_header_fill': required_fill,
-            'required_font_color': required_font
-        }
-        return df
-    
-    def _ensure_columns_exist(self, df: pd.DataFrame) -> pd.DataFrame:
-        """确保DataFrame包含所有必需的列"""
-        active_tags = self.config.get_active_tags()
-        active_tags.sort(key=lambda x: x['order'])
-        required_columns = [tag['table_name'] for tag in active_tags]
-        
-        # 添加缺失的列
-        for column in required_columns:
-            if column not in df.columns:
-                df[column] = None
-        
-        # 移除多余的列（不在激活标签中的列）
-        columns_to_keep = [col for col in df.columns if col in required_columns]
-        
-        # 重新排序列
-        df = df[required_columns]
-        
-        return df
-    
-    def save_database(self, df: pd.DataFrame, password: str = "") -> bool:
-        """保存DataFrame到Excel文件"""
-        try:
-            # 先根据 tag_config 规范 DataFrame 列与 category 值
-            df = self.update_utils.normalize_dataframe_columns(df, self.config)
+    def load_database(self) -> List[Paper]:
+        """加载数据库"""
+        if not os.path.exists(self.database_path):
+            return []
+        return self.update_utils.read_data(self.database_path)
 
-            # 备份原文件
-            backup_file(self.core_excel_path, self.backup_dir)
+    def save_database(self, papers: List[Paper]) -> bool:
+        """保存数据库 (带备份)"""
+        try:
+            # 1. 备份
+            if os.path.exists(self.database_path):
+                backup_file(self.database_path, self.backup_dir)
             
-            # 保存到Excel
-            with pd.ExcelWriter(
-                self.core_excel_path,
-                engine='openpyxl'
-            ) as writer:
-                df.to_excel(writer, index=False, sheet_name='Papers')
-                
-                # 获取工作簿和工作表
-                workbook = writer.book
-                worksheet = writer.sheets['Papers']
-                
-                # 应用格式
-                self._apply_excel_formatting(workbook, worksheet, df)
-                
-                # 如果有密码，尝试设置保护（但openpyxl的写保护有限）
-                if password:
-                    try:
-                        worksheet.protection.set_password(password)
-                        worksheet.protection.sheet = True
-                    except:
-                        print("注意：无法设置Excel保护，文件将以未加密形式保存")
+            # 2. 规范化 Assets (确保所有资源的 UID 对应且文件在 assets/{uid} 下)
+            # 这一步会移动文件，副作用
+            normalized_papers = []
+            for p in papers:
+                p = self.update_utils.normalize_assets(p)
+                normalized_papers.append(p)
+
+            # 3. 写入
+            return self.update_utils.write_data(self.database_path, normalized_papers)
             
-            print(f"数据库已保存到: {self.core_excel_path}")
-            return True
         except Exception as e:
             print(f"保存数据库失败: {e}")
             return False
-    
-    
-    
-    def _apply_excel_formatting(self, workbook, worksheet, df):
-        """对Excel应用列宽、表头格式等美化"""
- 
-        self.update_utils.apply_excel_formatting(workbook, worksheet, df)
-        
-        # 标记冲突行，同时对 invalid_fields 单元格上色
-        conflict_row_name = self.config.get_tag_field("conflict_marker", "table_name")
-        invalid_row_name = self.config.get_tag_field("invalid_fields", "table_name")  # 从config获取正确的表列名
-        
-        if conflict_row_name in df.columns:
-            # 颜色优先从配置中读取
-            conflict_color = self.settings.get('excel', {}).get('conflict_fill_color', 'FFCCCC')
-            conflict_fill = PatternFill(start_color=conflict_color, end_color=conflict_color, fill_type="solid")
 
-            # invalid_fields 列的单元格填充颜色
-            invalid_color = self.settings.get('excel', {}).get('invalid_fill_color', 'FF0000')
-            invalid_fill = PatternFill(start_color=invalid_color, end_color=invalid_color, fill_type="solid")
-
-            invalid_col_letter = None
-            if invalid_row_name and invalid_row_name in df.columns:
-                invalid_col_letter = get_column_letter(df.columns.get_loc(invalid_row_name) + 1)
-
-            for idx, row in df.iterrows():
-                if row.get(conflict_row_name) not in [False, 0, None, "False", "FALSE", "false", "", "0"]:
-                    for cell in worksheet[idx + 2]:  # +2因为标题行是1，索引从0开始
-                        cell.fill = conflict_fill
-                        # 如果列名是doi，就在该cell内容前加冲突标记
-                        if cell.value and cell.column_letter == get_column_letter(df.columns.get_loc('doi') + 1) \
-                                and cell.value.startswith(self.conflict_marker) == False:
-                            cell.value = f"{self.conflict_marker} {cell.value}"
-
-                # 对 invalid_fields指定的列单独着色（如果存在并且有内容）
-                if row.get(invalid_row_name) not in [False,None, "False", "FALSE", "false", "", "0"]:
-                    inval_value = row.get(invalid_row_name)
-                    split_result = re.split(r'[,，]', inval_value)
-                    invalid_fields = [int(item.strip()) for item in split_result if item.strip()]
-                    
-                    for field in invalid_fields:
-                        worksheet[idx+2][field].fill = invalid_fill 
-        else:
-            print(f"添加论文冲突格式时，发现数据库表格没有conflict_marker列")
-
-                        
-    
-    def get_password(self) -> str:
-        """获取Excel密码"""
-        # 首先尝试从环境变量获取
-        password = os.environ.get('EXCEL_KEY', '')
-        if password:
-            return password
-        
-        # 尝试从本地文件获取
-        password_path = self.settings['excel'].get('password_path', '')
-        if password_path and os.path.exists(password_path):
-            try:
-                with open(password_path, 'r', encoding='utf-8') as f:
-                    password = f.read().strip()
-                    return password
-            except Exception as e:
-                print(f"本地读取Excel密码失败{e}")
-                
-        
-        return ""  # 返回空字符串表示不加密
-    
-    
-    
-    #唯一对外接口
-    def add_papers(self, new_papers: List[Paper], conflict_resolution: str = 'mark') -> Tuple[List[Paper], List[Paper],List[str] ]:
+    def add_papers(self, new_papers: List[Paper], conflict_resolution: str = 'mark') -> Tuple[List[Paper], List[Paper], List[str]]:
         """
-        添加新论文到数据库，同时验证冲突
-        
-        参数:
-            new_papers: 新论文列表
-            conflict_resolution: 冲突解决策略 ('mark', 'skip', 'replace')
-        
-        返回:
-            Tuple[成功添加的论文列表, 冲突论文列表（被标记后需要加入数据库的）,验证失败消息列表]
+        添加新论文到数据库
+        返回: (Added, Conflicts, InvalidMessages)
         """
-        # 加载现有数据库
-        df = self.load_database()
-        old_papers = self.update_utils.excel_to_paper(df, only_non_system=False, skip_invalid=False)
-
-        # 统一验证所有已写入数据库的论文条目（用于提醒用户修正不规范条目）
+        # 1. 加载现有数据
+        current_papers = self.load_database()
+        
+        # 验证现有数据的完整性 (仅记录日志，不阻断)
         invalid_msg = []
-        invalid_count = 0
-        for p in old_papers:
-            try:
-                valid, errors, _ = p.validate_paper_fields(self.config, check_required=True, check_non_empty=True)
-                if not valid or getattr(p, 'invalid_fields', ""):
-                    invalid_count += 1
-                    invalid_msg_str = f"论文 '{p.title[:50]}' ，invalid_fields={p.invalid_fields}，错误示例: {errors[:3]}"
-                    #print(invalid_msg_str)
-                    invalid_msg.append(invalid_msg_str)
-            except Exception as e:
-                print(f"验证已存在论文时出错: {e}")
-        # if invalid_count:
-        #     print(f"⚠ 注意：数据库中共有 {invalid_count} 条论文包含不规范字段，所在单元格已标红，请手动修正（不影当前续添加/保存操作）。")
+        for p in current_papers:
+            # 简单验证，不normalize
+            valid, errors, _ = p.validate_paper_fields(self.config, check_required=True, no_normalize=True)
+            if not valid:
+                invalid_msg.append(f"DB Existing: {p.title[:30]} - {errors[0]}")
 
-        # non_conflict_papers存储结构: [(主论文, [冲突论文1, 冲突论文2, ...]), ...]
-        non_conflict_papers: List[Tuple[Paper, List[Paper]]] = []    
-        conflict_papers: List[Paper] = []
+        # 2. 分离冲突与非冲突 (处理逻辑保持原有思路：Group by identity)
+        # 结构: { key: [MainPaper, Conflict1, Conflict2...] }
+        # key 是 (doi, title) tuple
+        paper_groups: Dict[Tuple[str, str], List[Paper]] = {}
+        
+        # 辅助：展平现有列表到 groups
+        for p in current_papers:
+            key = p.get_key()
+            if key not in paper_groups:
+                paper_groups[key] = []
+            paper_groups[key].append(p)
+
         added_papers = []
-        old_conflict_papers = []
-        
-        # 分离现有论文中的正常论文和冲突论文
-        for p in old_papers:
-            if not p.conflict_marker:
-                non_conflict_papers.append((p, []))
-            else:
-                old_conflict_papers.append(p)
-        
-        # 还原原有的冲突结构
-        for old_conflict in old_conflict_papers:
-            conflict_found = False
-            for i, (main_paper, conflict_list) in enumerate(non_conflict_papers):
-                if is_same_identity(old_conflict, main_paper):
-                    conflict_list.append(old_conflict)
-                    conflict_found = True
+        conflict_papers = []
+
+        # 3. 处理新论文
+        for new_p in new_papers:
+            key = new_p.get_key()
+            
+            # 如果是全新的
+            if key not in paper_groups:
+                paper_groups[key] = [new_p]
+                added_papers.append(new_p)
+                continue
+            
+            # 如果已存在 (冲突处理)
+            existing_group = paper_groups[key]
+            
+            # 检查完全重复 (Strict Compare)
+            is_dup = False
+            for ex in existing_group:
+                if self._is_strictly_equal(ex, new_p):
+                    is_dup = True
                     break
             
-            if not conflict_found:
-                # 如果没有找到对应的主论文，将这个冲突论文作为一个新的主论文
-                print(f"警告：数据库原有冲突论文 {old_conflict.title[:50]}... 没有找到对应主论文，将其作为新论文添加")
-                non_conflict_papers.append((old_conflict, []))
-                old_conflict.conflict_marker = False  # 清除冲突标记
+            if is_dup:
+                print(f"跳过完全重复论文: {new_p.title[:30]}")
+                continue
+
+            # 处理冲突
+            if conflict_resolution == 'skip':
+                print(f"跳过冲突论文: {new_p.title[:30]}")
+                continue
+            elif conflict_resolution == 'replace':
+                # 替换：保留新论文，丢弃旧组
+                paper_groups[key] = [new_p]
+                added_papers.append(new_p)
+                print(f"替换冲突论文: {new_p.title[:30]}")
+            else: # mark (默认)
+                new_p.conflict_marker = True
+                existing_group.append(new_p) # 添加到组尾
+                conflict_papers.append(new_p)
+                print(f"标记冲突论文: {new_p.title[:30]}")
+
+        # 4. 重新构建列表并排序
+        # 排序规则: Category (Order) -> Submission Time (Desc)
         
-        # 处理新论文
-        for new_paper in new_papers:
-            # 检查是否已存在
-            same_identity_indices = []
-            main_paper_idx = -1
+        final_list = []
+        
+        # 辅助：获取分类的 Order
+        cat_order_map = {c['unique_name']: (c.get('order', 999), i) 
+                        for i, c in enumerate(self.config.get_active_categories())}
+        
+        def get_sort_key(p: Paper):
+            # 主分类（第一个）
+            first_cat = p.category.split(';')[0].strip() if p.category else ""
+            order_info = cat_order_map.get(first_cat, (9999, 9999))
             
-            # 找出所有同identity论文
-            for idx, (main_paper, conflict_list) in enumerate(non_conflict_papers):
-                if is_same_identity(new_paper, main_paper):
-                    same_identity_indices.append(idx)
-                    if not main_paper.conflict_marker and main_paper_idx == -1:
-                        main_paper_idx = idx
-            
-            if same_identity_indices:
-                # 检查是否为"完全重复提交" - 需要包括主论文和所有冲突论文
-                all_same_papers = []
-                for idx in same_identity_indices:
-                    main_paper, conflict_list = non_conflict_papers[idx]
-                    all_same_papers.append(main_paper)
-                    all_same_papers.extend(conflict_list)
-                
-                is_duplicate, conflict_field = is_duplicate_paper(all_same_papers, new_paper, complete_compare=False)
-                if is_duplicate:
-                    print(f"论文: {new_paper.title}——重复提交，跳过添加")
-                    continue
-                
-                # 不是完全相同，按冲突策略处理
-                if conflict_resolution == 'skip':
-                    print(f"论文: {new_paper.title}——在'{conflict_field}'字段与原有论文存在冲突，已跳过")
-                    continue
-                
-                elif conflict_resolution == 'replace':
-                    # 完全替换：删除所有同身份论文，添加新论文
-                    # 从后往前删除，避免索引错乱
-                    for idx in sorted(same_identity_indices, reverse=True):
-                        del non_conflict_papers[idx]
-                    
-                    non_conflict_papers.append((new_paper, []))
-                    added_papers.append(new_paper)
-                    print(f"论文: {new_paper.title}——在'{conflict_field}'字段与原有论文存在冲突，替换原有论文")
-                
-                elif conflict_resolution == 'mark':
-                    new_paper.conflict_marker = True
-                    
-                    if main_paper_idx != -1:
-                        # 添加到对应主论文的冲突列表中
-                        non_conflict_papers[main_paper_idx][1].append(new_paper)
-                        conflict_papers.append(new_paper)
-                        print(f"论文: {new_paper.title}——在'{conflict_field}'字段与原有论文存在冲突，已标记并作为冲突论文添加")
-                    else:
-                        # 所有同身份论文都有冲突标记，这是一个特殊情况
-                        # 将第一篇作为主论文，并添加冲突
-                        first_idx = same_identity_indices[0]
-                        main_paper = non_conflict_papers[first_idx][0]
-                        conflict_list = non_conflict_papers[first_idx][1]
-                        
-                        # 清除第一篇的冲突标记，使其成为主论文
-                        main_paper.conflict_marker = False
-                        conflict_list.append(new_paper)
-                        conflict_papers.append(new_paper)
-                        print(f"警告：论文 {new_paper.title[:50]}... 的所有同身份论文都有冲突标记，将第一篇清除标记并作为主论文")
-            else:
-                # 新论文，添加到列表
-                non_conflict_papers.append((new_paper, []))
-                added_papers.append(new_paper)
-                print(f"论文: {new_paper.title}——作为新论文添加")
+            # 时间解析
+            try:
+                ts = datetime.strptime(p.submission_time, "%Y-%m-%d %H:%M:%S")
+                ts_val = ts.timestamp()
+            except Exception:
+                # 在 Windows 上 datetime.min.timestamp() 可能抛出 OSError
+                ts_val = 0.0
+
+            # 返回: (CategoryOrder, OriginalIndex, -Timestamp)
+            return (order_info[0], order_info[1], -1 * ts_val)
+
+        # 将每个 group 内部先按时间倒序排好，确保主论文（无冲突标记或最新的）在第一个
+        # 这里策略：如果有 conflict_marker=False 的，优先放在前面作为 Main
+        # 如果都有，选最新的作为 Main
         
-        # 排序
-        # 按category分组
-        category_groups = {}
-        for main_paper, conflict_list in non_conflict_papers:
-            if main_paper.category not in category_groups:
-                category_groups[main_paper.category] = []
-            category_groups[main_paper.category].append((main_paper, conflict_list))
+        all_groups = list(paper_groups.values())
         
-        # 每个category内部按提交时间倒序（假设有submission_time属性）
-        sorted_all_papers = []
-        for category in sorted(category_groups.keys()):
-            papers_in_category = category_groups[category]
-            # 按主论文的提交时间倒序排序
-            papers_in_category.sort(key=lambda x: x[0].submission_time, reverse=True)
-            
-            # 添加主论文和对应的冲突论文
-            for main_paper, conflict_list in papers_in_category:
-                # 先添加冲突论文（按提交时间倒序，最新的在最上面）
-                if conflict_list:
-                    conflict_list.sort(key=lambda x: x.submission_time, reverse=True)
-                    sorted_all_papers.extend(conflict_list)
-                
-                # 再添加主论文
-                sorted_all_papers.append(main_paper)
+        # 展平前先处理每个组的内部顺序
+        # 逻辑：非冲突且最新的 -> 冲突且最新的
+        for group in all_groups:
+            group.sort(key=lambda x: (not x.conflict_marker, x.submission_time), reverse=True)
         
-        # 保存更新后的数据库
-        df = self.update_utils.paper_to_excel(sorted_all_papers, only_non_system=False, skip_invalid=False)
-        password = self.get_password()
-        success = self.save_database(df, password)
+        # 此时 group[0] 是这一组的代表，用于通过 Category 排序
+        # 对 all_groups 进行排序
+        all_groups.sort(key=lambda g: get_sort_key(g[0]))
         
-        if success:
+        # 展平
+        for group in all_groups:
+            final_list.extend(group)
+
+        # 5. 保存
+        if self.save_database(final_list):
             return added_papers, conflict_papers, invalid_msg
         else:
-            print("保存数据库失败，添加的论文未能保存")
             return [], new_papers, invalid_msg
-    
-    def update_paper(self, paper: Paper, updates: Dict[str, Any]) -> bool:
+
+    def _is_strictly_equal(self, p1: Paper, p2: Paper) -> bool:
+        """比较非系统字段是否完全一致"""
+        d1 = p1.to_dict()
+        d2 = p2.to_dict()
+        
+        ignore_fields = {t['id'] for t in self.config.get_system_tags()}
+        # 还要忽略 uid ? 如果 uid 不同但内容相同，视作内容重复
+        ignore_fields.add('uid')
+        
+        keys = set(d1.keys()) | set(d2.keys())
+        for k in keys:
+            if k in ignore_fields: continue
+            v1 = str(d1.get(k, "")).strip()
+            v2 = str(d2.get(k, "")).strip()
+            if v1 != v2: return False
+        return True
+
+    def update_paper(self, target_paper: Paper, updates: Dict[str, Any]) -> bool:
         """更新单篇论文"""
-        df = self.load_database()
-        papers = self.update_utils.excel_to_paper(df,only_non_system=False, skip_invalid=False)
-        success = False
-
-        updated_papers=[]
-        # 查找论文
-        target_papers = [p for p in papers if is_same_identity(p, paper)]
-
-        for paper in papers:
-            if paper in target_papers:
-                if success == False:
-                    success = True
-                    # 应用更新
-                    for key, value in updates.items():
-                        if hasattr(paper, key):
-                                setattr(paper, key, value)
-                    updated_papers.append(paper)
-                else:
-                    continue # 只更新第一篇找到的，其他的过滤掉
-            else:
-                updated_papers.append(paper)
+        papers = self.load_database()
+        updated = False
+        
+        for i, p in enumerate(papers):
+            if is_same_identity(p, target_paper):
+                # 如果是冲突组，需要确保只更新特定的那一个（比较对象引用或内容）
+                # 这里简单处理：如果 target_paper 传的是对象引用最好
+                # 或者比较所有字段
+                # 简化逻辑：更新第一个匹配 identity 的（通常 UI 只会让用户操作主条目）
+                # 为了支持冲突处理，可能需要更精确的匹配（如比较 uid 或 raw index）
+                # 假设 UI 传递的是完整的原始对象进行定位：
                 
-        # 保存更新
-        df = self.update_utils.paper_to_excel(updated_papers,only_non_system=False, skip_invalid=False) 
-        password = self.get_password()
-        return self.save_database(df, password)
+                # 尝试通过 UID 匹配 (最准)
+                if p.uid and target_paper.uid and p.uid == target_paper.uid:
+                    self._apply_updates(papers[i], updates)
+                    updated = True
+                    break
+                
+                # 否则 Fallback 到 Identity 且内容高度相似
+                if not updated: 
+                    self._apply_updates(papers[i], updates)
+                    updated = True
+                    break
         
-    
-    def delete_paper(self, paper: Paper) -> bool:
-        """删除单篇论文"""
-        df = self.load_database()
-        papers = self.update_utils.excel_to_paper(df,only_non_system=False, skip_invalid=False)
-        
-        # 过滤掉要删除的论文
-        filtered_papers = [p for p in papers if not is_same_identity(p, paper)]
+        if updated:
+            return self.save_database(papers)
+        return False
 
-        if len(filtered_papers) < len(papers):
-            # 有论文被删除
-            df = self.update_utils.paper_to_excel(filtered_papers,only_non_system=False)
-            password = self.get_password()
-            return self.save_database(df, password)
+    def _apply_updates(self, paper: Paper, updates: Dict):
+        for k, v in updates.items():
+            if hasattr(paper, k):
+                setattr(paper, k, v)
+
+    def delete_paper(self, target_paper: Paper) -> bool:
+        """删除论文"""
+        papers = self.load_database()
+        original_len = len(papers)
         
+        # 优先 UID
+        if target_paper.uid:
+            papers = [p for p in papers if p.uid != target_paper.uid]
+        else:
+            # Fallback identity
+            papers = [p for p in papers if not is_same_identity(p, target_paper)]
+            
+        if len(papers) < original_len:
+            return self.save_database(papers)
         return False

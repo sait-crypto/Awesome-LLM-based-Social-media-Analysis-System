@@ -1140,9 +1140,9 @@ class PaperSubmissionGUI:
                     if child_list:
                         for c in child_list:
                             text_lines.append(f"└── {c['name']}")
-                            text_lines.append(f"     Unique Name: {c['unique_name']}")
+                            text_lines.append(f"    Unique Name: {c['unique_name']}")
                             if c.get('description'):
-                                text_lines.append(f"     Description: {c.get('description')}")
+                                text_lines.append(f"    Description: {c.get('description')}")
                             text_lines.append("")
                 
                 

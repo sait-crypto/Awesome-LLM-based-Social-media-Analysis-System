@@ -29,7 +29,8 @@ project/
 │   ├── submit_gui.py
 │   ├── submit_logic.py 
 │   ├── update.py
-│   └── utils.py
+│   ├── utils.py
+│   └── validate.py
 ├── tests/
 ├── paper_database.xlsx
 ├── pyproject.toml

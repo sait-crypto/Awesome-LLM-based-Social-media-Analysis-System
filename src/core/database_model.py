@@ -1,19 +1,14 @@
-
-
 """
 数据库模型
 定义论文数据模型
-该脚本不应使用任何非基础第三方包，以供submit_gui调用
 """
 from dataclasses import dataclass, field, asdict, fields
 from typing import Dict, List, Optional, Union, Any, Tuple
 from datetime import datetime
-import hashlib
 import sys
 import os
 import re
 
-from src.core.config_loader import get_config_instance
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
@@ -21,15 +16,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
 # 导入工具函数
 from src.utils import (
     validate_url, validate_doi, clean_doi, format_authors,
-    validate_authors, normalize_pipeline_image, validate_pipeline_image,validate_date,
-    get_current_timestamp, validate_invalid_fields
+    validate_authors, validate_date, validate_invalid_fields
 )
 
+from src.core.config_loader import get_config_instance
 
 @dataclass
 class Paper:
     """论文数据模型"""
     
+    # 唯一资源标识符 (New)
+    uid: str = ""
+
     # 基础信息
     doi: str = ""
     title: str = ""
@@ -80,11 +78,6 @@ class Paper:
         self.doi = clean_doi(self.doi, conflict_marker) if self.doi else ""
         self.authors = format_authors(self.authors) if self.authors else ""
         
-        # 规范化pipeline_image
-        if self.pipeline_image:
-            figure_dir = config.settings['paths'].get('figure_dir', 'figures')
-            self.pipeline_image = normalize_pipeline_image(self.pipeline_image, figure_dir)
-
         # 规范化 Date (Publish Date)
         if self.date:
             _, normalized_date = validate_date(self.date)
@@ -144,6 +137,7 @@ class Paper:
         conflict_marker = config_instance.settings['database'].get('conflict_marker')
         required_tags = config_instance.get_required_tags() if check_required else []
         active_tags = config_instance.get_active_tags()
+        project_root = config_instance.project_root
         
         # 0. 辅助函数：判断是否需要验证当前字段
         def should_check(var_name):
@@ -160,41 +154,52 @@ class Paper:
         
         if should_check('category'):
             try:
-                raw_cat = str(temp_category) if temp_category else ""
-                # 使用 update_file_utils 的方法进行统一规范化（若可用）
-                normalized_cat = raw_cat
-                try:
-                    from src.core.update_file_utils import UpdateFileUtils
-                    ufu = UpdateFileUtils()
-                    normalized_cat = ufu.normalize_category_value(raw_cat, config_instance)
-                except Exception:
-                    # 回退实现
-                    parts = [p.strip() for p in re.split(r'[;；]', raw_cat) if p.strip()]
-                    seen = set()
-                    out = []
-                    try:
-                        max_allowed = int(config_instance.settings['database'].get('max_categories_per_paper', 4))
-                    except Exception:
-                        max_allowed = 4
-                    for part in parts:
-                        cat = config_instance.get_category_by_name_or_unique_name(part)
-                        uname = cat.get('unique_name') if cat else part
-                        if uname not in seen:
-                            seen.add(uname)
-                            out.append(uname)
-                        if len(out) >= max_allowed:
-                            break
-                    normalized_cat = ";".join(out)
-                
-                # 如果不是纯验证模式，回写
+                from src.core.update_file_utils import get_update_file_utils
+                ufu = get_update_file_utils()
+                normalized_cat = ufu.normalize_category_value(str(temp_category), config_instance)
                 if not no_normalize:
                     self.category = normalized_cat
                 else:
-                    # 验证模式下使用规范化后的值进行后续检查（如重复检查）
                     temp_category = normalized_cat
-            except Exception:
-                pass
-        
+            except Exception: pass
+
+        # === 资源路径验证 (Assets) ===
+        # 检查资源是否规范地位于 assets/{uid}/ 下
+        for asset_field in ['pipeline_image', 'paper_file']:
+            if should_check(asset_field):
+                from src.core.update_file_utils import get_update_file_utils
+                ufu = get_update_file_utils()
+                # 1. 检查格式: assets/{uid}/filename
+                if not self.uid:
+                    normalized = ufu.normalize_assets(self)  # 生成 UID 和规范化路径（副作用）
+                    self.uid = normalized.uid  # 确保 UID 被设置
+                    self.pipeline_image = normalized.pipeline_image
+                    self.paper_file = normalized.paper_file
+                val = getattr(self, asset_field, "")
+                if val:
+                    # 分割多图情况
+                    paths = [p.strip() for p in re.split(r'[;；]', str(val)) if p.strip()]
+                    for p in paths:
+
+
+                        if not self.uid:
+                            errors.append(f"{asset_field} 存在资源路径但 Paper UID 为空，无法验证资源路径规范性")
+                            invalid_vars.add(asset_field)
+                            continue
+
+                        elif not p.startswith(f"assets/{self.uid}/") and not p.startswith(f"assets\\{self.uid}\\"):
+                             # 兼容旧路径 figures/xxx, papers/xxx (如果不强制迁移)
+                             # 但如果要求严格 assets，这里应报错
+                             if not (p.startswith("figures") or p.startswith("papers")):
+                                 errors.append(f"{asset_field} 路径不规范: {p} (应在 assets/{self.uid}/ 下)")
+                                 invalid_vars.add(asset_field)
+                        
+                        # 2. 检查文件是否存在
+                        full_path = os.path.join(project_root, p)
+                        if not os.path.exists(full_path):
+                             errors.append(f"{asset_field} 文件不存在: {p}")
+                             invalid_vars.add(asset_field)
+
         # 1. 特殊字段验证
         
         # 验证 invalid_fields 字段格式
@@ -227,45 +232,6 @@ class Paper:
                 elif not no_normalize:
                     self.authors = formatted_authors
         
-        # Pipeline图片验证
-        if should_check('pipeline_image'):
-            if self.pipeline_image:
-                figure_dir = config_instance.settings['paths'].get('figure_dir', 'figures')
-                pipeline_valid, normalized_path = validate_pipeline_image(self.pipeline_image, figure_dir)
-                if not pipeline_valid and check_non_empty:
-                    errors.append(f"Pipeline图片格式无效: {self.pipeline_image}")
-                    invalid_vars.add('pipeline_image')
-                elif pipeline_valid:
-                    if not no_normalize:
-                        self.pipeline_image = normalized_path
-        # 验证 paper_file
-        if should_check('paper_file'):
-            if self.paper_file:
-                paper_dir = config_instance.settings['paths'].get('paper_dir', 'assets/papers/')
-                # 复用 image 的路径规范化逻辑 (因为逻辑是一样的：相对路径 check)
-                is_valid, normalized_path = validate_pipeline_image(self.paper_file, paper_dir) 
-                # 注意：validate_pipeline_image 会检查图片后缀，这里我们需要忽略后缀检查或者使用通用路径检查
-                # 这里暂时简单检查是否在目录下
-                from src.utils import normalize_figure_path
-                normalized = normalize_figure_path(self.paper_file, paper_dir)
-                # 简单验证：必须是相对路径且在目录下
-                if ".." in normalized or normalized.startswith("/"): # Basic check
-                     pass # 实际上 normalize_figure_path 已经处理了大部分
-                
-                if not no_normalize:
-                    self.paper_file = normalized
-        
-        # URL验证
-        if should_check('paper_url'):
-            if self.paper_url and not validate_url(self.paper_url) and check_non_empty:
-                errors.append(f"论文链接格式无效: {self.paper_url}")
-                invalid_vars.add('paper_url')
-        
-        if should_check('project_url'):
-            if self.project_url and not validate_url(self.project_url) and check_non_empty:
-                errors.append(f"项目链接格式无效: {self.project_url}")
-                invalid_vars.add('project_url')
-        
         # 日期验证
         if should_check('date'):
             if self.date:
@@ -275,17 +241,29 @@ class Paper:
                     invalid_vars.add('date')
                 elif not no_normalize:
                     self.date = formatted_date
+
+        # URL 验证
+        for url_field in ['paper_url', 'project_url']:
+            if should_check(url_field):
+                val = getattr(self, url_field, "")
+                if val and not validate_url(val) and check_non_empty:
+                    errors.append(f"{url_field} 格式无效")
+                    invalid_vars.add(url_field)
                 
+
+        # === 必填与非空检查 ===
+        current_cat_val = temp_category if no_normalize else self.category
+
         # 2. 必填字段检查
         if check_required:
             for tag in required_tags:
-                var_name = tag['variable']
+                var_name = tag['id']
                 if not should_check(var_name):
                     continue
                     
                 display_name = tag.get('display_name', var_name)
                 # 使用 self 中的值 (注意 category 可能在 temp_category 中)
-                value = temp_category if var_name == 'category' and no_normalize else getattr(self, var_name, "")
+                value = current_cat_val if var_name == 'category' else getattr(self, var_name, "")
                 
                 # 在验证前忽略 conflict_marker
                 try:
@@ -301,7 +279,7 @@ class Paper:
         # 3. 非空字段检查（类型验证和validation字段验证）
         if check_non_empty:
             for tag in active_tags:
-                var_name = tag['variable']
+                var_name = tag['id']
                 if not should_check(var_name):
                     continue
                     
@@ -309,7 +287,7 @@ class Paper:
                 tag_type = tag.get('type', 'string')
                 validation_pattern = tag.get('validation')
                 
-                value = temp_category if var_name == 'category' and no_normalize else getattr(self, var_name, "")
+                value = current_cat_val if var_name == 'category' else getattr(self, var_name, "")
                 
                 # 跳过空值（除非是必填字段，已经在上面检查过了）
                 try:
@@ -440,6 +418,7 @@ class Paper:
             no_normalize=False # 默认保持原行为，更新对象
         )
         return errors
+    
 
 
 # Paper对象间级方法

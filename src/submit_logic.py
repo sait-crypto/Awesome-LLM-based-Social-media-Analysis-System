@@ -1,25 +1,24 @@
 """
 提交系统的业务逻辑层
 处理数据管理、文件读写、Git操作和Zotero集成
+适配 CSV/JSON 和 Assets 架构
 """
 import os
 import sys
 import threading
 import subprocess
 import time
-from typing import Dict, List, Any, Optional, Tuple
 import shutil
-import configparser
-import json
+import uuid
+from typing import Dict, List, Any, Optional, Tuple
 
-# 保持与原文件一致的路径处理
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.core.config_loader import get_config_instance
 from src.core.database_model import Paper, is_same_identity
 from src.core.update_file_utils import get_update_file_utils
 from src.process_zotero_meta import ZoteroProcessor
-from src.utils import clean_doi
+from src.utils import clean_doi, ensure_directory
 
 # 锚定根目录
 BASE_DIR = str(get_config_instance().project_root)
@@ -37,19 +36,20 @@ class SubmitLogic:
         # 论文数据列表
         self.papers: List[Paper] = []
         
-        # 路径配置
-        self.update_json_path = os.path.join(BASE_DIR, self.settings['paths']['update_json'])
-        self.update_excel_path = os.path.join(BASE_DIR, self.settings['paths']['update_excel'])
+        # 默认使用 JSON 作为主要更新文件，如果未配置则使用 CSV
+        self.primary_update_file = self.settings['paths'].get('update_json', 'submit_template.json')
+        if not self.primary_update_file:
+             self.primary_update_file = self.settings['paths'].get('update_csv', 'submit_template.csv')
         
+        # 绝对路径
+        if self.primary_update_file and not os.path.isabs(self.primary_update_file):
+            self.primary_update_file = os.path.join(BASE_DIR, self.primary_update_file)
+
         self.conflict_marker = self.settings['database']['conflict_marker']
         self.PLACEHOLDER = "to be filled in"
-
-
-        self.figure_dir = self.settings['paths'].get('figure_dir', 'assets/figures/')
-        self.paper_dir = self.settings['paths'].get('paper_dir', 'assets/papers/')
-        # 确保目录存在
-        os.makedirs(os.path.join(BASE_DIR, self.figure_dir), exist_ok=True)
-        os.makedirs(os.path.join(BASE_DIR, self.paper_dir), exist_ok=True)
+        
+        # 资源目录配置
+        self.assets_dir = self.settings['paths'].get('assets_dir', 'assets/')
 
         # PR配置
         try:
@@ -65,10 +65,10 @@ class SubmitLogic:
     def load_existing_updates(self) -> int:
         """加载默认更新文件中的论文"""
         count = 0
-        if os.path.exists(self.update_json_path):
+        if self.primary_update_file and os.path.exists(self.primary_update_file):
             try:
-                loaded_papers = self.update_utils.load_papers_from_json(self.update_json_path, skip_invalid=False)
-                self.papers.extend(loaded_papers)
+                # 使用通用的 read_data 接口
+                self.papers = self.update_utils.read_data(self.primary_update_file)
                 count = len(self.papers)
             except Exception as e:
                 raise Exception(f"加载更新文件失败: {e}")
@@ -76,7 +76,10 @@ class SubmitLogic:
 
     def create_new_paper(self) -> Paper:
         """创建一个新的占位符论文并添加到列表"""
+        # 创建时就分配一个临时 UID，方便关联资源
+        new_uid = str(uuid.uuid4())[:8]
         placeholder_data = {
+            'uid': new_uid,
             'title': self.PLACEHOLDER,
             'authors': self.PLACEHOLDER,
             'category': '',
@@ -91,7 +94,7 @@ class SubmitLogic:
         try:
             placeholder = Paper.from_dict(placeholder_data)
         except Exception:
-            placeholder = Paper.from_dict({'title': self.PLACEHOLDER})
+            placeholder = Paper(title=self.PLACEHOLDER, uid=new_uid)
             
         self.papers.append(placeholder)
         return placeholder
@@ -118,14 +121,14 @@ class SubmitLogic:
                 no_normalize=False
             )
              if not valid:
-                 invalid_papers.append((i+1, paper.title[:50], errors[:2]))
+                 invalid_papers.append((i+1, paper.title[:30], errors[:2]))
         return invalid_papers
 
     def check_save_conflicts(self, target_path: str) -> Tuple[List[Paper], bool]:
         """检查保存时的冲突，返回(合并后的列表, 是否有冲突)"""
         existing_papers = []
         if os.path.exists(target_path):
-            existing_papers = self.update_utils.load_papers_from_json(target_path, skip_invalid=False)
+            existing_papers = self.update_utils.read_data(target_path)
         
         merged_papers = list(existing_papers)
         existing_map = {}
@@ -135,61 +138,67 @@ class SubmitLogic:
 
         has_conflict = False
         
-        # 预处理当前论文并检查冲突
         for paper in self.papers:
+            # 预处理
             paper.doi = clean_doi(paper.doi, self.conflict_marker) if paper.doi else ""
             paper.category = self.update_utils.normalize_category_value(paper.category, self.config)
             
+            # 确保 UID (如果不保存只是检查，可以先不生成，但为了统一逻辑，这里确保一下)
+            if not paper.uid:
+                paper.uid = str(uuid.uuid4())[:8]
+
             key = paper.get_key()
             if key in existing_map:
                 has_conflict = True
-                # 这里我们不合并，只标记冲突，具体合并逻辑在 perform_save 中根据用户选择处理
             else:
-                pass # 这里只是预检查
+                pass 
                 
         return merged_papers, has_conflict
 
-    def perform_save(self, target_path: str, overwrite_duplicates: bool = False) -> List[Paper]:
-        """执行保存操作"""
+    def perform_save(self, target_path: str, conflict_mode: str = 'overwrite_duplicates') -> List[Paper]:
+        """执行保存操作 (包含 Assets 规范化)"""
         existing_papers = []
         if os.path.exists(target_path):
-            existing_papers = self.update_utils.load_papers_from_json(target_path, skip_invalid=False)
+            existing_papers = self.update_utils.read_data(target_path)
         
         merged_papers = list(existing_papers)
+        # 建立映射: Key -> List index
         existing_map = {}
         for idx, p in enumerate(existing_papers):
             key = p.get_key()
             existing_map[key] = idx
 
         for paper in self.papers:
-            # 再次确保规范化
+            # 1. 规范化 Assets (移动文件到 assets/{uid})
+            # 这是一个副作用操作，会将 temp 文件归档
+            paper = self.update_utils.normalize_assets(paper)
+
+            # 2. 规范化其他字段
             paper.doi = clean_doi(paper.doi, self.conflict_marker) if paper.doi else ""
             paper.category = self.update_utils.normalize_category_value(paper.category, self.config)
             
             key = paper.get_key()
+            
             if key in existing_map:
-                if overwrite_duplicates:
+                if conflict_mode == 'overwrite_duplicates' or conflict_mode == 'overwrite_all':
                     idx = existing_map[key]
                     merged_papers[idx] = paper
+                elif conflict_mode == 'skip_duplicates' or conflict_mode == 'skip_all':
+                    continue
+                # 如果是逐个询问模式，上层逻辑应该已经处理好了 papers 列表的去留，
+                # 这里默认按照 overwrite 处理剩余的
             else:
                 merged_papers.append(paper)
+                # 更新 map 以防止 self.papers 内部也有重复
+                existing_map[key] = len(merged_papers) - 1
 
-        self.update_utils.save_papers_to_json(target_path, merged_papers, skip_invalid=False)
+        # 写入文件
+        self.update_utils.write_data(target_path, merged_papers)
         return merged_papers
 
     def load_from_template(self, filepath: str) -> int:
-        """从模板文件加载论文，替换当前列表"""
-        new_papers = []
-        if filepath.endswith('.json'):
-            data = self.update_utils.read_json_file(filepath)
-            if data and 'papers' in data:
-                for paper_data in data['papers']:
-                    new_papers.append(Paper.from_dict(paper_data))
-        elif filepath.endswith('.xlsx'):
-            import pandas as pd
-            df = pd.read_excel(filepath, engine='openpyxl')
-            new_papers = self.update_utils.excel_to_paper(df, only_non_system=True)
-        
+        """从文件加载论文"""
+        new_papers = self.update_utils.read_data(filepath)
         self.papers = new_papers
         return len(self.papers)
 
@@ -201,14 +210,15 @@ class SubmitLogic:
 
     def add_zotero_papers(self, papers: List[Paper]) -> int:
         """批量添加Zotero论文"""
+        # 为新论文分配 UID
+        for p in papers:
+            if not p.uid:
+                p.uid = str(uuid.uuid4())[:8]
         self.papers.extend(papers)
         return len(papers)
 
     def get_zotero_fill_updates(self, source_paper: Paper, target_index: int) -> Tuple[List[str], List[Tuple[str, Any]]]:
-        """
-        计算Zotero填充的更新内容
-        返回: (冲突字段列表, 待更新字段列表[(field, val)])
-        """
+        """计算Zotero填充的更新内容"""
         if not (0 <= target_index < len(self.papers)):
             return [], []
             
@@ -216,10 +226,10 @@ class SubmitLogic:
         conflicts = []
         fields_to_update = []
         
-        system_fields = [t["variable"] for t in self.config.get_system_tags()]
+        system_fields = [t["id"] for t in self.config.get_system_tags()] # 使用 ID 匹配
         
         for field in source_paper.__dataclass_fields__:
-            if field in ['invalid_fields', 'is_placeholder'] or field in system_fields:
+            if field in ['invalid_fields', 'is_placeholder', 'uid'] or field in system_fields:
                 continue
             
             val = getattr(source_paper, field)
@@ -247,11 +257,47 @@ class SubmitLogic:
                 updated_count += 1
         return updated_count
 
+    # ================= Assets Import (New) =================
+    
+    def import_file_asset(self, src_path: str, asset_type: str) -> str:
+        """
+        GUI 临时导入文件资源：
+        1. 将文件复制到 assets/temp/ 目录 (防止源文件被移动/删除)
+        2. 返回 assets/temp/filename 相对路径供 GUI 显示
+        3. 保存时 (perform_save -> normalize_assets) 会将其移动到 assets/{uid}/
+        """
+        if not src_path or not os.path.exists(src_path):
+            return ""
+        
+        # 临时目录 assets/temp/
+        temp_dir = os.path.join(BASE_DIR, self.assets_dir, 'temp')
+        ensure_directory(temp_dir)
+        
+        filename = os.path.basename(src_path)
+        # 防止重名：加时间戳
+        name, ext = os.path.splitext(filename)
+        timestamp = int(time.time())
+        # 简单检查是否存在，存在则加后缀
+        if os.path.exists(os.path.join(temp_dir, filename)):
+            filename = f"{name}_{timestamp}{ext}"
+            
+        dest_path = os.path.join(temp_dir, filename)
+        
+        try:
+            shutil.copy2(src_path, dest_path)
+            # 返回相对路径 (正斜杠)
+            rel_path = f"{self.assets_dir}temp/{filename}".replace('\\', '/')
+            return rel_path
+        except Exception as e:
+            print(f"Import file failed: {e}")
+            return ""
+
     # ================= PR 提交逻辑 =================
 
     def has_update_files(self) -> bool:
         """检查是否存在更新文件"""
-        return os.path.exists(self.update_json_path)
+        # 只要主更新文件存在即可
+        return self.primary_update_file and os.path.exists(self.primary_update_file)
 
     def execute_pr_submission(self, status_callback, result_callback, error_callback):
         """执行PR提交的线程函数"""
@@ -263,6 +309,19 @@ class SubmitLogic:
                 except (subprocess.CalledProcessError, FileNotFoundError):
                     raise Exception("Git未安装！")
                 
+                # 获取待提交文件列表
+                files_to_commit = []
+                paths = self.settings['paths']
+                # 收集配置中所有有效的更新文件
+                check_keys = ['update_csv', 'update_json', 'my_update_csv', 'my_update_json']
+                for k in check_keys:
+                    p = paths.get(k)
+                    if p and os.path.exists(os.path.join(BASE_DIR, p) if not os.path.isabs(p) else p):
+                         files_to_commit.append(p)
+                
+                if not files_to_commit:
+                    raise Exception("没有找到可提交的更新文件！")
+
                 # 获取当前分支
                 result = subprocess.run(["git", "branch", "--show-current"], 
                                        capture_output=True, text=True, cwd=BASE_DIR)
@@ -283,27 +342,19 @@ class SubmitLogic:
                 else:
                     branch_name = current_branch
                 
-                # 添加文件
-                have_files = False
-                try:
-                    if os.path.exists(self.update_json_path):
-                        have_files = True
-                        subprocess.run(["git", "add", self.update_json_path], 
-                                     check=True, capture_output=True, cwd=BASE_DIR)
-                    if os.path.exists(self.update_excel_path):
-                        have_files = True
-                        subprocess.run(["git", "add", self.update_excel_path], 
-                                     check=True, capture_output=True, cwd=BASE_DIR)
-                    
-                    if not have_files:
-                        raise Exception("没有找到可提交的更新文件！")
-                        
-                    # 提交
-                    subprocess.run(["git", "commit", "-m", f"Add {len(self.papers)} papers via GUI"], 
-                                   check=True, capture_output=True, cwd=BASE_DIR)
-                    status_callback("已提交更改到本地仓库")
-                except subprocess.CalledProcessError as e:
-                    raise Exception(f"提交更改失败: {e.stderr}")
+                # 添加更新文件
+                for f in files_to_commit:
+                    subprocess.run(["git", "add", f], check=True, capture_output=True, cwd=BASE_DIR)
+                
+                # 重要：添加 assets 目录 (包含新添加的资源)
+                # 使用 assets/ 递归添加
+                if os.path.exists(os.path.join(BASE_DIR, self.assets_dir)):
+                     subprocess.run(["git", "add", self.assets_dir], check=True, capture_output=True, cwd=BASE_DIR)
+
+                # 提交
+                subprocess.run(["git", "commit", "-m", f"Add {len(self.papers)} papers via GUI"], 
+                               check=True, capture_output=True, cwd=BASE_DIR)
+                status_callback("已提交更改到本地仓库")
                 
                 # 推送
                 try:
@@ -313,7 +364,7 @@ class SubmitLogic:
                 except subprocess.CalledProcessError as e:
                     raise Exception(f"推送失败: {e.stderr}")
                 
-                # 创建 PR
+                # 创建 PR (尝试使用 gh cli)
                 pr_url = None
                 try:
                     pr_title = f"论文提交: {len(self.papers)} 篇新论文"
@@ -333,18 +384,16 @@ class SubmitLogic:
                         if res.returncode == 0:
                             pr_url = res.stdout.strip()
                         else:
-                            # 即使GH失败，推送已完成，由用户手动创建
                             raise Exception(f"GitHub CLI创建PR失败: {res.stderr}")
                     else:
-                        # 抛出特定异常以触发手动指引
                         raise Exception("GitHub CLI not installed")
 
                 except Exception as e:
+                    # 推送成功但PR创建失败，引导手动创建
                     if "GitHub CLI" in str(e):
                         result_callback(None, branch_name, manual_guide=True)
                     else:
                         result_callback(None, branch_name, manual_guide=False)
-                    # 此时不应抛出异常终止，因为推送已成功
                 else:
                     result_callback(pr_url, branch_name, manual_guide=False)
 
@@ -357,83 +406,6 @@ class SubmitLogic:
                 
         threading.Thread(target=run, daemon=True).start()
 
-
-
-    def import_file_asset(self, src_path: str, asset_type: str) -> str:
-        """
-        导入文件资源到项目目录
-        asset_type: 'figure' or 'paper'
-        返回: 相对路径字符串
-        """
-        if not src_path or not os.path.exists(src_path):
-            return ""
-        
-        dest_dir = self.figure_dir if asset_type == 'figure' else self.paper_dir
-        abs_dest_dir = os.path.join(BASE_DIR, dest_dir)
-        
-        filename = os.path.basename(src_path)
-        # 简单避免重名覆盖
-        if os.path.exists(os.path.join(abs_dest_dir, filename)):
-            name, ext = os.path.splitext(filename)
-            filename = f"{name}_{int(time.time())}{ext}"
-            
-        dest_path = os.path.join(abs_dest_dir, filename)
-        try:
-            shutil.copy2(src_path, dest_path)
-            # 返回相对路径（使用正斜杠）
-            rel_path = os.path.join(dest_dir, filename).replace('\\', '/')
-            return rel_path
-        except Exception as e:
-            print(f"Copy file failed: {e}")
-            return ""
-
     def save_ai_config(self, profiles: List[Dict], active_profile: str, enable_ai: bool):
-        """保存AI配置到 config.ini"""
-        config = configparser.ConfigParser()
-        user_path = os.path.join(self.config.config_path, 'config.ini')
-        if os.path.exists(user_path):
-            config.read(user_path, encoding='utf-8')
-        
-        if 'ai' not in config:
-            config['ai'] = {}
-            
-        config['ai']['enable_ai_generation'] = str(enable_ai).lower()
-        config['ai']['active_profile'] = active_profile
-        config['ai']['profiles_json'] = json.dumps(profiles) # 使用JSON存储列表
-        
-        with open(user_path, 'w', encoding='utf-8') as f:
-            config.write(f)
-        
-        # 重新加载
-        self.config = get_config_instance() # Reload
-
-    def perform_save(self, target_path: str, conflict_mode: str = 'ask') -> List[Paper]:
-        """
-        执行保存
-        conflict_mode: 'ask', 'overwrite_all', 'skip_all'
-        """
-        existing_papers = []
-        if os.path.exists(target_path):
-            existing_papers = self.update_utils.load_papers_from_json(target_path, skip_invalid=False)
-        
-        merged_papers = list(existing_papers)
-        existing_map = {p.get_key(): idx for idx, p in enumerate(existing_papers)}
-
-        for paper in self.papers:
-            # 规范化
-            paper.doi = clean_doi(paper.doi, self.conflict_marker) if paper.doi else ""
-            paper.category = self.update_utils.normalize_category_value(paper.category, self.config)
-            
-            key = paper.get_key()
-            if key in existing_map:
-                if conflict_mode == 'overwrite_all':
-                    idx = existing_map[key]
-                    merged_papers[idx] = paper
-                elif conflict_mode == 'skip_all':
-                    continue
-                # 'ask' 模式应在 GUI 层处理，Logic 层假设调用时已确定策略
-            else:
-                merged_papers.append(paper)
-
-        self.update_utils.save_papers_to_json(target_path, merged_papers, skip_invalid=False)
-        return merged_papers
+        """保存AI配置 (代理到ConfigLoader)"""
+        self.config.save_ai_settings(enable_ai, active_profile, profiles)
