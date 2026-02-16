@@ -11,14 +11,17 @@ import time
 import shutil
 import uuid
 from typing import Dict, List, Any, Optional, Tuple
+import re
+import copy # 新增
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.core.config_loader import get_config_instance
 from src.core.database_model import Paper, is_same_identity
+from src.core.database_manager import DatabaseManager
 from src.core.update_file_utils import get_update_file_utils
 from src.process_zotero_meta import ZoteroProcessor
-from src.utils import clean_doi, ensure_directory
+from src.utils import clean_doi, ensure_directory, generate_paper_uid
 
 # 锚定根目录
 BASE_DIR = str(get_config_instance().project_root)
@@ -31,10 +34,12 @@ class SubmitLogic:
         self.config = get_config_instance()
         self.settings = get_config_instance().settings
         self.update_utils = get_update_file_utils()
+        self.db_manager = DatabaseManager()
         self.zotero_processor = ZoteroProcessor()
         
         # 论文数据列表
         self.papers: List[Paper] = []
+        self.current_file_path: Optional[str] = None # 当前编辑的文件路径
         
         # 默认使用 JSON 作为主要更新文件，如果未配置则使用 CSV
         self.primary_update_file = self.settings['paths'].get('update_json', 'submit_template.json')
@@ -62,40 +67,213 @@ class SubmitLogic:
         if '--no-pr' in sys.argv or os.environ.get('NO_PR', '').lower() in ('1', 'true'):
             self.pr_enabled = False
 
+        # 管理员相关（当前没有实现自选位置吗）
+        self.is_admin = False
+        self.admin_password_path = self.settings['database'].get('administer_password_path', '')
+        if not self.admin_password_path:
+             # 默认位置
+             self.admin_password_path = os.path.join(BASE_DIR, 'admin_key.txt')
+
+        self.update_json_path = self.settings['paths'].get('update_json', 'submit_template.json')
+    # ================= 文件加载与管理 =================
+
+    def load_papers_from_file(self, filepath: str) -> int:
+        """加载指定文件"""
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"文件不存在: {filepath}")
+        
+        # 权限检查：如果是数据库文件且未登录
+        if self._is_database_file(filepath) and not self.is_admin:
+            raise PermissionError("需要管理员权限才能打开数据库文件")
+
+        success,self.papers = self.update_utils.read_data(filepath)
+        if not success:
+            print(f"加载文件失败: {filepath}")
+        self.current_file_path = filepath
+        return len(self.papers)
+
+
     def load_existing_updates(self) -> int:
         """加载默认更新文件中的论文"""
         count = 0
         if self.primary_update_file and os.path.exists(self.primary_update_file):
             try:
                 # 使用通用的 read_data 接口
-                self.papers = self.update_utils.read_data(self.primary_update_file)
+                success,self.papers = self.update_utils.read_data(self.primary_update_file)
+                if not success:                    
+                    print(f"加载更新文件失败: {self.primary_update_file}")
                 count = len(self.papers)
             except Exception as e:
                 raise Exception(f"加载更新文件失败: {e}")
         return count
 
+    def _is_database_file(self, filepath: str) -> bool:
+        """检查路径是否为核心数据库"""
+        db_path = self.settings['paths']['database']
+        if not os.path.isabs(db_path):
+            db_path = os.path.join(BASE_DIR, db_path)
+        
+        # 简单路径比对
+        try:
+            return os.path.samefile(filepath, db_path)
+        except:
+            return os.path.abspath(filepath) == os.path.abspath(db_path)
+
+    # ================= 筛选与搜索 =================
+
+    def filter_papers(self, keyword: str = "", category: str = "") -> List[int]:
+        """
+        根据条件筛选论文
+        返回符合条件的论文在 self.papers 中的索引列表
+        """
+        indices = []
+        kw = keyword.lower().strip()
+        cat = category.strip()
+        
+        for i, p in enumerate(self.papers):
+            # Category 过滤 (修复空值报错)
+            if cat and cat != "All Categories":
+                raw_cat = p.category if p.category else ""
+                # 支持多分类匹配
+                p_cats = [c.strip() for c in re.split(r'[;；]', raw_cat) if c.strip()]
+                if cat not in p_cats:
+                    continue
+            
+            # Keyword 过滤
+            if kw:
+                # 搜索范围: title, authors, doi, notes
+                # 修复 None 导致的报错
+                title = p.title if p.title else ""
+                authors = p.authors if p.authors else ""
+                doi = p.doi if p.doi else ""
+                notes = p.notes if p.notes else ""
+                
+                content = f"{title} {authors} {doi} {notes}".lower()
+                if kw not in content:
+                    continue
+            
+            indices.append(i)
+        return indices
+    
+    # ================= 列表操作 (新增功能) =================
+
+    def move_paper(self, from_index: int, to_index: int):
+        """移动论文位置"""
+        if from_index == to_index: return
+        if not (0 <= from_index < len(self.papers) and 0 <= to_index < len(self.papers)): return
+        
+        item = self.papers.pop(from_index)
+        self.papers.insert(to_index, item)
+
+    def duplicate_paper(self, index: int) -> int:
+        """拷贝论文，返回新索引"""
+        if 0 <= index < len(self.papers):
+            new_paper = copy.deepcopy(self.papers[index])
+            # # 重置系统字段
+            # new_paper.uid = "" 
+            # new_paper.conflict_marker = False
+            # new_paper.title = f"{new_paper.title} (Copy)"
+            self.papers.insert(index + 1, new_paper)
+            return index + 1
+        return -1
+
+    def find_base_paper_index(self, conflict_index: int) -> int:
+        """查找冲突论文对应的基论文索引"""
+        if not (0 <= conflict_index < len(self.papers)): return -1
+        
+        conflict_paper = self.papers[conflict_index]
+        # 简单逻辑：向前查找同一个Identity且非冲突的论文
+        # 或者遍历所有论文查找
+        for i, p in enumerate(self.papers):
+            if i == conflict_index: continue
+            if is_same_identity(p, conflict_paper) and not p.conflict_marker:
+                return i
+        return -1
+
+    def merge_papers_custom(self, base_index: int, conflict_index: int, final_data: Dict[str, Any]):
+        """
+        合并冲突：使用前端传入的具体数据(final_data)更新基论文，并删除冲突论文
+        """
+        base = self.papers[base_index]
+        
+        for field, value in final_data.items():
+            if hasattr(base, field):
+                setattr(base, field, value)
+        
+        # 标记处理完毕（防止逻辑混乱，其实可以直接删除）
+        base.conflict_marker = False
+        
+        # 删除冲突论文
+        self.delete_paper(conflict_index)
+
+    # ================= 保存逻辑 (新) =================
+
+    def save_to_file_rewrite(self, target_path: str):
+        """重写模式：完全用当前列表覆盖目标文件"""
+        # 如果是数据库，走数据库专用逻辑
+        if self._is_database_file(target_path):
+            if not self.is_admin: raise PermissionError("无权限写入数据库")
+            self.db_manager.save_database(self.papers)
+        else:
+            # 普通文件，先处理 Assets 归档
+            for p in self.papers:
+                self.update_utils.normalize_assets(p)
+            self.update_utils.write_data(target_path, self.papers)
+
+    def save_to_file_incremental(self, target_path: str, conflict_decisions: Dict[str, str]):
+        """
+        增量模式：读取目标文件，根据 decisions 决定如何合并当前的新增项
+        conflict_decisions: { paper_key: 'overwrite' | 'skip' }
+        """
+        success, existing_papers = self.update_utils.read_data(target_path)
+        if not success: existing_papers = []
+        
+        existing_map = {p.get_key(): i for i, p in enumerate(existing_papers)}
+        
+        # 待追加的论文
+        papers_to_append = []
+        
+        for p in self.papers:
+            # 规范化
+            self.update_utils.normalize_assets(p)
+            p.doi = clean_doi(p.doi, self.conflict_marker)
+            
+            key = p.get_key()
+            
+            if key in existing_map:
+                decision = conflict_decisions.get(key, 'skip') # 默认跳过
+                if decision == 'overwrite':
+                    idx = existing_map[key]
+                    existing_papers[idx] = p # 替换
+            else:
+                papers_to_append.append(p)
+        
+        # 合并
+        final_list = existing_papers + papers_to_append
+        self.update_utils.write_data(target_path, final_list)
+        return final_list
+
+    def get_conflicts_for_save(self, target_path: str) -> List[Paper]:
+        """预检查：返回当前列表中与目标文件冲突的论文"""
+        if not os.path.exists(target_path): return []
+        
+        success, existing = self.update_utils.read_data(target_path)
+        if not success: return []
+        
+        existing_keys = {p.get_key() for p in existing}
+        conflicts = []
+        
+        for p in self.papers:
+            if p.get_key() in existing_keys:
+                conflicts.append(p)
+        return conflicts
+
     def create_new_paper(self) -> Paper:
         """创建一个新的占位符论文并添加到列表"""
         # 创建时就分配一个临时 UID，方便关联资源
+        # 占位符不使用基于 title/doi 的稳定 uid，保持随机短 UUID
         new_uid = str(uuid.uuid4())[:8]
-        placeholder_data = {
-            'uid': new_uid,
-            'title': self.PLACEHOLDER,
-            'authors': self.PLACEHOLDER,
-            'category': '',
-            'doi': '',
-            'paper_url': '',
-            'project_url': '',
-            'conference': '',
-            'contributor': '',
-            'notes': '',
-            'status': ''
-        }
-        try:
-            placeholder = Paper.from_dict(placeholder_data)
-        except Exception:
-            placeholder = Paper(title=self.PLACEHOLDER, uid=new_uid)
-            
+        placeholder = Paper(title=self.PLACEHOLDER, uid=new_uid)
         self.papers.append(placeholder)
         return placeholder
 
@@ -128,7 +306,9 @@ class SubmitLogic:
         """检查保存时的冲突，返回(合并后的列表, 是否有冲突)"""
         existing_papers = []
         if os.path.exists(target_path):
-            existing_papers = self.update_utils.read_data(target_path)
+            success,existing_papers = self.update_utils.read_data(target_path)
+            if not success:
+                print(f"加载文件失败: {target_path}")
         
         merged_papers = list(existing_papers)
         existing_map = {}
@@ -145,7 +325,7 @@ class SubmitLogic:
             
             # 确保 UID (如果不保存只是检查，可以先不生成，但为了统一逻辑，这里确保一下)
             if not paper.uid:
-                paper.uid = str(uuid.uuid4())[:8]
+                paper.uid = generate_paper_uid(getattr(paper, 'title', ''), getattr(paper, 'doi', ''))
 
             key = paper.get_key()
             if key in existing_map:
@@ -156,10 +336,24 @@ class SubmitLogic:
         return merged_papers, has_conflict
 
     def perform_save(self, target_path: str, conflict_mode: str = 'overwrite_duplicates') -> List[Paper]:
-        """执行保存操作 (包含 Assets 规范化)"""
+        """
+        执行保存操作 (包含 Assets 规范化)
+        数据库操作使用覆盖模式
+        """
+
+        # 如果目标是数据库文件，需要使用 db_manager.save_database
+        if self._is_database_file(target_path):
+            if not self.is_admin: raise PermissionError("无权限写入数据库")
+            # 数据库保存直接覆盖 (Full Save)
+            self.db_manager.save_database(self.papers)
+            return self.papers
+
+
         existing_papers = []
         if os.path.exists(target_path):
-            existing_papers = self.update_utils.read_data(target_path)
+            success,existing_papers = self.update_utils.read_data(target_path)
+            if not success:
+                print(f"加载文件失败: {target_path}")
         
         merged_papers = list(existing_papers)
         # 建立映射: Key -> List index
@@ -198,9 +392,33 @@ class SubmitLogic:
 
     def load_from_template(self, filepath: str) -> int:
         """从文件加载论文"""
-        new_papers = self.update_utils.read_data(filepath)
+        success, new_papers = self.update_utils.read_data(filepath)
+        if not success:
+            print(f"加载文件失败: {filepath}")
+            return 0
         self.papers = new_papers
         return len(self.papers)
+    
+    # ================= 管理员权限 =================
+
+    def check_admin_password_configured(self) -> bool:
+        return os.path.exists(self.admin_password_path)
+
+    def verify_admin_password(self, password: str) -> bool:
+        if not self.check_admin_password_configured(): return False
+        try:
+            with open(self.admin_password_path, 'r', encoding='utf-8') as f:
+                stored = f.read().strip()
+            return stored == password
+        except: return False
+
+    def set_admin_password(self, password: str):
+        ensure_directory(os.path.dirname(self.admin_password_path))
+        with open(self.admin_password_path, 'w', encoding='utf-8') as f:
+            f.write(password)
+
+    def set_admin_mode(self, enabled: bool):
+        self.is_admin = enabled
 
     # ================= Zotero 逻辑 =================
 
@@ -213,7 +431,7 @@ class SubmitLogic:
         # 为新论文分配 UID
         for p in papers:
             if not p.uid:
-                p.uid = str(uuid.uuid4())[:8]
+                p.uid = generate_paper_uid(getattr(p, 'title', ''), getattr(p, 'doi', ''))
         self.papers.extend(papers)
         return len(papers)
 
@@ -226,7 +444,11 @@ class SubmitLogic:
         conflicts = []
         fields_to_update = []
         
-        system_fields = [t["id"] for t in self.config.get_system_tags()] # 使用 ID 匹配
+        system_fields = [
+            t.get("variable")
+            for t in self.config.get_system_tags()
+            if t.get("variable")
+        ]
         
         for field in source_paper.__dataclass_fields__:
             if field in ['invalid_fields', 'is_placeholder', 'uid'] or field in system_fields:

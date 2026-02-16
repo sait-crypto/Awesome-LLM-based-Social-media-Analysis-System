@@ -6,6 +6,8 @@ import shutil
 import os
 import re
 import json
+import hashlib
+import uuid
 from typing import List, Dict, Any, Optional,Tuple
 from datetime import datetime
 from pathlib import Path
@@ -367,6 +369,20 @@ def truncate_text(text: str, max_length: int, ellipsis: str = "...") -> str:
 def get_current_timestamp() -> str:
     """获取当前时间戳"""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def generate_paper_uid(title: str, doi: str, length: int = 8) -> str:
+    """
+    根据论文的 title 和 doi 生成一个稳定的短 UID（默认 8 字符十六进制）
+    如果 title 和 doi 都为空，则回退为短 UUID
+    """
+    t = (title or "").strip()
+    d = (doi or "").strip()
+    key = f"{t}|{d}"
+    if not t and not d:
+        return str(uuid.uuid4())[:length]
+    h = hashlib.sha1(key.encode('utf-8')).hexdigest()
+    return h[:length]
 
 
 def compare_papers(paper1: Dict, paper2: Dict, key_fields: List[str] = None) -> List[str]:

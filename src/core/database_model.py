@@ -257,7 +257,9 @@ class Paper:
         # 2. 必填字段检查
         if check_required:
             for tag in required_tags:
-                var_name = tag['id']
+                var_name = tag.get('variable')
+                if not var_name:
+                    continue
                 if not should_check(var_name):
                     continue
                     
@@ -279,7 +281,9 @@ class Paper:
         # 3. 非空字段检查（类型验证和validation字段验证）
         if check_non_empty:
             for tag in active_tags:
-                var_name = tag['id']
+                var_name = tag.get('variable')
+                if not var_name:
+                    continue
                 if not should_check(var_name):
                     continue
                     
@@ -465,10 +469,15 @@ def _papers_fields_equal(new: Union[Paper, Dict[str, Any]], exist: Union[Paper, 
     
     比较 DOI 时会忽略 conflict_marker。
     """
-    conflict_marker = get_config_instance().settings['database'].get('conflict_marker','')
     if ignore_fields is None:
         system_tags=get_config_instance().get_system_tags()
-        ignore_fields = [t["variable"] for t in system_tags]
+        ignore_fields = [
+            t["variable"]
+            for t in system_tags
+            if isinstance(t.get("variable"), str) and t.get("variable")
+        ]
+    else:
+        ignore_fields = list(ignore_fields)
 
     if isinstance(new, Paper):
         a_dict = new.to_dict()
@@ -569,7 +578,9 @@ def is_duplicate_paper(existing_papers: List[Paper], new_paper: Paper,complete_c
         return False,''
     first_conflict_field = ''
     for ex in same_identity_entries:
-        equal,first_conflict_field = _papers_fields_equal(ex, new_paper,complete_compare)
+        # _papers_fields_equal 的签名为 (new, exist, ...)
+        # 这里应将新提交的论文放在第一个参数，已有条目放在第二个参数
+        equal,first_conflict_field = _papers_fields_equal(new_paper, ex, complete_compare)
         if equal:
             return True,''
     return False,first_conflict_field

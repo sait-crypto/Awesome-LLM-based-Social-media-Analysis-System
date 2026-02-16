@@ -6,7 +6,7 @@
 import os
 import sys
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog, scrolledtext
+from tkinter import ttk, messagebox, filedialog, scrolledtext, simpledialog
 from typing import Dict, List, Any, Optional, Tuple
 import threading 
 import subprocess
@@ -28,8 +28,8 @@ class PaperSubmissionGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("Awesome 论文规范化提交处理界面")
-        self.root.geometry("1200x800")
+        self.root.title("Awesome 论文提交系统")
+        self.root.geometry("1300x850")
         
         # 初始化业务逻辑控制器
         self.logic = SubmitLogic()
@@ -39,6 +39,8 @@ class PaperSubmissionGUI:
         self.settings = self.logic.settings
         
         self.current_paper_index = -1
+        # 存储当前筛选后的索引列表 [real_index_in_logic_papers, ...]
+        self.filtered_indices: List[int] = [] 
         
         # 尺寸调整：紧凑 (1.1)
         self.root.tk.call('tk', 'scaling', 1.3)
@@ -46,10 +48,12 @@ class PaperSubmissionGUI:
         self.color_invalid = "#FFC0C0" 
         self.color_required_empty = "#E6F7FF"
         self.color_normal = "white"
+        self.color_conflict = "#FFEEEE" # 冲突行背景色
         
         self.style = ttk.Style()
         self.style.map('Invalid.TCombobox', fieldbackground=[('readonly', self.color_invalid)])
         self.style.map('Required.TCombobox', fieldbackground=[('readonly', self.color_required_empty)])
+        self.style.configure("Conflict.Treeview", background=self.color_conflict)
 
         self._suppress_select_event = False
         
@@ -61,9 +65,13 @@ class PaperSubmissionGUI:
         }
 
         self.setup_ui()
+        
+        # 检查管理员状态并更新UI
+        self._update_admin_ui_state()
+        
         self.load_initial_data()
         
-        messagebox.showinfo("须知",f"该界面用于:\n    1.规范化生成的处理json更新文件\n    2.自动分支并提交PR（完整版功能）\n如果根目录中的submit_template.xlsx或submit_template.json已按规范填写内容，你可以手动提交PR或使用该界面自动分支并提交PR，您提交的内容会自动更新到仓库论文列表")
+        messagebox.showinfo("须知",f"该界面用于:\n    1.规范化生成的处理json/csv更新文件\n    2.自动分支并提交PR（完整版功能）\n如果根目录中的submit_template.xlsx或submit_template.json已按规范填写内容，你可以手动提交PR或使用该界面自动分支并提交PR，您提交的内容会自动更新到仓库论文列表")
         
         self.tooltip = None
         self.show_placeholder()
@@ -72,8 +80,9 @@ class PaperSubmissionGUI:
         try:
             count = self.logic.load_existing_updates()
             if count > 0:
-                self.update_paper_list()
-                self.update_status(f"已从{self.logic.update_json_path}加载 {count} 篇论文")
+                self.refresh_list_view()
+                filename = os.path.basename(self.logic.primary_update_file) if self.logic.primary_update_file else "Template"
+                self.update_status(f"已从 {filename} 加载 {count} 篇论文")
         except Exception as e:
             messagebox.showerror("错误", str(e))
 
@@ -87,25 +96,66 @@ class PaperSubmissionGUI:
         main_frame.columnconfigure(1, weight=1) 
         main_frame.rowconfigure(1, weight=1)
         
-        title_label = ttk.Label(main_frame, text="🎓 Awesome 论文规范化提交处理界面", font=("Arial", 14, "bold"))
-        title_label.grid(row=0, column=0, columnspan=3, pady=(0, 5))
+        # === 顶部 Header 区域 ===
+        header_frame = ttk.Frame(main_frame)
+        header_frame.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 5))
         
-        self.paned_window = ttk.PanedWindow(main_frame, orient=tk.HORIZONTAL)
+        title_label = ttk.Label(header_frame, text="🎓 Awesome 论文规范化提交处理界面", font=("Arial", 14, "bold"))
+        title_label.pack(side=tk.LEFT)
+        
+        # 显示当前活跃的更新文件提示
+        active_files = []
+        paths = self.logic.config.settings['paths']
+        for k in ['update_json', 'update_csv', 'my_update_json', 'my_update_csv']:
+            p = paths.get(k)
+            if p: active_files.append(os.path.basename(p))
+                
+        # 额外更新文件
+        extra = paths.get('extra_update_files_list', [])
+        active_files.extend([os.path.basename(f) for f in extra])
+        
+        files_str = ", ".join(active_files[:6])
+        if len(active_files) > 6: files_str += "..."
+        
+        info_label = ttk.Label(header_frame, text=f"  [Active: {files_str}]", foreground="gray")
+        info_label.pack(side=tk.LEFT, padx=10)
+
+        # 管理员切换按钮
+        self.admin_btn = ttk.Button(header_frame, text="🔒 管理员模式", command=self._toggle_admin_mode, width=15)
+        self.admin_btn.pack(side=tk.RIGHT)
+        
+        # === 主分割窗口 ===
+        self.paned_window = tk.PanedWindow(
+            main_frame,
+            orient=tk.HORIZONTAL,
+            sashwidth=5,
+            sashrelief=tk.RAISED,
+            showhandle=False,
+            opaqueresize=True,
+            bd=0
+            
+        )
         self.paned_window.grid(row=1, column=0, columnspan=3, sticky="nsew", padx=(0,0), pady=(0,0))
 
         left_frame = ttk.Frame(self.paned_window)
         self.right_container = ttk.Frame(self.paned_window)
 
         left_frame.columnconfigure(0, weight=1)
-        left_frame.rowconfigure(1, weight=1)
+        left_frame.rowconfigure(2, weight=1) # Treeview expands
         self.right_container.columnconfigure(0, weight=1)
         self.right_container.rowconfigure(0, weight=1)
         
         self.setup_paper_list_frame(left_frame)
         self.setup_paper_form_frame(self.right_container)
         
-        self.paned_window.add(left_frame, weight=1)
-        self.paned_window.add(self.right_container, weight=7)
+        self.paned_window.add(left_frame, minsize=250, stretch="always")
+        self.paned_window.add(self.right_container, minsize=500, stretch="always")
+
+        def _set_initial_sash_position():
+            total_width = self.paned_window.winfo_width()
+            if total_width > 1:
+                self.paned_window.sash_place(0, int(total_width * 0.22), 0)
+        self.root.after_idle(_set_initial_sash_position)
 
         self.placeholder_label = ttk.Label(
             self.right_container,
@@ -118,59 +168,146 @@ class PaperSubmissionGUI:
         self.setup_buttons_frame(main_frame)
         self.setup_status_bar(main_frame)
     
+# ================= 1. 论文列表区域布局修改 =================
+
     def setup_paper_list_frame(self, parent):
-        list_title = ttk.Label(parent, text="📚 论文列表", font=("Arial", 11, "bold"))
-        list_title.grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
+        # 定义 grid 权重，确保 list_frame (row 1) 占据绝大部分空间
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(0, weight=0) # Header
+        parent.rowconfigure(1, weight=1) # Treeview (Expand)
+        parent.rowconfigure(2, weight=0) # Buttons
+
+        # --- Row 0: 标题 + 搜索 + 筛选 ---
+        header_frame = ttk.Frame(parent)
+        header_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
         
+        # 1. 标题
+        list_title = ttk.Label(header_frame, text="📚 论文列表", font=("Arial", 11, "bold"))
+        list_title.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # 2. 分类筛选 (Right)
+        self.cat_filter_combo = ttk.Combobox(header_frame, state="readonly", width=15)
+        cats = ["All Categories"] + [c['name'] for c in self.config.get_active_categories()]
+        self.cat_filter_combo['values'] = cats
+        self.cat_filter_combo.set("All Categories")
+        self.cat_filter_combo.bind("<<ComboboxSelected>>", self._on_search_change)
+        self.cat_filter_combo.pack(side=tk.RIGHT)
+        
+        # 3. 搜索框 (Middle Fill) - 带占位符逻辑
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Entry(header_frame, textvariable=self.search_var)
+        self.search_entry.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=5)
+        
+        # 占位符逻辑
+        self._search_placeholder = "输入关键词进行筛选..."
+        self._search_is_placeholder = True
+        
+        def on_search_focus_in(event):
+            if self._search_is_placeholder:
+                self.search_var.set("")
+                self.search_entry.config(foreground='black')
+                self._search_is_placeholder = False
+
+        def on_search_focus_out(event):
+            if not self.search_var.get():
+                self._search_is_placeholder = True
+                self.search_var.set(self._search_placeholder)
+                self.search_entry.config(foreground='gray')
+            
+        # 初始化占位符
+        on_search_focus_out(None)
+        
+        # 绑定事件
+        self.search_entry.bind("<FocusIn>", on_search_focus_in)
+        self.search_entry.bind("<FocusOut>", on_search_focus_out)
+        # 只有当不是占位符时才触发搜索逻辑
+        def on_trace(*args):
+            if not self._search_is_placeholder:
+                self._on_search_change()
+        self.search_var.trace("w", on_trace)
+
+
+        # --- Row 1: 列表区域 ---
         list_frame = ttk.Frame(parent)
         list_frame.grid(row=1, column=0, sticky="nsew")
         
-        list_frame.columnconfigure(1, weight=1)
+        list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
         
-        columns = ("ID", "标题", "作者", "分类")
+        columns = ("ID", "Title", "Status") 
         self.paper_tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=15)
         
-        for col in columns:
-            self.paper_tree.heading(col, text=col)
-            if col == "ID": self.paper_tree.column(col, width=30)
-            elif col == "标题": self.paper_tree.column(col, width=180)
-            elif col == "作者": self.paper_tree.column(col, width=70)
-            else: self.paper_tree.column(col, width=100)
+        self.paper_tree.heading("ID", text="#")
+        self.paper_tree.heading("Title", text="Title")
+        self.paper_tree.heading("Status", text="Status")
+        
+        self.paper_tree.column("ID", width=40, anchor="center")
+        self.paper_tree.column("Title", width=200)
+        self.paper_tree.column("Status", width=60, anchor="center")
+        
+        self.paper_tree.tag_configure('conflict', background=self.color_conflict)
         
         scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.paper_tree.yview)
         self.paper_tree.configure(yscrollcommand=scrollbar.set)
         
-        self.paper_tree.grid(row=0, column=1, sticky="nsew")
-        scrollbar.grid(row=0, column=0, sticky="ns")
+        self.paper_tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
     
         self.paper_tree.bind('<<TreeviewSelect>>', self.on_paper_selected)
         self.paper_tree.bind('<Enter>', lambda e: self._bind_global_scroll(self.paper_tree.yview_scroll))
         
+        self.paper_tree.bind("<Button-3>", self._show_context_menu)
+        self.paper_tree.bind("<Button-1>", self._on_drag_start)
+        self.paper_tree.bind("<B1-Motion>", self._on_drag_motion)
+        self.paper_tree.bind("<ButtonRelease-1>", self._on_drag_release)
+        
+        # --- Row 2: 按钮区域 (调整顺序) ---
         list_buttons_frame = ttk.Frame(parent)
-        list_buttons_frame.grid(row=2, column=0, pady=(5, 0))
+        list_buttons_frame.grid(row=2, column=0, pady=(5, 0), sticky="ew")
         
-        add_button = ttk.Button(list_buttons_frame, text="➕ 添加论文", command=self.add_paper, width=15)
-        add_button.grid(row=0, column=0, padx=(0, 5))
-        
-        delete_button = ttk.Button(list_buttons_frame, text="🗑 删除论文", command=self.delete_paper, width=15)
-        delete_button.grid(row=0, column=1, padx=(0, 5))
-        
-        clear_button = ttk.Button(list_buttons_frame, text="🧹 清空列表", command=self.clear_papers, width=15)
-        clear_button.grid(row=0, column=2)
-    
+        # 按文字长度分配：Zotero 略宽，其他三个略窄
+        list_buttons_frame.columnconfigure(0, weight=14)
+        list_buttons_frame.columnconfigure(1, weight=10)
+        list_buttons_frame.columnconfigure(2, weight=10)
+        list_buttons_frame.columnconfigure(3, weight=10)
+
+        ttk.Button(list_buttons_frame, text="📑 从Zotero新建", command=self.add_from_zotero_meta).grid(
+            row=0, column=0, sticky="ew", padx=2
+        )
+        ttk.Button(list_buttons_frame, text="➕ 新建论文", command=self.add_paper).grid(
+            row=0, column=1, sticky="ew", padx=2
+        )
+        ttk.Button(list_buttons_frame, text="🗑 删除论文", command=self.delete_paper).grid(
+            row=0, column=2, sticky="ew", padx=2
+        )
+        ttk.Button(list_buttons_frame, text="🧹 清空列表", command=self.clear_papers).grid(
+            row=0, column=3, sticky="ew", padx=2
+        )
+
+    # ================= 2. 表单区域布局 (按钮宽度对齐) =================
+
     def setup_paper_form_frame(self, parent):
         self.form_container = ttk.Frame(parent)
         
+        # --- 标题栏 (Grid 对齐) ---
         title_frame = ttk.Frame(self.form_container)
-        title_frame.grid(row=0, column=0, sticky=tk.W, pady=(0, 10))
+        title_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         
+        # 定义列权重：Col 0 是 Label，Col 1 是 Button (要拉伸)
+        title_frame.columnconfigure(1, weight=1)
+
         form_title = ttk.Label(title_frame, text="📝 论文详情", font=("Arial", 11, "bold"))
-        form_title.pack(side=tk.LEFT, padx=(0, 10))
+        # 给 Label 一个固定的 minsize 或者 padx，使其宽度大致等于下方 Label 的宽度
+        # 假设下方 Label 宽度大约 120px
+        form_title.grid(row=0, column=0, sticky="w", padx=(0, 5))
         
-        fill_zotero_btn = ttk.Button(title_frame, text="📋 从Zotero Meta填充表单", command=self.fill_from_zotero_meta, width=200)
-        fill_zotero_btn.pack(side=tk.LEFT, padx=(55, 0))
+        fill_zotero_btn = ttk.Button(title_frame, text="📋 填充当前表单 (Zotero)", command=self.fill_from_zotero_meta)
+        # sticky="ew" 让按钮横向填满，实现“右边也对齐”
+        # padx=(5, 5) 这里的左边距需要手动调整以对齐下方的输入框起始位置
+        # 下方输入框起始位置 = Label Width + Label Padding
+        fill_zotero_btn.grid(row=0, column=1, sticky="ew", padx=(15, 5)) 
         
+        # --- 可滚动区域 ---
         self.form_canvas = tk.Canvas(self.form_container)
         scrollbar = ttk.Scrollbar(self.form_container, orient=tk.VERTICAL, command=self.form_canvas.yview)
         
@@ -192,12 +329,18 @@ class PaperSubmissionGUI:
         self.form_canvas.bind("<Configure>", self._on_canvas_configure)
         
         self.create_form_fields()
+
     
     def _on_canvas_configure(self, event):
         if event.width > 1:
             self.form_canvas.itemconfig(self.form_canvas_window, width=event.width)
 
     def create_form_fields(self):
+        """动态生成表单字段"""
+        # 清除旧控件（用于切换管理员模式时刷新）
+        for widget in self.form_frame.winfo_children():
+            widget.destroy()
+
         row = 0
         active_tags = self.config.get_active_tags()
         
@@ -205,15 +348,16 @@ class PaperSubmissionGUI:
         self.field_widgets = {}
         
         for tag in active_tags:
-            if not tag.get('show_in_readme', True) and tag.get('variable') not in [
-                'doi', 'title', 'authors', 'date', 'category', 'status',
-                'paper_url', 'project_url', 'abstract',
-                'conference', 'contributor', 'notes','is_placeholder',
-                'paper_file', 'title_translation'
-            ]:
+            # 逻辑：如果是系统字段且不是管理员模式，隐藏
+            # 管理员模式下，显示所有字段（包括 id, conflict_marker 等）
+            is_system = tag.get('system_var', False)
+            if is_system and not self.logic.is_admin:
                 continue
             
-            variable = tag['variable']
+            # 逻辑：tag['variable'] 是唯一标识
+            variable = tag.get('variable')
+            if not variable:
+                continue
             display_name = tag['display_name']
             description = tag.get('description', '')
             required = tag.get('required', False)
@@ -221,13 +365,17 @@ class PaperSubmissionGUI:
             
             label_text = f"{display_name}* :" if required else f"{display_name} :"
             
+            # 特殊标注系统字段
+            if is_system:
+                label_text = f"[SYS] {label_text}"
+            
             label = ttk.Label(self.form_frame, text=label_text)
             label_sticky = tk.NW if field_type == 'text' else tk.W
             
             label.grid(row=row, column=0, sticky=label_sticky, pady=(2, 2))
             if description: self.create_tooltip(label, description)
             
-            # === 1. Category Field ===
+            # === 1. Category Field (Complex) ===
             if field_type == 'enum[]' and variable == 'category':
                 container = ttk.Frame(self.form_frame)
                 container.grid(row=row, column=1, sticky="we", pady=(2, 2), padx=(5, 0))
@@ -252,14 +400,16 @@ class PaperSubmissionGUI:
                 self.form_fields[variable] = container
                 self.field_widgets[variable] = container
 
-            # === 2. File Fields ===
+            # === 2. File Fields (Asset Import) ===
             elif variable in ['pipeline_image', 'paper_file']:
                 self._create_file_field_ui(row, variable)
 
             # === 3. Standard Enum ===
             elif field_type == 'enum':
                 values = tag.get('options', [])
-                if variable == 'status': values = ['unread', 'reading', 'done', 'skimmed', 'adopted']
+                # Hardcoded fallback for status if not in config
+                if variable == 'status' and not values: 
+                    values = ['unread', 'reading', 'done', 'skimmed', 'adopted']
                 
                 combo = ttk.Combobox(self.form_frame, values=values, state='readonly')
                 combo.grid(row=row, column=1, sticky="we", pady=(2, 2), padx=(5, 0))
@@ -283,7 +433,7 @@ class PaperSubmissionGUI:
                 text_frame = ttk.Frame(self.form_frame)
                 text_frame.grid(row=row, column=1, sticky="we", pady=(2, 2), padx=(5, 0))
                 
-                height = 4 if variable in ['abstract', 'notes'] else 2#最小貌似就是4行
+                height = 4 if variable in ['abstract', 'notes'] else 2
                 text_widget = scrolledtext.ScrolledText(text_frame, height=height, width=50, undo=True, maxundo=-1)
                 text_widget.grid(row=0, column=0, sticky="nsew")
                 
@@ -317,54 +467,52 @@ class PaperSubmissionGUI:
         self.form_frame.columnconfigure(1, weight=1)
 
     def _import_file_asset_once(self, src_path: str, asset_type: str, field_name: str) -> str:
-        """
-        智能导入文件资源，避免重复导入
-        
-        Args:
-            src_path: 源文件路径（绝对路径或相对路径）
-            asset_type: 'figure' or 'paper'
-            field_name: 'pipeline_image' or 'paper_file'
+            """
+            智能导入文件资源，避免重复导入
+            Args:
+                src_path: 源文件路径（绝对路径或相对路径）
+                asset_type: 'figure' or 'paper'
+                field_name: 'pipeline_image' or 'paper_file'
+            Returns:
+                相对路径字符串
+            """
+            # 1. 如果是相对路径且文件存在，直接返回（已经在项目中）
+            if not os.path.isabs(src_path):
+                rel_check = os.path.join(BASE_DIR, src_path)
+                if os.path.exists(rel_check):
+                    # 更新跟踪记录
+                    self._imported_files[field_name] = (src_path, src_path)
+                    return src_path
             
-        Returns:
-            相对路径字符串
-        """
-        # 1. 如果是相对路径且文件存在，直接返回（已经在项目中）
-        if not os.path.isabs(src_path):
-            rel_check = os.path.join(BASE_DIR, src_path)
-            if os.path.exists(rel_check):
-                # 更新跟踪记录
-                self._imported_files[field_name] = (src_path, src_path)
-                return src_path
-        
-        # 2. 如果是绝对路径，检查是否已经在项目目录中
-        if os.path.isabs(src_path):
-            try:
-                # 尝试获取相对于项目的路径
-                rel_path = os.path.relpath(src_path, BASE_DIR).replace('\\', '/')
-                # 如果文件在项目目录内，直接使用相对路径
-                if not rel_path.startswith('..'):
-                    self._imported_files[field_name] = (src_path, rel_path)
-                    return rel_path
-            except ValueError:
-                # 不同驱动器，无法计算相对路径
-                pass
-        
-        # 3. 检查是否已经导入过这个源文件
-        if field_name in self._imported_files and self._imported_files[field_name]:
-            cached_src, cached_dest = self._imported_files[field_name]
-            # 如果源文件相同，直接返回之前的目标路径
-            if cached_src == src_path:
-                return cached_dest
-        
-        # 4. 需要导入新文件，调用底层方法
-        rel_path = self.logic.import_file_asset(src_path, asset_type)
-        if rel_path:
-            # 记录导入信息
-            self._imported_files[field_name] = (src_path, rel_path)
-        return rel_path
+            # 2. 如果是绝对路径，检查是否已经在项目目录中
+            if os.path.isabs(src_path):
+                try:
+                    # 尝试获取相对于项目的路径
+                    rel_path = os.path.relpath(src_path, BASE_DIR).replace('\\', '/')
+                    # 如果文件在项目目录内，直接使用相对路径
+                    if not rel_path.startswith('..'):
+                        self._imported_files[field_name] = (src_path, rel_path)
+                        return rel_path
+                except ValueError:
+                    # 不同驱动器，无法计算相对路径
+                    pass
+            
+            # 3. 检查是否已经导入过这个源文件 (缓存机制)
+            if field_name in self._imported_files and self._imported_files[field_name]:
+                cached_src, cached_dest = self._imported_files[field_name]
+                # 如果源文件相同，直接返回之前的目标路径
+                if cached_src == src_path:
+                    return cached_dest
+            
+            # 4. 需要导入新文件，调用底层方法 (导入到 assets/temp/)
+            rel_path = self.logic.import_file_asset(src_path, asset_type)
+            if rel_path:
+                # 记录导入信息
+                self._imported_files[field_name] = (src_path, rel_path)
+            return rel_path
 
     def _create_file_field_ui(self, row, variable):
-        """Helper to create file fields with correct layout and scoping"""
+        """Helper to create file fields with correct layout, scoping, and Drag-and-Drop"""
         frame = ttk.Frame(self.form_frame)
         frame.grid(row=row, column=1, sticky="we", pady=(2, 2), padx=(5, 0))
         
@@ -381,56 +529,20 @@ class PaperSubmissionGUI:
         entry.config(textvariable=sv)
         entry.textvariable = sv
         
-        # 拖放功能支持 (可选依赖 tkinterdnd2)
+        # 拖放功能支持 (tkinterdnd2)
         def setup_drag_drop(widget):
             """设置拖放支持"""
-            # 检查是否有全局拖放支持标记
+            # 检查是否有全局拖放支持标记 (在main中初始化)
             if not hasattr(self.root, '_dnd_available'):
+                # 简单检测是否是 DnD 实例
                 try:
-                    import tkinterdnd2
-                    from tkinterdnd2 import TkinterDnD, DND_FILES
-                    
-                    # 检查root是否已经是TkinterDnD实例
-                    if not isinstance(self.root, TkinterDnD.Tk):
-                        # 如果不是，标记为不可用
-                        self.root._dnd_available = False
-                        self.root._dnd_reason = "需要使用 TkinterDnD.Tk 初始化根窗口"
-                    else:
-                        # 测试 tkdnd 是否可用
-                        try:
-                            self.root.tk.call('package', 'require', 'tkdnd')
-                            self.root._dnd_available = True
-                        except Exception:
-                            self.root._dnd_available = False
-                            self.root._dnd_reason = "tkdnd 库未正确加载"
-                            
-                except ImportError:
+                    self.root.tk.call('package', 'require', 'tkdnd')
+                    self.root._dnd_available = True
+                except:
                     self.root._dnd_available = False
-                    self.root._dnd_reason = "未安装 tkinterdnd2"
-                except Exception as e:
-                    self.root._dnd_available = False
-                    self.root._dnd_reason = str(e)
             
-            if not self.root._dnd_available:
-                # 拖放不可用，提供替代提示
-                tooltip_text = "使用「📂 浏览」按钮选择文件"
-                self.create_tooltip(widget, tooltip_text)
-                
-                # 绑定点击事件，提示用户安装
-                def on_click_show_tip(event):
-                    reason = getattr(self.root, '_dnd_reason', '未知原因')
-                    field_name = "Pipeline图" if variable == 'pipeline_image' else "论文文件"
-                    messagebox.showinfo(
-                        "拖放功能不可用", 
-                        f"拖放功能暂不可用（{reason}）\n\n"
-                        f"您仍可以使用「📂 浏览」按钮选择{field_name}。\n\n"
-                        f"如需启用拖放功能，请安装完整环境：\n"
-                        f"pip install tkinterdnd2"
-                    )
-                    # 只提示一次
-                    widget.unbind('<Button-1>')
-                
-                widget.bind('<Button-1>', on_click_show_tip, add='+')
+            if not getattr(self.root, '_dnd_available', False):
+                self.create_tooltip(widget, "使用「📂 浏览」按钮选择文件")
                 return
                 
             # 拖放可用，注册目标
@@ -465,17 +577,15 @@ class PaperSubmissionGUI:
                 
                 widget.drop_target_register(DND_FILES)
                 widget.dnd_bind('<<Drop>>', on_drop)
-                tooltip_text = "可拖放文件到此，或使用「📂 浏览」按钮"
-                self.create_tooltip(widget, tooltip_text)
+                self.create_tooltip(widget, "可拖放文件到此，或使用「📂 浏览」按钮")
                 
             except Exception as e:
-                self.root._dnd_available = False
-                self.root._dnd_reason = f"注册失败: {str(e)}"
+                print(f"DnD Registration failed: {e}")
         
         # 应用拖放支持
         setup_drag_drop(entry)
         
-        # FocusOut Event
+        # FocusOut Event (手动输入路径后的处理)
         def on_focus_out(event):
             path = sv.get().strip()
             if path and os.path.isabs(path) and os.path.exists(path):
@@ -485,7 +595,7 @@ class PaperSubmissionGUI:
                     sv.set(rel_path)
         entry.bind("<FocusOut>", on_focus_out)
 
-        # Browse
+        # Browse Button
         def browse_file():
             ft = [("Images", "*.png;*.jpg;*.jpeg")] if variable == 'pipeline_image' else [("PDF", "*.pdf")]
             path = filedialog.askopenfilename(filetypes=ft)
@@ -628,44 +738,39 @@ class PaperSubmissionGUI:
             btn.config(state='disabled')
 
     def setup_buttons_frame(self, parent):
-        """底部按钮区域重构"""
+        """底部按钮区域"""
         buttons_frame = ttk.Frame(parent)
         buttons_frame.grid(row=2, column=0, columnspan=2, pady=(15, 10))
         
-        # Left Group: Data & PR
-        add_zotero_btn = ttk.Button(buttons_frame, text="📑 从Zotero新建论文", command=self.add_from_zotero_meta, width=18)
-        add_zotero_btn.grid(row=0, column=0, padx=3)
+        # Group 1: Script Tools
+        script_frame = ttk.LabelFrame(buttons_frame, text="Script Tools")
+        script_frame.grid(row=0, column=0, padx=5, sticky="ns")
+        ttk.Button(script_frame, text="🔄 运行更新", command=self.run_update_script, width=12).pack(side=tk.LEFT, padx=5, pady=5)
+        ttk.Button(script_frame, text="✅ 运行验证", command=self.run_validate_script, width=12).pack(side=tk.LEFT, padx=5, pady=5)
 
-        save_all_button = ttk.Button(buttons_frame, text="📤 保存到文件", command=self.save_all_papers, width=18)
-        save_all_button.grid(row=0, column=1, padx=3)
+        # Group 2: File Operations (增加打开数据库)
+        file_frame = ttk.LabelFrame(buttons_frame, text="File Operations")
+        file_frame.grid(row=0, column=1, padx=5, sticky="ns")
+        
+        ttk.Button(file_frame, text="💾 打开数据库", command=self._open_database_action, width=12).pack(side=tk.LEFT, padx=5, pady=5)
+        ttk.Button(file_frame, text="📤 保存文件", command=self.save_all_papers, width=12).pack(side=tk.LEFT, padx=5, pady=5)
+        ttk.Button(file_frame, text="📂 加载文件", command=self.load_template, width=12).pack(side=tk.LEFT, padx=5, pady=5)
         
         if getattr(self.logic, 'pr_enabled', True):
-            submit_button = ttk.Button(buttons_frame, text="🚀 自动提交PR", command=self.submit_pr, width=18)
-            submit_button.grid(row=0, column=2, padx=3)
+            ttk.Button(file_frame, text="🚀 提交PR", command=self.submit_pr, width=12).pack(side=tk.LEFT, padx=5, pady=5)
         
-        load_template_button = ttk.Button(buttons_frame, text="📂 从文件加载", command=self.load_template, width=18)
-        load_template_button.grid(row=0, column=3, padx=3)
-        
-        # Spacer
-        ttk.Frame(buttons_frame, width=20).grid(row=0, column=4)
-        
-        # Right Group: AI Tools (Single Dropdown Button)
-        ai_frame = ttk.Frame(buttons_frame)
-        ai_frame.grid(row=0, column=5, padx=5, sticky="ns")
+        # Group 3: AI Tools (增加 LabelFrame)
+        ai_frame = ttk.LabelFrame(buttons_frame, text="AI Assistant")
+        ai_frame.grid(row=0, column=2, padx=5, sticky="ns")
         
         self.ai_btn_var = tk.StringVar(value="🤖 AI 助手 ▾")
-        ai_btn = ttk.Button(ai_frame, textvariable=self.ai_btn_var, width=18)
-        ai_btn.pack()
+        ai_btn = ttk.Button(ai_frame, textvariable=self.ai_btn_var, width=15)
+        ai_btn.pack(padx=5, pady=5)
         
         self.ai_menu = tk.Menu(self.root, tearoff=0)
-        
-        # Group 1: Config & Tools
         self.ai_menu.add_command(label="🧰 AI 工具箱", command=self.ai_toolbox_window)
         self.ai_menu.add_command(label="⚙️ AI 配置", command=self.open_ai_config_dialog)
-        
         self.ai_menu.add_separator()
-        
-        # Group 2: Actions
         self.ai_menu.add_command(label="✨ 生成所有空字段", command=lambda: self.run_ai_task(self.ai_generate_field, None))
         self.ai_menu.add_command(label="🏷️分类建议", command=self.ai_suggest_category)
         
@@ -673,8 +778,510 @@ class PaperSubmissionGUI:
             self.ai_menu.post(event.x_root, event.y_root)
         ai_btn.bind("<Button-1>", show_ai_menu)
 
+    # ================= 管理员逻辑 =================
+
+    def _toggle_admin_mode(self):
+        """切换管理员模式"""
+        if self.logic.is_admin:
+            # 退出管理员模式
+            self.logic.set_admin_mode(False)
+            self._update_admin_ui_state()
+            self._refresh_ui_fields()
+        else:
+            # 进入管理员模式
+            # 检查是否有密码配置
+            if not self.logic.check_admin_password_configured():
+                # 首次设置
+                pwd = simpledialog.askstring("设置管理员密码", "首次进入管理员模式，请设置密码:", show='*')
+                if pwd:
+                    self.logic.set_admin_password(pwd)
+                    self.logic.set_admin_mode(True)
+                    self._update_admin_ui_state()
+                    self._refresh_ui_fields()
+            else:
+                # 验证密码
+                pwd = simpledialog.askstring("管理员验证", "请输入管理员密码:", show='*')
+                if pwd:
+                    if self.logic.verify_admin_password(pwd):
+                        self.logic.set_admin_mode(True)
+                        self._update_admin_ui_state()
+                        self._refresh_ui_fields()
+                    else:
+                        messagebox.showerror("错误", "密码错误")
+
+    def _update_admin_ui_state(self):
+        """更新UI以反映管理员状态"""
+        if self.logic.is_admin:
+            self.admin_btn.config(text="🔓 管理员: ON")
+            self.root.title("Awesome 论文提交系统 [管理员模式]")
+        else:
+            self.admin_btn.config(text="🔒 管理员: OFF")
+            self.root.title("Awesome 论文提交系统")
+
+    def _refresh_ui_fields(self):
+        """完全重建表单字段 (根据管理员模式显示/隐藏字段)"""
+        # 清除现有
+        for widget in self.form_frame.winfo_children():
+            widget.destroy()
+        
+        # 重建
+        self.create_form_fields()
+        
+        # 重新加载当前论文（如果已选）
+        if self.current_paper_index >= 0 and self.current_paper_index < len(self.filtered_indices):
+            # 需要映射回真实 index
+            real_idx = self.filtered_indices[self.current_paper_index]
+            if 0 <= real_idx < len(self.logic.papers):
+                self.load_paper_to_form(self.logic.papers[real_idx])
+
+    # ================= 筛选与列表逻辑 =================
+
+    def _get_search_keyword(self) -> str:
+        if getattr(self, '_search_is_placeholder', False):
+            return ""
+        kw = self.search_var.get()
+        if kw == getattr(self, '_search_placeholder', ""):
+            return ""
+        return kw
+
+    def _on_search_change(self, *args):
+        kw = self._get_search_keyword()
+        cat = self.cat_filter_combo.get()
+        self.refresh_list_view(kw, cat)
+
+
+    def on_paper_selected(self, event):
+        if self._suppress_select_event: return
+        selection = self.paper_tree.selection()
+        if not selection:
+            self.current_paper_index = -1
+            self.show_placeholder()
+            return
+        
+        item = selection[0]
+        values = self.paper_tree.item(item, 'values')
+        
+        # values[0] 是显示序号 (1-based)，转换为 0-based index
+        display_index = int(values[0]) - 1
+        
+        if 0 <= display_index < len(self.filtered_indices):
+            # 获取在 logic.papers 中的真实索引
+            self.current_paper_index = display_index # 记录当前显示列表的选中索引
+            real_index = self.filtered_indices[display_index]
+            
+            self.show_form()
+            self.load_paper_to_form(self.logic.papers[real_index])
+            self._validate_all_fields_visuals(real_index)
+            self.update_status(f"正在编辑: {self.logic.papers[real_index].title[:30]}...")
+
+    def load_paper_to_form(self, paper):
+        self._disable_callbacks = True
+        
+        # 清空文件导入缓存
+        self._imported_files = {'pipeline_image': None, 'paper_file': None}
+        
+        try:
+            for variable, widget in self.form_fields.items():
+                value = getattr(paper, variable, "")
+                if value is None: value = ""
+                
+                # 记录文件字段缓存
+                if variable in ['pipeline_image', 'paper_file'] and value:
+                    self._imported_files[variable] = (value, value)
+                
+                if variable == 'category':
+                    unique_names = [v.strip() for v in str(value).split(';') if v.strip()]
+                    current_rows = getattr(self, 'category_rows', [])
+                    needed_rows = len(unique_names) if unique_names else 1
+                    while len(current_rows) < needed_rows: self._gui_add_category_row('')
+                    while len(current_rows) > needed_rows: 
+                        row_frame, _, _ = current_rows.pop()
+                        row_frame.destroy()
+                    for i in range(needed_rows):
+                        uname = unique_names[i] if i < len(unique_names) else ""
+                        display_name = self.category_reverse_mapping.get(uname, '')
+                        _, _, combo = current_rows[i]
+                        combo.set(display_name)
+                
+                elif isinstance(widget, ttk.Combobox): widget.set(str(value) if value else "")
+                elif isinstance(widget, tk.BooleanVar): widget.set(bool(value))
+                elif isinstance(widget, scrolledtext.ScrolledText):
+                    widget.delete(1.0, tk.END)
+                    widget.insert(1.0, str(value))
+                    widget.edit_reset()
+                elif isinstance(widget, tk.Entry):
+                    widget.delete(0, tk.END)
+                    widget.insert(0, str(value))
+        finally: self._disable_callbacks = False
+
+    def _on_field_change(self, variable, widget_or_var):
+        if getattr(self, '_disable_callbacks', False): return
+        if self.current_paper_index < 0: return
+        
+        # 获取真实论文对象
+        real_idx = self.filtered_indices[self.current_paper_index]
+        current_paper = self.logic.papers[real_idx]
+        
+        new_value = ""
+        if variable == 'category': pass
+        elif isinstance(widget_or_var, tk.BooleanVar): new_value = widget_or_var.get()
+        elif isinstance(widget_or_var, scrolledtext.ScrolledText): new_value = widget_or_var.get(1.0, tk.END).strip()
+        elif isinstance(widget_or_var, ttk.Combobox): new_value = widget_or_var.get()
+        elif isinstance(widget_or_var, tk.Entry): new_value = widget_or_var.get()
+        
+        setattr(current_paper, variable, new_value)
+        self._validate_single_field_visuals(variable, real_idx)
+        
+        if variable in ['title', 'authors']: 
+            self._refresh_list_item(self.current_paper_index, current_paper)
+
+    def _on_category_change(self, variable=None, widget_or_var=None):
+        if getattr(self, '_disable_callbacks', False): return
+        if self.current_paper_index < 0: return
+        
+        real_idx = self.filtered_indices[self.current_paper_index]
+        current_paper = self.logic.papers[real_idx]
+        
+        unique_names = self._gui_get_category_values()
+        cat_str = ";".join(unique_names)
+        current_paper.category = cat_str
+        
+        self._validate_single_field_visuals('category', real_idx)
+        # Category change doesn't update treeview column in this version, but good to have logic ready
+
+    def _refresh_list_item(self, display_index, paper):
+        """更新列表中的单项显示"""
+        children = self.paper_tree.get_children()
+        if display_index < len(children):
+            title = paper.title[:50] + "..." if len(paper.title) > 50 else paper.title
+            
+            status_str = "Conflict" if paper.conflict_marker else ("New" if not paper.doi else "OK")
+            tags = ('conflict',) if paper.conflict_marker else ()
+            
+            self.paper_tree.item(children[display_index], values=(display_index+1, title, status_str), tags=tags)
+
+    # ================= 验证视觉效果 =================
+
+    def _validate_single_field_visuals(self, variable, paper_idx):
+        paper = self.logic.papers[paper_idx]
+        # 调用 Logic 层的验证
+        is_valid, _, _ = paper.validate_paper_fields(self.config, True, True, variable=variable, no_normalize=True)
+        
+        tag_config = self.config.get_tag_by_variable(variable)
+        if not tag_config:
+            for t in self.config.get_active_tags():
+                if t.get('variable') == variable: tag_config = t; break
+                
+        is_required = tag_config.get('required', False) if tag_config else False
+        val = getattr(paper, variable, "")
+        is_empty = not val if variable == 'category' else (val is None or str(val).strip() == "" or str(val) == self.logic.PLACEHOLDER)
+        
+        self._apply_widget_style(variable, is_valid, is_required, is_empty)
+
+    def _validate_all_fields_visuals(self, paper_idx=None):
+        if paper_idx is None:
+            if self.current_paper_index < 0: return
+            paper_idx = self.filtered_indices[self.current_paper_index]
+            
+        paper = self.logic.papers[paper_idx]
+        _, _, invalid_vars = paper.validate_paper_fields(self.config, True, True, no_normalize=True)
+        invalid_set = set(invalid_vars)
+        
+        for variable in self.form_fields.keys():
+            # 获取配置
+            tag_config = None
+            for t in self.config.get_active_tags():
+                if t.get('variable') == variable: tag_config = t; break
+            
+            is_required = tag_config.get('required', False) if tag_config else False
+            val = getattr(paper, variable, "")
+            is_empty = not val if variable == 'category' else (val is None or str(val).strip() == "" or str(val) == self.logic.PLACEHOLDER)
+            is_valid = (variable not in invalid_set)
+            
+            self._apply_widget_style(variable, is_valid, is_required, is_empty)
+
+    def _apply_widget_style(self, variable, is_valid, is_required, is_empty):
+        widget = self.field_widgets.get(variable)
+        if not widget: return
+        
+        bg_color = self.color_normal
+        if is_required and is_empty: bg_color = self.color_required_empty
+        elif not is_valid and not is_empty: bg_color = self.color_invalid
+        
+        try:
+            if isinstance(widget, scrolledtext.ScrolledText): widget.config(background=bg_color)
+            elif isinstance(widget, tk.Entry): widget.config(background=bg_color)
+            elif isinstance(widget, ttk.Combobox):
+                style_name = "TCombobox"
+                if bg_color == self.color_invalid: style_name = "Invalid.TCombobox"
+                elif bg_color == self.color_required_empty: style_name = "Required.TCombobox"
+                widget.configure(style=style_name)
+        except: pass
+
+    # ================= 业务操作按钮 =================
+
+    def add_paper(self):
+        self.logic.create_new_paper()
+        self.refresh_list_view(self._get_search_keyword(), self.cat_filter_combo.get())
+        
+        # 选中最后一个
+        new_display_idx = len(self.filtered_indices) - 1
+        if new_display_idx >= 0:
+            self.current_paper_index = new_display_idx
+            self._suppress_select_event = True
+            child_id = self.paper_tree.get_children()[new_display_idx]
+            self.paper_tree.selection_set(child_id)
+            self.paper_tree.see(child_id)
+            self._suppress_select_event = False
+            
+            self.show_form()
+            real_idx = self.filtered_indices[new_display_idx]
+            self.load_paper_to_form(self.logic.papers[real_idx])
+            self._validate_all_fields_visuals(real_idx)
+            self.update_status("已创建新论文")
+
+    def delete_paper(self):
+        if self.current_paper_index < 0: return messagebox.showwarning("警告", "请先选择一篇论文")
+        if messagebox.askyesno("确认", "确定要删除这篇论文吗？"):
+            real_idx = self.filtered_indices[self.current_paper_index]
+            if self.logic.delete_paper(real_idx):
+                self.current_paper_index = -1
+                self.refresh_list_view(self._get_search_keyword(), self.cat_filter_combo.get())
+                self.show_placeholder()
+                self.update_status("论文已删除")
+
+    def clear_papers(self):
+        if not self.logic.papers: return
+        if messagebox.askyesno("警告", "警告！确定要清空所有论文吗？"):
+            if messagebox.askyesno("警告", "二次警告！确定要清空？"):
+                self.logic.clear_papers()
+                self.current_paper_index = -1
+                self.refresh_list_view()
+                self.show_placeholder()
+                self.update_status("所有论文已清空")
+
+    def save_all_papers(self):
+        if not self.logic.papers: return messagebox.showwarning("警告", "没有论文可以保存")
+        
+        # 1. 验证
+        invalid_papers = self.logic.validate_papers_for_save()
+        if invalid_papers:
+            msg = "以下论文未通过验证，建议修正:\n\n" + "\n".join([f"#{i} {t[:20]}..." for i, t, e in invalid_papers[:5]])
+            if not messagebox.askyesno("验证警告", msg + "\n\n是否仍要强制保存？"):
+                return
+
+        # 2. 选择路径
+        initial_file = os.path.basename(self.logic.current_file_path) if self.logic.current_file_path else "submit_template.json"
+        target_path = filedialog.asksaveasfilename(
+            title="选择保存位置", 
+            defaultextension='.json', 
+            filetypes=[("JSON", "*.json"), ("CSV", "*.csv")],
+            initialfile=initial_file,
+            initialdir=BASE_DIR
+        )
+        if not target_path: return
+
+        # 3. 判断是否为数据库
+        is_db = self.logic._is_database_file(target_path)
+        
+        if is_db:
+            if not self.logic.is_admin:
+                return messagebox.showerror("权限错误", "写入数据库需要管理员权限。")
+            if messagebox.askyesno("警告", "正在写入核心数据库！\n\n数据库模式仅支持【全量重写】。\n这将用当前列表完全覆盖数据库内容。\n\n是否继续？"):
+                self.logic.save_to_file_rewrite(target_path)
+                messagebox.showinfo("成功", "数据库已更新")
+            return
+
+        # 4. 普通文件：使用简单的 Yes/No/Cancel 对话框
+        # Yes = 增量, No = 重写, Cancel = 取消
+        choice = messagebox.askyesnocancel("选择保存模式", 
+            "请选择保存模式：\n\n"
+            "【是 (Yes)】：增量模式 (智能合并)\n"
+            "   - 适合多人协作或追加更新。\n"
+            "   - 若遇重复项，将逐一询问覆盖或跳过。\n\n"
+            "【否 (No)】：重写模式 (完全覆盖)\n"
+            "   - 适合完全替换目标文件内容。\n"
+            "   - 当前工作区将完全覆盖目标文件。")
+        
+        if choice is None: return # Cancel
+
+        try:
+            if choice is False: # No -> Rewrite
+                self.logic.save_to_file_rewrite(target_path)
+                messagebox.showinfo("成功", "文件已重写保存")
+            else: # Yes -> Incremental
+                # 增量模式：检查冲突
+                conflicts = self.logic.get_conflicts_for_save(target_path)
+                decisions = {}
+                
+                if conflicts:
+                    # 循环询问
+                    for i, p in enumerate(conflicts):
+                        msg = f"发现重复论文 ({i+1}/{len(conflicts)}):\n\n标题: {p.title}\nDOI: {p.doi}\n\n目标文件中已存在该论文。"
+                        res = messagebox.askyesnocancel("处理重复", msg + "\n\n是(Yes) = 覆盖旧条目\n否(No) = 跳过 (保留旧条目)")
+                        
+                        if res is None: 
+                            self.update_status("保存已取消")
+                            return
+                        
+                        key = p.get_key()
+                        decisions[key] = 'overwrite' if res else 'skip'
+                
+                self.logic.save_to_file_incremental(target_path, decisions)
+                messagebox.showinfo("成功", "增量保存完成")
+                
+        except Exception as e:
+            messagebox.showerror("保存失败", str(e))
+
+    def submit_pr(self):
+        if not messagebox.askyesno("须知", f"将自动通过 PR 提交论文...\n\n1. 创建新分支\n2. 提交更新文件和 Assets 资源\n3. 推送并创建 PR"): return
+        
+        if not self.logic.has_update_files():
+             if messagebox.askyesno("确认", "未检测到有效更新文件，是否先保存当前内容？"): 
+                self.save_all_papers()
+                if not self.logic.has_update_files(): return # 用户取消保存
+        
+        def on_status(msg): self.root.after(0, lambda: self.update_status(msg))
+        def on_result(url, branch, manual):
+            if manual: self.root.after(0, lambda: self.show_github_cli_guide(branch))
+            else: self.root.after(0, lambda: self.show_pr_result(url))
+        def on_error(msg): 
+            self.root.after(0, lambda: messagebox.showerror("提交失败", msg))
+            self.root.after(0, lambda: self.update_status("提交失败"))
+            
+        self.logic.execute_pr_submission(on_status, on_result, on_error)
+
+    def show_github_cli_guide(self, branch): 
+        messagebox.showinfo("手动创建PR指引", f"GitHub CLI 未安装或认证失败。\n\n代码已推送至分支: {branch}\n请打开 GitHub 网页手动创建 Pull Request。")
+    
+    def show_pr_result(self, url):
+        w = tk.Toplevel(self.root); w.title("PR Result"); w.geometry("500x200")
+        ttk.Label(w, text="PR 创建成功！", font=("Arial", 12, "bold")).pack(pady=10)
+        entry = ttk.Entry(w, width=60)
+        entry.pack(pady=5)
+        entry.insert(0, url)
+        entry.config(state='readonly')
+        ttk.Button(w, text="复制链接", command=lambda: [self.root.clipboard_clear(), self.root.clipboard_append(url)]).pack(pady=10)
+
+    def load_template(self):
+        # 新增：确认提示
+        if self.logic.papers:
+            if not messagebox.askyesno("确认", "加载新文件将覆盖当前工作区。\n\n是否继续？(建议先保存)"):
+                return
+            
+        path = filedialog.askopenfilename(title="选择文件", filetypes=[("Data", "*.json *.csv")])
+        if not path: return
+        
+        # 权限检查：如果用户试图打开数据库文件且不是管理员
+        try:
+            cnt = self.logic.load_papers_from_file(path)
+            self.refresh_list_view() # 刷新列表
+            self.current_paper_index = -1
+            self.show_placeholder()
+            
+            fname = os.path.basename(path)
+            messagebox.showinfo("成功", f"已从 {fname} 加载 {cnt} 篇论文")
+            self.update_status(f"当前文件: {fname}")
+            
+        except PermissionError:
+            if messagebox.askyesno("需要管理员权限", "打开核心数据库文件需要管理员权限。\n\n是否立即切换模式？"):
+                self._toggle_admin_mode()
+                if self.logic.is_admin:
+                    self.load_template() # 重试
+        except Exception as e:
+            messagebox.showerror("Error", f"加载失败: {e}")
+
+    def _open_database_action(self):
+        """打开数据库文件的快捷操作"""
+        if self.logic.papers:
+            if not messagebox.askyesno("确认", "加载新文件将覆盖当前工作区。\n\n是否继续？(建议先保存)"):
+                return
+            
+        if not self.logic.is_admin:
+            if messagebox.askyesno("权限限制", "打开核心数据库需要管理员权限。\n是否立即切换模式？"):
+                self._toggle_admin_mode()
+                if not self.logic.is_admin: return
+        
+        db_path = os.path.join(BASE_DIR, self.config.settings['paths']['database'])
+        try:
+            cnt = self.logic.load_papers_from_file(db_path)
+            self.refresh_list_view()
+            self.current_paper_index = -1
+            self.show_placeholder()
+            self.update_status(f"已加载数据库: {os.path.basename(db_path)}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def run_update_script(self):
+        if messagebox.askyesno("Run Update", "将合并更新文件到数据库并生成 README。\n此操作会修改核心数据库。\n\n是否继续？"):
+            cmd = [sys.executable, os.path.join(BASE_DIR, "src/update.py")]
+            # 使用 Popen 不阻塞 GUI，但无法实时获取输出到 status bar (为了简单)
+            # 或者使用 invoke 方式
+            try:
+                subprocess.Popen(cmd, cwd=BASE_DIR)
+                self.update_status("正在后台运行更新脚本...")
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+
+    def run_validate_script(self):
+        cmd = [sys.executable, os.path.join(BASE_DIR, "src/validate.py")]
+        try:
+            # 开启新窗口运行以便查看输出
+            if sys.platform == 'win32':
+                subprocess.Popen(cmd, cwd=BASE_DIR, creationflags=subprocess.CREATE_NEW_CONSOLE)
+            else:
+                subprocess.Popen(cmd, cwd=BASE_DIR)
+            self.update_status("已启动验证脚本...")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+
+
+
+    def fill_from_zotero_meta(self):
+        if self.current_paper_index < 0: return messagebox.showwarning("提示", "请先选择论文")
+        s = self._show_zotero_input_dialog("填充表单")
+        if not s: return
+        new_p = self.logic.process_zotero_json(s)
+        if not new_p: return messagebox.showwarning("提示", "无有效数据")
+        
+        real_idx = self.filtered_indices[self.current_paper_index]
+        conflicts, updates = self.logic.get_zotero_fill_updates(new_p[0], real_idx)
+        
+        if not updates: return messagebox.showinfo("提示", "Zotero数据中没有有效内容可填充")
+        
+        overwrite = True
+        if conflicts:
+            msg = f"检测到 {len(conflicts)} 个字段已有内容（如 {conflicts[0]} 等）。\n\n是否覆盖已有内容？\n\n是(Yes): 覆盖所有字段\n否(No): 仅填充空白字段 (保留已有内容)\n取消(Cancel): 取消操作"
+            res = messagebox.askyesnocancel("覆盖确认", msg)
+            if res is None: return
+            overwrite = res
+        
+        cnt = self.logic.apply_paper_updates(real_idx, updates, overwrite)
+        self.load_paper_to_form(self.logic.papers[real_idx])
+        self.update_status(f"已从Zotero数据更新 {cnt} 个字段")
+
+    def _show_zotero_input_dialog(self, title):
+        d = tk.Toplevel(self.root); d.title(title); d.geometry("600x400")
+        ttk.Label(d, text="请粘贴Zotero导出的元数据JSON (支持单个对象或列表):", padding=10).pack()
+        t = scrolledtext.ScrolledText(d, height=15); t.pack(fill=tk.BOTH, expand=True, padx=10)
+        res = {"d":None}
+        def ok(): 
+            val = t.get("1.0", tk.END).strip()
+            if not val: return messagebox.showwarning("提示", "输入内容为空", parent=d)
+            res['d'] = val; d.destroy()
+        
+        btn_frame = ttk.Frame(d)
+        btn_frame.pack(pady=10)
+        ttk.Button(btn_frame, text="✅ 确定", command=ok).pack(side=tk.LEFT, padx=5)
+        
+        self.root.wait_window(d)
+        return res['d']
+
     def ai_toolbox_window(self):
-        """弹出AI生成工具箱 (非模态)"""
+        self.ai_toolbox_window_impl()
+
+    def ai_toolbox_window_impl(self):
         if self.current_paper_index < 0:
             messagebox.showwarning("Warning", "请先选择一篇论文")
             return
@@ -688,21 +1295,15 @@ class PaperSubmissionGUI:
         menu_win.title("AI 工具箱")
         menu_win.geometry("260x420")
         
-        # --- Config & Category ---
-        # 移除 LabelFrame，直接放置按钮，用分割线分开
-        
+        # 保持与 Part 1 中按钮逻辑一致，复用 run_ai_task
         ttk.Button(menu_win, text="🏷️分类建议", command=self.ai_suggest_category).pack(fill=tk.X, padx=10, pady=(10, 2))
         ttk.Separator(menu_win, orient='horizontal').pack(fill=tk.X, padx=10, pady=5)
-        ttk.Button(menu_win, text="⚙️ AI 配置", command=self.open_ai_config_dialog).pack(fill=tk.X, padx=10, pady=(2, 10))
         
-        # --- Generators Group ---
         gen_frame = ttk.LabelFrame(menu_win, text="字段生成", padding=5)
         gen_frame.pack(fill=tk.X, padx=10, pady=5)
 
         ttk.Button(gen_frame, text="✨ 所有空字段", 
                    command=lambda: self.run_ai_task(self.ai_generate_field, None)).pack(fill=tk.X, pady=3)
-        
-        ttk.Separator(gen_frame, orient='horizontal').pack(fill=tk.X, pady=5)
         
         fields = [
             ('title_translation', '标题翻译'),
@@ -717,7 +1318,7 @@ class PaperSubmissionGUI:
         for var, label in fields:
             ttk.Button(gen_frame, text=f"生成 {label}", 
                        command=lambda v=var: self.run_ai_task(self.ai_generate_field, v)).pack(fill=tk.X, pady=1)
-
+            
     def run_ai_task(self, target_func, *args):
         """通用AI异步执行器"""
         if self.current_paper_index < 0:
@@ -1140,9 +1741,9 @@ class PaperSubmissionGUI:
                     if child_list:
                         for c in child_list:
                             text_lines.append(f"└── {c['name']}")
-                            text_lines.append(f"    Unique Name: {c['unique_name']}")
+                            text_lines.append(f"     Unique Name: {c['unique_name']}")
                             if c.get('description'):
-                                text_lines.append(f"    Description: {c.get('description')}")
+                                text_lines.append(f"     Description: {c.get('description')}")
                             text_lines.append("")
                 
                 
@@ -1306,267 +1907,347 @@ class PaperSubmissionGUI:
         self.form_canvas.yview_moveto(0)
     
     def update_paper_list(self):
+        """兼容旧调用的包装器"""
+        self.refresh_list_view(self._get_search_keyword(), self.cat_filter_combo.get())
+
+    def refresh_list_view(self, keyword="", category=""):
+        """根据搜索条件刷新列表 (修复列数据对应)"""
+        # 1. 获取筛选后的索引
+        self.filtered_indices = self.logic.filter_papers(keyword, category)
+        
+        # 2. 清空列表
         for item in self.paper_tree.get_children():
             self.paper_tree.delete(item)
-        for i, paper in enumerate(self.logic.papers):
+            
+        # 3. 填充列表
+        for display_i, real_idx in enumerate(self.filtered_indices):
+            paper = self.logic.papers[real_idx]
+            
             title = paper.title[:50] + "..." if len(paper.title) > 50 else paper.title
-            authors = paper.authors[:30] + "..." if len(paper.authors) > 30 else paper.authors
-            cat_disp = paper.category
-            if hasattr(self, 'category_mapping') and paper.category:
-                parts = [p.strip() for p in str(paper.category).split(';') if p.strip()]
-                cat_disp = ", ".join([self.category_reverse_mapping.get(p, p) for p in parts])
-            item = self.paper_tree.insert("", "end", values=(i+1, title, authors, cat_disp))
-            if self.current_paper_index == i:
-                self.paper_tree.selection_set(item)
-                self.paper_tree.see(item)
-    
-    def on_paper_selected(self, event):
-        if self._suppress_select_event: return
-        selection = self.paper_tree.selection()
-        if not selection:
-            self.current_paper_index = -1
-            self.show_placeholder()
-            return
-        item = selection[0]
-        values = self.paper_tree.item(item, 'values')
-        paper_index = int(values[0]) - 1
-        if 0 <= paper_index < len(self.logic.papers):
-            self.current_paper_index = paper_index
+            
+            # 状态显示
+            status_str = ""
+            if paper.conflict_marker:
+                status_str = "Conflict"
+            elif not paper.doi:
+                status_str = "New"
+            else:
+                status_str = "OK"
+            
+            tags = ('conflict',) if paper.conflict_marker else ()
+            
+            # 修复：values 必须与 columns=("ID", "Title", "Status") 对应
+            self.paper_tree.insert("", "end", iid=str(real_idx), values=(display_i + 1, title, status_str), tags=tags)
+        
+        # 恢复选中状态
+        if self.current_paper_index >= 0 and self.current_paper_index < len(self.filtered_indices):
+             # 这里逻辑有点复杂，简化为如果不匹配则重置
+             pass
+        else:
+             self.current_paper_index = -1
+             self.show_placeholder()
+
+
+    # ================= 右键菜单功能 =================
+
+    def _show_context_menu(self, event):
+        item_id = self.paper_tree.identify_row(event.y)
+        if not item_id: return
+        
+        self.paper_tree.selection_set(item_id)
+        # item_id 是 real_index (str)
+        real_idx = int(item_id)
+        paper = self.logic.papers[real_idx]
+        
+        menu = tk.Menu(self.root, tearoff=0)
+        
+        # 通用功能
+        menu.add_command(label="📄 拷贝条目", command=lambda: self._action_duplicate(real_idx))
+        
+        # 冲突项特有功能
+        if paper.conflict_marker:
+            menu.add_separator()
+            menu.add_command(label="⚔️ 处理冲突...", command=lambda: self._open_conflict_resolution_dialog(real_idx))
+            
+            base_idx = self.logic.find_base_paper_index(real_idx)
+            if base_idx != -1:
+                menu.add_command(label="🔗 转到基论文", command=lambda: self._highlight_paper(base_idx))
+            else:
+                menu.add_command(label="⚠️ 未找到基论文", state="disabled")
+        
+        menu.post(event.x_root, event.y_root)
+
+    def _action_duplicate(self, index):
+        new_idx = self.logic.duplicate_paper(index)
+        self.refresh_list_view(self._get_search_keyword(), self.cat_filter_combo.get())
+        self._highlight_paper(new_idx)
+        self.update_status("条目已拷贝")
+
+    def _highlight_paper(self, real_idx):
+        """在列表中高亮显示指定真实索引的论文"""
+        # 检查该 real_idx 是否在当前筛选视图中
+        if real_idx in self.filtered_indices:
+            # 找到对应的 display index
+            display_idx = self.filtered_indices.index(real_idx)
+            self.current_paper_index = display_idx
+            
+            # Treeview操作
+            if self.paper_tree.exists(str(real_idx)):
+                self.paper_tree.selection_set(str(real_idx))
+                self.paper_tree.see(str(real_idx))
+                
+            # 加载表单
             self.show_form()
-            self.load_paper_to_form(self.logic.papers[paper_index])
-            self._validate_all_fields_visuals()
-            self.update_status(f"正在编辑: {self.logic.papers[paper_index].title[:30]}...")
+            self.load_paper_to_form(self.logic.papers[real_idx])
+        else:
+            messagebox.showinfo("提示", "目标论文不在当前筛选视图中，请清除搜索条件。")
 
-    def load_paper_to_form(self, paper):
-        self._disable_callbacks = True
+    # ================= 冲突处理窗口 (新功能) =================
+
+    def _open_conflict_resolution_dialog(self, conflict_idx):
+        base_idx = self.logic.find_base_paper_index(conflict_idx)
+        if base_idx == -1:
+            messagebox.showerror("错误", "无法找到对应的基论文。")
+            return
+
+        base_paper = self.logic.papers[base_idx]
+        conflict_paper = self.logic.papers[conflict_idx]
+
+        win = tk.Toplevel(self.root)
+        win.title(f"冲突处理")
+        win.geometry("1100x700")
+        win.transient(self.root)
+        win.grab_set()
+
+        # 1. 顶部说明
+        top_frame = ttk.Frame(win, padding=5)
+        top_frame.pack(fill=tk.X)
+        ttk.Label(top_frame, text="提示：对比两栏内容，勾选要保留的版本。可直接在文本框中修改最终结果。", font=("Arial", 9), foreground="gray").pack()
+
+        # 标题行
+        header_frame = ttk.Frame(win)
+        header_frame.pack(fill=tk.X, padx=25, pady=5)
+        header_frame.columnconfigure(2, weight=1)
+        header_frame.columnconfigure(5, weight=1) # Widget Col is 5
         
-        # 清空文件导入缓存，为新论文准备
-        self._imported_files = {
-            'pipeline_image': None,
-            'paper_file': None
-        }
+        h_font = ("Arial", 10, "bold")
         
-        try:
-            for variable, widget in self.form_fields.items():
-                value = getattr(paper, variable, "")
-                if value is None: value = ""
-                
-                # 对于文件字段，记录当前值到缓存
-                if variable in ['pipeline_image', 'paper_file'] and value:
-                    self._imported_files[variable] = (value, value)
-                
-                if variable == 'category':
-                    unique_names = [v.strip() for v in str(value).split(';') if v.strip()]
-                    current_rows = getattr(self, 'category_rows', [])
-                    needed_rows = len(unique_names) if unique_names else 1
-                    while len(current_rows) < needed_rows: self._gui_add_category_row('')
-                    while len(current_rows) > needed_rows: 
-                        row_frame, _, _ = current_rows.pop()
-                        row_frame.destroy()
-                    for i in range(needed_rows):
-                        uname = unique_names[i] if i < len(unique_names) else ""
-                        display_name = self.category_reverse_mapping.get(uname, '')
-                        _, _, combo = current_rows[i]
-                        combo.set(display_name)
-                elif isinstance(widget, ttk.Combobox): widget.set(str(value) if value else "")
-                elif isinstance(widget, tk.BooleanVar): widget.set(bool(value))
-                elif isinstance(widget, scrolledtext.ScrolledText):
-                    widget.delete(1.0, tk.END)
-                    widget.insert(1.0, str(value))
-                    widget.edit_reset()
-                elif isinstance(widget, tk.Entry):
-                    widget.delete(0, tk.END)
-                    widget.insert(0, str(value))
-        finally: self._disable_callbacks = False
+        ttk.Label(header_frame, text="字段名", width=15, font=h_font).grid(row=0, column=0, sticky="w")
+        ttk.Label(header_frame, text="  ", width=4).grid(row=0, column=1) 
+        ttk.Label(header_frame, text="基论文 (保留)", foreground="blue", font=h_font).grid(row=0, column=2, sticky="w")
+        ttk.Label(header_frame, text="", width=2).grid(row=0, column=3) 
+        ttk.Label(header_frame, text="  ", width=4).grid(row=0, column=4) # Checkbox Col
+        ttk.Label(header_frame, text="冲突/新论文 (删除)", foreground="red", font=h_font).grid(row=0, column=5, sticky="w")
 
-    def _on_field_change(self, variable, widget_or_var):
-        if getattr(self, '_disable_callbacks', False): return
-        if self.current_paper_index < 0: return
-        new_value = ""
-        if variable == 'category': pass
-        elif isinstance(widget_or_var, tk.BooleanVar): new_value = widget_or_var.get()
-        elif isinstance(widget_or_var, scrolledtext.ScrolledText): new_value = widget_or_var.get(1.0, tk.END).strip()
-        elif isinstance(widget_or_var, ttk.Combobox): new_value = widget_or_var.get()
-        elif isinstance(widget_or_var, tk.Entry): new_value = widget_or_var.get()
-        current_paper = self.logic.papers[self.current_paper_index]
-        setattr(current_paper, variable, new_value)
-        self._validate_single_field_visuals(variable)
-        if variable in ['title', 'authors']: self._refresh_list_item(self.current_paper_index)
+        # 2. 滚动区域
+        canvas_frame = ttk.Frame(win)
+        canvas_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        canvas = tk.Canvas(canvas_frame, bg="#f0f0f0", highlightthickness=0)
+        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
+        scroll_frame = ttk.Frame(canvas)
+        scroll_frame.columnconfigure(2, weight=1)
+        scroll_frame.columnconfigure(5, weight=1) # Widget Col is 5
 
-    def _on_category_change(self, variable=None, widget_or_var=None):
-        if getattr(self, '_disable_callbacks', False): return
-        if self.current_paper_index < 0: return
-        unique_names = self._gui_get_category_values()
-        cat_str = ";".join(unique_names)
-        current_paper = self.logic.papers[self.current_paper_index]
-        current_paper.category = cat_str
-        self._validate_single_field_visuals('category')
-        self._refresh_list_item(self.current_paper_index)
+        canvas_window = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+
+        def configure_scroll_region(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            canvas.itemconfig(canvas_window, width=event.width)
+
+        scroll_frame.bind("<Configure>", configure_scroll_region)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_window, width=e.width))
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # 智能滚动
+        def _smart_mousewheel(event):
+            try:
+                widget_under_mouse = win.winfo_containing(event.x_root, event.y_root)
+                if widget_under_mouse and "text" in widget_under_mouse.winfo_class().lower():
+                    return 
+            except: pass
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+        win.bind_all("<MouseWheel>", _smart_mousewheel)
+        win.bind("<Destroy>", lambda e: win.unbind_all("<MouseWheel>"))
+
+        # 3. 字段生成
+        self.conflict_ui_data = {} 
+        tags = self.config.get_non_system_tags()
+        row = 0
+        
+        for tag in tags:
+            field = tag['variable']
+            name = tag['display_name']
+            ftype = tag.get('type', 'string')
+            
+            val_base = getattr(base_paper, field, "")
+            val_conflict = getattr(conflict_paper, field, "")
+            is_diff = str(val_base) != str(val_conflict)
+            bg_color = "#FFF5F5" if is_diff else "#FFFFFF"
+            
+            # Label
+            lbl = tk.Label(scroll_frame, text=name, width=15, anchor="e", bg=bg_color, font=("Arial", 9))
+            lbl.grid(row=row, column=0, sticky="nsew", padx=1, pady=1)
+            
+            choice_var = tk.IntVar(value=0)
+            if not val_base and val_conflict: choice_var.set(1)
+            self.conflict_ui_data[field] = {'var': choice_var, 'type': ftype}
+
+            # Base Side
+            rb1 = tk.Radiobutton(scroll_frame, variable=choice_var, value=0, bg=bg_color)
+            rb1.grid(row=row, column=1, sticky="nsew", pady=1)
+            
+            if ftype == 'text':
+                wb = scrolledtext.ScrolledText(scroll_frame, height=4, width=30, font=("Arial", 9))
+                wb.insert(1.0, str(val_base))
+            else:
+                wb = tk.Entry(scroll_frame, font=("Arial", 9), relief="flat", bg="white")
+                wb.insert(0, str(val_base))
+            wb.grid(row=row, column=2, sticky="nsew", pady=1, padx=2)
+            self.conflict_ui_data[field]['w_base'] = wb
+            
+            # Separator
+            line = tk.Frame(scroll_frame, width=2, bg="#cccccc")
+            line.grid(row=row, column=3, sticky="ns", pady=1)
+            
+            # Conflict Side (复选框在前)
+            rb2 = tk.Radiobutton(scroll_frame, variable=choice_var, value=1, bg=bg_color)
+            rb2.grid(row=row, column=4, sticky="nsew", pady=1)
+            
+            if ftype == 'text':
+                wc = scrolledtext.ScrolledText(scroll_frame, height=4, width=30, font=("Arial", 9))
+                wc.insert(1.0, str(val_conflict))
+            else:
+                wc = tk.Entry(scroll_frame, font=("Arial", 9), relief="flat", bg="white")
+                wc.insert(0, str(val_conflict))
+            wc.grid(row=row, column=5, sticky="nsew", pady=1, padx=2)
+            self.conflict_ui_data[field]['w_conflict'] = wc
+
+            row += 1
+
+        # 4. 底部按钮
+        btm_frame = ttk.Frame(win, padding=5)
+        btm_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        
+        def select_all(val):
+            for data in self.conflict_ui_data.values():
+                data['var'].set(val)
+        
+        ttk.Button(btm_frame, text="全选左侧 (基论文)", command=lambda: select_all(0)).pack(side=tk.LEFT)
+        ttk.Button(btm_frame, text="全选右侧 (新论文)", command=lambda: select_all(1)).pack(side=tk.LEFT, padx=10)
+        
+        def on_confirm():
+            final_data = {}
+            for field, data in self.conflict_ui_data.items():
+                choice = data['var'].get()
+                widget = data['w_conflict'] if choice == 1 else data['w_base']
+                
+                if data['type'] == 'text':
+                    val = widget.get("1.0", "end-1c").strip()
+                else:
+                    val = widget.get().strip()
+                final_data[field] = val
+                
+            if messagebox.askyesno("确认", "确定应用合并并删除冲突条目吗？"):
+                self.logic.merge_papers_custom(base_idx, conflict_idx, final_data)
+                win.destroy()
+                self.refresh_list_view(self._get_search_keyword(), self.cat_filter_combo.get())
+                
+                new_base_idx = base_idx if base_idx < conflict_idx else base_idx - 1
+                self._highlight_paper(new_base_idx)
+                self.update_status("冲突处理完成")
+
+        ttk.Button(btm_frame, text="✅ 确认合并", command=on_confirm, width=20).pack(side=tk.RIGHT)
+
+
+    # ================= 拖拽排序功能 (修改：增加跟随窗口) =================
+
+    def _on_drag_start(self, event):
+        if self._get_search_keyword() or self.cat_filter_combo.get() != "All Categories": return
+        item = self.paper_tree.identify_row(event.y)
+        if item:
+            self.drag_item = item
+            # 获取显示文本
+            item_text = self.paper_tree.item(item, "values")[1] # Title
+            self._create_drag_ghost(item_text)
+
+    def _create_drag_ghost(self, text):
+        if hasattr(self, 'drag_ghost') and self.drag_ghost:
+            self.drag_ghost.destroy()
+        
+        self.drag_ghost = tk.Toplevel(self.root)
+        self.drag_ghost.overrideredirect(True) # 无边框
+        self.drag_ghost.attributes('-alpha', 0.8) # 半透明
+        self.drag_ghost.attributes('-topmost', True)
+        
+        label = tk.Label(self.drag_ghost, text=text[:30]+"...", bg="#e1e1e1", borderwidth=1, relief="solid", padx=5, pady=2)
+        label.pack()
+        
+        # 初始位置
+        x, y = self.root.winfo_pointerx(), self.root.winfo_pointery()
+        self.drag_ghost.geometry(f"+{x+15}+{y+10}")
+
+    def _update_drag_ghost(self, event):
+        if hasattr(self, 'drag_ghost') and self.drag_ghost:
+            # 使用 root coordinates
+            x, y = self.root.winfo_pointerx(), self.root.winfo_pointery()
+            self.drag_ghost.geometry(f"+{x+15}+{y+10}")
+
+    def _destroy_drag_ghost(self):
+        if hasattr(self, 'drag_ghost') and self.drag_ghost:
+            self.drag_ghost.destroy()
+            self.drag_ghost = None
+
+    def _on_drag_motion(self, event):
+        """拖拽中预览 (仅移动 Ghost，不改变 Listbox 选中)"""
+        if not hasattr(self, 'drag_item') or not self.drag_item: return
+        self._update_drag_ghost(event)
+        
+        # 可选：绘制一条插入线 (TreeView 比较难实现插入线，这里保持简单，不乱动 Selection)
+        # 移除原有的 selection_set 代码，避免鼠标划过时疯狂切换选中项
+
+    def _on_drag_release(self, event):
+        self._destroy_drag_ghost()
+        if not hasattr(self, 'drag_item') or not self.drag_item: return
+        
+        # 检测释放位置是否在 Treeview 内
+        tv_width = self.paper_tree.winfo_width()
+        tv_height = self.paper_tree.winfo_height()
+        
+        if event.x < 0 or event.x > tv_width or event.y < 0 or event.y > tv_height:
+            # 在框外释放，取消移动
+            self.drag_item = None
+            return
+
+        target_item = self.paper_tree.identify_row(event.y)
+        
+        if target_item and target_item != self.drag_item:
+            try:
+                real_from = int(self.drag_item)
+                real_to_target = int(target_item)
+                
+                from_index = self.filtered_indices.index(real_from)
+                to_index = self.filtered_indices.index(real_to_target)
+                
+                self.logic.move_paper(from_index, to_index)
+                self.refresh_list_view()
+                self._highlight_paper(to_index) 
+                
+            except ValueError:
+                pass 
+            
+        self.drag_item = None
+
 
     def _on_text_undo(self, event):
-        try:
-            event.widget.edit_undo()
-            variable = next((var for var, w in self.form_fields.items() if w == event.widget), None)
-            if variable: self._on_field_change(variable, event.widget)
-            return "break"
+        try: event.widget.edit_undo(); return "break"
         except: return "break"
-
     def _on_text_redo(self, event):
-        try:
-            event.widget.edit_redo()
-            variable = next((var for var, w in self.form_fields.items() if w == event.widget), None)
-            if variable: self._on_field_change(variable, event.widget)
-            return "break"
+        try: event.widget.edit_redo(); return "break"
         except: return "break"
 
-    def _refresh_list_item(self, index):
-        children = self.paper_tree.get_children()
-        if index < len(children):
-            paper = self.logic.papers[index]
-            title = paper.title[:50] + "..." if len(paper.title) > 50 else paper.title
-            authors = paper.authors[:30] + "..." if len(paper.authors) > 30 else paper.authors
-            cat_disp = paper.category
-            if hasattr(self, 'category_mapping') and paper.category:
-                parts = [p.strip() for p in str(paper.category).split(';') if p.strip()]
-                cat_disp = ", ".join([self.category_reverse_mapping.get(p, p) for p in parts])
-            self.paper_tree.item(children[index], values=(index+1, title, authors, cat_disp))
-
-    def _validate_single_field_visuals(self, variable):
-        if self.current_paper_index < 0: return
-        paper = self.logic.papers[self.current_paper_index]
-        is_valid, _, _ = paper.validate_paper_fields(self.config, True, True, variable=variable, no_normalize=True)
-        tag_config = self.config.get_tag_by_variable(variable)
-        is_required = tag_config.get('required', False) if tag_config else False
-        val = getattr(paper, variable, "")
-        is_empty = not val if variable == 'category' else (val is None or str(val).strip() == "" or str(val) == self.logic.PLACEHOLDER)
-        self._apply_widget_style(variable, is_valid, is_required, is_empty)
-
-    def _validate_all_fields_visuals(self, variable=None, widget_or_var=None):
-        if self.current_paper_index < 0: return
-        paper = self.logic.papers[self.current_paper_index]
-        _, _, invalid_vars = paper.validate_paper_fields(self.config, True, True, no_normalize=True)
-        invalid_set = set(invalid_vars)
-        for variable in self.form_fields.keys():
-            tag_config = self.config.get_tag_by_variable(variable)
-            is_required = tag_config.get('required', False) if tag_config else False
-            val = getattr(paper, variable, "")
-            is_empty = not val if variable == 'category' else (val is None or str(val).strip() == "" or str(val) == self.logic.PLACEHOLDER)
-            is_valid = (variable not in invalid_set)
-            self._apply_widget_style(variable, is_valid, is_required, is_empty)
-
-    def _apply_widget_style(self, variable, is_valid, is_required, is_empty):
-        widget = self.field_widgets.get(variable)
-        if not widget: return
-        bg_color = self.color_normal
-        if is_required and is_empty: bg_color = self.color_required_empty
-        elif not is_valid and not is_empty: bg_color = self.color_invalid
-        try:
-            if isinstance(widget, scrolledtext.ScrolledText): widget.config(background=bg_color)
-            elif isinstance(widget, tk.Entry): widget.config(background=bg_color)
-            elif isinstance(widget, ttk.Combobox):
-                style_name = "TCombobox"
-                if bg_color == self.color_invalid: style_name = "Invalid.TCombobox"
-                elif bg_color == self.color_required_empty: style_name = "Required.TCombobox"
-                widget.configure(style=style_name)
-        except: pass
-
-    def add_paper(self):
-        placeholder = self.logic.create_new_paper()
-        self.update_paper_list()
-        new_index = len(self.logic.papers) - 1
-        children = self.paper_tree.get_children()
-        self.current_paper_index = new_index
-        self._suppress_select_event = True
-        if new_index < len(children):
-            self.paper_tree.selection_set(children[new_index])
-            self.paper_tree.see(children[new_index])
-        self._suppress_select_event = False
-        self.load_paper_to_form(placeholder)
-        self.show_form()
-        self._validate_all_fields_visuals()
-        self.update_status("已创建新论文，请在右侧编辑")
-        self.root.update_idletasks()
-        try: next(w for w in self.form_fields.values() if isinstance(w, (tk.Entry, ttk.Combobox))).focus_force()
-        except: pass
-
-    def delete_paper(self):
-        if self.current_paper_index < 0: return messagebox.showwarning("警告", "请先选择一篇论文")
-        if messagebox.askyesno("确认", "确定要删除这篇论文吗？"):
-            if self.logic.delete_paper(self.current_paper_index):
-                self.current_paper_index = -1
-                self.update_paper_list()
-                self.show_placeholder()
-                self.update_status("论文已删除")
-
-    def clear_papers(self):
-        if not self.logic.papers: return
-        if messagebox.askyesno("警告", "警告！确定要清空所有论文吗？\n\n⚠️ 这将丢失目前已添加的所有论文！"):
-            if messagebox.askyesno("警告", "二次警告！确定要清空所有论文吗？\n\n⚠️ 这将丢失目前已添加的所有论文！"):
-                self.logic.clear_papers()
-                self.current_paper_index = -1
-                self.update_paper_list()
-                self.show_placeholder()
-                self.update_status("所有论文已清空")
-
-    def save_all_papers(self):
-        if not self.logic.papers: return messagebox.showwarning("警告", "没有论文可以保存")
-        invalid_papers = self.logic.validate_papers_for_save()
-        if invalid_papers:
-            msg = "保存被阻止！列表中发现验证失败的论文:\n\n" + "\n".join([f"#{i} {t[:30]}... - {', '.join(e[:2])}" for i, t, e in invalid_papers])
-            msg += "\n请在左侧列表中选择对应论文，修正红色标记的字段后再保存。"
-            return messagebox.showerror("验证错误", msg)
-        target_path = filedialog.asksaveasfilename(title="选择保存到的更新文件（JSON）", defaultextension='.json', filetypes=[("JSON", "*.json")], initialfile='submit_template.json', initialdir=BASE_DIR)
-        if not target_path: return self.update_status("保存已取消")
-        
-        _, has_conflict = self.logic.check_save_conflicts(target_path)
-        conflict_mode = 'overwrite_duplicates'
-        if has_conflict:
-            msg = f"检测到部分论文已存在于更新文件中（基于DOI或Title）。\n\n是否覆盖这些重复的条目？"
-            res = messagebox.askyesnocancel("发现重复论文", msg)
-            if res is None: return self.update_status("保存操作已取消")
-            conflict_mode = 'overwrite_all' if res else 'skip_all'
-        
-        try:
-            merged = self.logic.perform_save(target_path, conflict_mode)
-            messagebox.showinfo("成功", f"成功保存 {len(merged)} 篇论文到更新文件:\n{target_path}")
-            self.update_status(f"已更新文件: {target_path}")
-        except Exception as e: messagebox.showerror("Error", str(e))
-
-    def submit_pr(self):
-        if not messagebox.askyesno("须知", f"将自动通过pull request提交论文...\n\n1.若当前在main分支，将创建新分支提交PR；\n2.提交PR后将切回原分支；\n3.收到PR后github action将自动读取submit_template.xlsx和submit_template.json中的论文进行更新\n"): return
-        if not self.logic.has_update_files():
-             if messagebox.askyesno("确认", "注意！是否保存当前所有论文？如果否，当前工作区内容将不会提交PR"): 
-                if self.save_all_papers()==False: return
-        if not messagebox.askyesno("确认", f"确定要提交submit_template.xlsx和submit_template.json中的论文吗？"): return
-        
-        def on_status(msg): self.root.after(0, lambda: self.update_status(msg))
-        def on_result(url, branch, manual):
-            if manual: self.root.after(0, lambda: self.show_github_cli_guide(branch))
-            else: self.root.after(0, lambda: self.show_pr_result(url))
-        def on_error(msg): 
-            self.root.after(0, lambda: messagebox.showerror("提交失败", msg))
-            self.root.after(0, lambda: self.update_status("提交失败"))
-        self.logic.execute_pr_submission(on_status, on_result, on_error)
-
-    def show_github_cli_guide(self, branch): messagebox.showinfo("手动创建PR指引", f"请打开项目的github页面，按照引导手动创建PR。分支: {branch}")
-    def show_pr_result(self, url):
-        w = tk.Toplevel(self.root); w.title("PR提交结果"); w.geometry("400x200")
-        ttk.Label(w, text=f"PR Link: {url or '代码已推送，请手动创建PR'}", wraplength=380).pack(pady=20)
-
-    def load_template(self):
-        path = filedialog.askopenfilename(title="选择模板文件", filetypes=[("Excel和JSON文件", "*.xlsx *.json"), ("Excel文件", "*.xlsx"), ("JSON文件", "*.json"), ("所有文件", "*.*")])
-        if not path: return
-        if self.logic.papers:
-            choice = messagebox.askyesnocancel("确认", "注意！是否保存当前所有论文？如果否，当前所有内容会丢失")
-            if choice is None: return
-            if choice and self.save_all_papers() == False: return
-        try:
-            cnt = self.logic.load_from_template(path)
-            self.update_paper_list()
-            self.current_paper_index = -1
-            self.show_placeholder()
-            messagebox.showinfo("成功", f"已加载 {cnt} 篇论文")
-        except Exception as e: messagebox.showerror("Error", f"加载模板失败: {e}")
 
     def on_closing(self):
         if self.logic.papers:
@@ -1591,64 +2272,17 @@ class PaperSubmissionGUI:
         self.show_form()
         messagebox.showinfo("成功", f"已添加 {len(new_p)} 篇论文")
 
-    def fill_from_zotero_meta(self):
-        if self.current_paper_index < 0: return messagebox.showwarning("提示", "请先在左侧选择要填充的论文条目")
-        s = self._show_zotero_input_dialog("填充当前表单")
-        if not s: return
-        new_p = self.logic.process_zotero_json(s)
-        if not new_p: return
-        conflicts, updates = self.logic.get_zotero_fill_updates(new_p[0], self.current_paper_index)
-        if not updates: return messagebox.showinfo("提示", "Zotero数据中没有有效内容可填充")
-        overwrite = True
-        if conflicts:
-            msg = f"检测到 {len(conflicts)} 个字段已有内容（如 {conflicts[0]} 等）。\n\n是否覆盖已有内容？\n\n是(Yes): 覆盖所有字段\n否(No): 仅填充空白字段 (保留已有内容)\n取消(Cancel): 取消操作"
-            res = messagebox.askyesnocancel("覆盖确认", msg)
-            if res is None: return
-            overwrite = res
-        cnt = self.logic.apply_paper_updates(self.current_paper_index, updates, overwrite)
-        self.load_paper_to_form(self.logic.papers[self.current_paper_index])
-        self.update_status(f"已从Zotero数据更新 {cnt} 个字段")
 
-    def _show_zotero_input_dialog(self, title):
-        d = tk.Toplevel(self.root); d.title(title); d.geometry("600x400")
-        ttk.Label(d, text="请粘贴Zotero导出的元数据JSON (支持单个对象或列表):", padding=10).pack()
-        t = scrolledtext.ScrolledText(d, height=15); t.pack(fill=tk.BOTH, expand=True, padx=10)
-        res = {"d":None}
-        def ok(): 
-            val = t.get("1.0", tk.END).strip()
-            if not val: return messagebox.showwarning("提示", "输入内容为空", parent=d)
-            res['d'] = val; d.destroy()
-        def help():
-            msg = "1. 推荐使用特意开发的zotero插件'One-Click Copy Metadata'\n可从项目的tools文件夹拿到One-Click Copy Metadata.xpi）。\n也可在github主页面的readme中找到下载链接。\n2. 安装后右键点击条目 -> ==Copy Meta to JSON Format==。就会将所需meta数据拷贝到剪贴板\n\n注：也可以手动从Zotero导出为CSL JSON格式。（因数据不完全，不推荐）\n\n支持单个条目 {...} 或 条目列表 [...]"
-            messagebox.showinfo("获取帮助", msg, parent=d)
-        
-        bf = ttk.Frame(d); bf.pack(pady=10)
-        ttk.Button(bf, text="✅ 确定", command=ok).pack(side=tk.LEFT, padx=10)
-        ttk.Button(bf, text="❓ 帮助", command=help).pack(side=tk.LEFT, padx=10)
-        
-        self.root.wait_window(d)
-        return res['d']
 
 def main():
     # 尝试使用 tkinterdnd2 初始化根窗口以支持拖放
-    dnd_enabled = False
     try:
         from tkinterdnd2 import TkinterDnD
         root = TkinterDnD.Tk()
-        
-        # # 验证 tkdnd 是否真正可用
-        # try:
-        #     version = root.tk.call('tkdnd::version')
-        #     dnd_enabled = True
-        #     print(f"✓ 拖放功能已启用 (tkdnd {version})")
-        # except Exception:
-        #     # tkdnd 不可用，但已经创建了 root，继续使用
-        #     print("ℹ tkinterdnd2 已安装但拖放不可用，使用浏览按钮选择文件")
-            
     except Exception:
         # 完全回退到普通 Tk
         root = tk.Tk()
-        print("ℹ 使用浏览按钮选择文件")
+        print("ℹ tkinterdnd2 未安装，拖放功能不可用")
         
     app = PaperSubmissionGUI(root)
     root.protocol("WM_DELETE_WINDOW", app.on_closing)

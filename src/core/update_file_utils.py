@@ -8,14 +8,13 @@ import os
 import json
 import csv
 import shutil
-import uuid
 import re
 from typing import List, Dict, Any, Optional, Union, Tuple
 from dataclasses import asdict
 
 from src.core.config_loader import get_config_instance
 from src.core.database_model import Paper, is_same_identity
-from src.utils import ensure_directory, backup_file, get_current_timestamp
+from src.utils import ensure_directory, backup_file, get_current_timestamp, generate_paper_uid
 
 class UpdateFileUtils:
     """更新文件工具类 (CSV/JSON/Assets)"""
@@ -35,13 +34,13 @@ class UpdateFileUtils:
 
     # ================= 统一 IO 接口 =================
 
-    def read_data(self, filepath: str) -> List[Paper]:
+    def read_data(self, filepath: str) -> Tuple[bool, List[Paper]]:
         """
         统一读取入口
         根据后缀自动判断 CSV 或 JSON
         """
         if not filepath or not os.path.exists(filepath):
-            return []
+            return False, []
         
         ext = os.path.splitext(filepath)[1].lower()
         if ext == '.json':
@@ -50,7 +49,7 @@ class UpdateFileUtils:
             return self.load_papers_from_csv(filepath)
         else:
             print(f"不支持的文件格式: {filepath}")
-            return []
+            return False, []
 
     def write_data(self, filepath: str, papers: List[Paper]) -> bool:
         """
@@ -74,51 +73,56 @@ class UpdateFileUtils:
 
     # ================= CSV 处理 (核心逻辑) =================
 
-    def load_papers_from_csv(self, filepath: str) -> List[Paper]:
+    def load_papers_from_csv(self, filepath: str) -> Tuple[bool, List[Paper]]:
         """
         读取 CSV 文件
         格式规范：
         第1行: Human Readable Header (Table Name) - 忽略，仅供人类阅读
-        第2行: System IDs (Tag ID) - 核心，用于映射列数据
+        第2行: System Variables (tag variable) - 核心，用于映射列数据
         第3行+: Data
         """
         papers = []
-        try:
-            # utf-8-sig 处理 Windows Excel 保存的 CSV 可能带有的 BOM
-            with open(filepath, 'r', encoding='utf-8-sig') as f: 
-                reader = csv.reader(f)
-                rows = list(reader)
-                
-                if len(rows) < 2:
-                    # 如果少于2行，可能只有表头或者空文件，无法确定映射关系
-                    return []
-                
-                # 第2行是 ID 行 (Tag IDs)
-                header_ids = [h.strip() for h in rows[1]]
-                
-                # 从第3行开始是数据
-                for row_data in rows[2:]:
-                    # 忽略全空行
-                    if not any(row_data):
-                        continue
 
-                    # 补齐列数不足的情况
-                    if len(row_data) < len(header_ids):
-                        row_data += [''] * (len(header_ids) - len(row_data))
-                    
-                    paper_dict = {}
-                    for i, tag_id in enumerate(header_ids):
-                        if not tag_id: continue # 跳过空列ID
-                        paper_dict[tag_id] = row_data[i]
-                    
-                    # 转换为 Paper 对象
-                    if paper_dict:
-                        papers.append(self._dict_to_paper(paper_dict))
-                        
-        except Exception as e:
-            print(f"读取 CSV 失败 {filepath}: {e}")
-        
-        return papers
+        # 尝试多种常见编码，先 utf-8-sig（兼容 BOM），再尝试常见回退编码
+        encodings_to_try = ['utf-8-sig', 'utf-8', 'gbk', 'cp1252', 'latin-1']
+        last_exc = None
+
+        for enc in encodings_to_try:
+            try:
+                with open(filepath, 'r', encoding=enc, errors='strict') as f:
+                    reader = csv.reader(f)
+                    rows = list(reader)
+
+                    if len(rows) < 2:
+                        return False, []
+
+                    header_ids = [h.strip() for h in rows[1]]
+
+                    for row_data in rows[2:]:
+                        if not any(row_data):
+                            continue
+
+                        if len(row_data) < len(header_ids):
+                            row_data += [''] * (len(header_ids) - len(row_data))
+
+                        paper_dict = {}
+                        for i, tag_id in enumerate(header_ids):
+                            if not tag_id: continue
+                            paper_dict[tag_id] = row_data[i]
+
+                        if paper_dict:
+                            papers.append(self._dict_to_paper(paper_dict))
+
+                # 成功读取则跳出循环
+                return True, papers
+            except Exception as e:
+                last_exc = e
+                # 尝试下一个编码
+                continue
+
+        # 如果所有编码都失败，打印最后一个异常并返回失败
+        print(f"读取 CSV 失败 {filepath}: {last_exc}")
+        return False, []
 
     def save_papers_to_csv(self, filepath: str, papers: List[Paper]) -> bool:
         """
@@ -126,7 +130,7 @@ class UpdateFileUtils:
         写入逻辑（规范化结构）：
         1. 获取所有 Active Tags，按 Order 排序
         2. Row 1: Table Name (Display Name)
-        3. Row 2: Tag ID (System Key)
+        3. Row 2: Tag Variable (System Key)
         4. Row 3+: Data
         """
         # 获取排序后的激活 Tag
@@ -134,8 +138,8 @@ class UpdateFileUtils:
         tags.sort(key=lambda x: x.get('order', 0))
         
         # 准备表头
-        display_names = [t.get('table_name', t['id']) for t in tags]
-        tag_ids = [t['id'] for t in tags]
+        display_names = [t.get('table_name', t.get('variable', '')) for t in tags]
+        tag_ids = [t.get('variable') for t in tags if t.get('variable')]
         
         try:
             with open(filepath, 'w', encoding='utf-8-sig', newline='') as f:
@@ -172,7 +176,7 @@ class UpdateFileUtils:
 
     # ================= JSON 处理 (核心逻辑) =================
 
-    def load_papers_from_json(self, filepath: str) -> List[Paper]:
+    def load_papers_from_json(self, filepath: str) -> Tuple[bool, List[Paper]]:
         """
         读取 JSON
         支持新结构: {"meta": {"column_ids": [...]}, "papers": [...]}
@@ -196,10 +200,10 @@ class UpdateFileUtils:
             elif isinstance(data, list):
                 raw_list = data
             
-            return [self._dict_to_paper(p) for p in raw_list]
+            return True, [self._dict_to_paper(p) for p in raw_list]
         except Exception as e:
             print(f"读取 JSON 失败 {filepath}: {e}")
-            return []
+            return False, []
 
     def save_papers_to_json(self, filepath: str, papers: List[Paper]) -> bool:
         """
@@ -217,10 +221,10 @@ class UpdateFileUtils:
         }
         """
         try:
-            # 获取排序后的 Tag IDs
+            # 获取排序后的 tag variable 列表
             tags = self.config.get_active_tags()
             tags.sort(key=lambda x: x.get('order', 0))
-            ordered_ids = [t['id'] for t in tags]
+            ordered_ids = [t.get('variable') for t in tags if t.get('variable')]
 
             # 1. 准备 Meta
             existing_meta = {}
@@ -276,9 +280,9 @@ class UpdateFileUtils:
         if not has_assets and not paper.uid:
             return paper
 
-        # 1. 确保 UID 存在
+        # 1. 确保 UID 存在（基于 title+doi 的稳定 hash）
         if not paper.uid:
-            paper.uid = str(uuid.uuid4())[:8] # 短UUID
+            paper.uid = generate_paper_uid(getattr(paper, 'title', ''), getattr(paper, 'doi', ''))
         
         # 目标目录: assets/{uid}/
         paper_asset_dir = os.path.join(self.project_root, self.assets_dir, paper.uid)
@@ -382,7 +386,7 @@ class UpdateFileUtils:
         # 提取已知字段
         valid_keys = Paper.__dataclass_fields__.keys()
         clean_data = {}
-        tags_map = {t['id']: t for t in self.config.get_active_tags()}
+        tags_map = {t.get('variable'): t for t in self.config.get_active_tags() if t.get('variable')}
         
         for k, v in data.items():
             if k in valid_keys:
@@ -457,8 +461,8 @@ class UpdateFileUtils:
     def persist_ai_generated_to_update_files(self, papers: List[Paper], file_path: str):
         """回写 AI 数据到文件"""
         # 读取 -> 更新 -> 写入
-        existing = self.read_data(file_path)
-        if not existing: return
+        success, existing = self.read_data(file_path)
+        if not success or not existing: return
         
         updated_count = 0
         ai_fields = ['title_translation', 'analogy_summary',

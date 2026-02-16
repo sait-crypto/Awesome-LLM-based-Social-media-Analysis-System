@@ -44,7 +44,10 @@ class ReadmeGenerator:
     def generate_readme_tables(self) -> str:
         """生成README的论文表格部分"""
         # 1. 加载数据 (List[Paper])
-        papers = self.db_manager.load_database()
+        success,papers = self.db_manager.load_database()
+        if not success:
+            print("加载数据库失败，无法生成README表格")
+            return ""
         
         # 2. 预处理：截断翻译，过滤不显示的
         display_papers = []

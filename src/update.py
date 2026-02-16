@@ -80,7 +80,12 @@ class UpdateProcessor:
             
             # 1. 加载论文
             try:
-                current_papers = self.update_utils.read_data(file_path)
+                success, current_papers = self.update_utils.read_data(file_path)
+                if not success:
+                    err = f"加载文件 {file_path} 失败"
+                    result['errors'].append(err)
+                    print(err)
+                    continue
             except Exception as e:
                 err = f"加载文件 {file_path} 失败: {e}"
                 result['errors'].append(err)
@@ -128,30 +133,38 @@ class UpdateProcessor:
             if not valid_papers:
                 continue
 
-            # 4. AI 生成 (如果启用)
-            if self.enable_ai and self.ai_generator.is_available():
+            # 4. AI 生成缺失内容并回写到 *当前文件*
+            if self.ai_generator.is_available():
                 print("使用AI生成缺失内容...")
                 try:
-                    enhanced_papers, is_enhanced = self.ai_generator.batch_enhance_papers(valid_papers)
-                    valid_papers = enhanced_papers # 更新引用
-                    
-                    if is_enhanced:
-                        # 回写到当前更新文件
+                    valid_papers, is_enhanced = self.ai_generator.batch_enhance_papers(valid_papers)
+                    if  is_enhanced:
+                        # 回写到当前文件
                         try:
                             self.update_utils.persist_ai_generated_to_update_files(valid_papers, file_path)
-                            print(f"AI内容已回写至 {os.path.basename(file_path)}")
                         except Exception as e:
-                            result['errors'].append(f"回写AI内容失败: {e}")
+                            err = f"回写AI内容到 {file_path} 失败: {e}"
+                            print(err)
+                            result['errors'].append(err)
                         
                         # 统计
                         ai_count = 0
                         for p in valid_papers:
-                            # 简单检查是否有 AI 标记
-                            if self.ai_generate_mark in str(p.to_dict()): 
+                            if any(
+                                getattr(p, field, "").startswith(self.ai_generate_mark) 
+                                for field in ['title_translation', 'analogy_summary', 
+                                            'summary_motivation', 'summary_innovation',
+                                            'summary_method', 'summary_conclusion', 
+                                            'summary_limitation']
+                            ):
                                 ai_count += 1
                         result['ai_generated'] += ai_count
+                    else:
+                        print("AI未生成内容")
                 except Exception as e:
-                    result['errors'].append(f"AI生成失败: {e}")
+                    err = f"AI生成内容失败 ({file_path}): {e}"
+                    result['errors'].append(err)
+                    print(f"错误: {err}")
 
             # 5. 添加到数据库
             print(f"正在更新 {len(valid_papers)} 篇论文到数据库...")
@@ -177,7 +190,12 @@ class UpdateProcessor:
                     processed = added + conflicts
                     if processed:
                         # 重新读取当前文件（防止覆盖期间的变动），过滤掉 processed
-                        current_file_papers = self.update_utils.read_data(file_path)
+                        success, current_file_papers = self.update_utils.read_data(file_path)
+                        if not success:
+                            err = f"加载文件 {file_path} 失败"
+                            result['errors'].append(err)
+                            print(err)
+                            continue
                         remaining = []
                         
                         processed_keys = {p.get_key() for p in processed}
@@ -194,7 +212,9 @@ class UpdateProcessor:
                             print(f"🗑️ 已从 {os.path.basename(file_path)} 移除 {len(current_file_papers)-len(remaining)} 篇已处理论文")
                             
                 except Exception as e:
-                    result['errors'].append(f"清理文件 {file_path} 失败: {e}")
+                    err = f"清理更新文件 {file_path} 失败: {e}"
+                    result['errors'].append(err)
+                    print(f"警告: {err}")
 
         # 整理冲突信息
         conflicts_list = []
@@ -231,7 +251,7 @@ class UpdateProcessor:
     def print_result(self, result: Dict):
         """打印结果"""
         print("\n" + "="*50)
-        print("更新处理完成")
+        print("更新处理结束")
         print("="*50)
         
         if result['success']:
@@ -257,7 +277,7 @@ def main():
     processor = UpdateProcessor()
     result = processor.process_updates(conflict_resolution='mark')
     processor.print_result(result)
-    
+    backup_file("assets","backups")
     if result['success']:
         print("\n正在重新生成 README...")
         try:

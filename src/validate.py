@@ -40,7 +40,10 @@ class Validator:
         
         # 1. 验证数据库
         print(f"\n[Database] 检查: {self.db_path}")
-        db_papers = self.db_manager.load_database()
+        success,db_papers = self.db_manager.load_database()
+        if not success:
+            print(f"加载数据库失败: {self.db_path}")
+            return
         self._check_papers(db_papers, "Database")
         
         # 2. 验证更新文件
@@ -48,7 +51,10 @@ class Validator:
         
         for fpath in self.update_files:
             print(f"\n[Update File] 检查: {os.path.basename(fpath)}")
-            papers = self.update_utils.read_data(fpath)
+            success, papers = self.update_utils.read_data(fpath)
+            if not success:
+                print(f"加载更新文件失败: {fpath}")
+                continue
             self._check_papers(papers, os.path.basename(fpath))
             
             # 3. 检查与数据库的重复 (Cross-Check)
