@@ -28,7 +28,7 @@
       "status": "",
       "submission_time": "",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": ""
     },
     {
       "doi": "10.1609/icwsm.v19i1.35801",
@@ -59,7 +59,7 @@
       "status": "",
       "submission_time": "",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": ""
     },
     {
       "doi": "10.1609/icwsm.v19i1.35800",
@@ -91,7 +91,7 @@
       "status": "",
       "submission_time": "",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": ""
     },
     {
       "doi": "10.1017/pan.2023.2",
@@ -124,7 +124,7 @@
       "status": "",
       "submission_time": "",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": ""
     },
     {
       "doi": "10.18653/v1/2024.findings-emnlp.153",
@@ -155,7 +155,7 @@
       "status": "",
       "submission_time": "",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": ""
     },
     {
       "doi": "10.1609/aaai.v39i12.33430",
@@ -185,7 +185,7 @@
       "status": "",
       "submission_time": "",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": ""
     },
     {
       "doi": "10.1007/978-981-99-8181-6_33",
@@ -215,7 +215,7 @@
       "status": "",
       "submission_time": "",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": ""
     },
     {
       "doi": "10.1609/icwsm.v19i1.35804",
@@ -245,7 +245,7 @@
       "status": "",
       "submission_time": "",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": ""
     },
     {
       "doi": "10.1145/3627673.3679519",
@@ -275,7 +275,7 @@
       "status": "",
       "submission_time": "",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": ""
     }
   ],
   "meta": {

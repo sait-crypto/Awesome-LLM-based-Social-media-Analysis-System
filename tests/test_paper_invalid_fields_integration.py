@@ -15,7 +15,7 @@ def test_paper_invalid_fields_validation():
     
     test_cases = [
         {
-            "name": "有效的 invalid_fields（多个数字）",
+            "name": "有效的 invalid_fields（多个variable）",
             "paper": Paper(
                 doi="10.1609/icwsm.v19i1.35804",
                 title="Test Paper",
@@ -24,12 +24,12 @@ def test_paper_invalid_fields_validation():
                 category="Test",
                 paper_url="https://example.com/paper",
                 abstract="Abstract",
-                invalid_fields="1,2,3"
+                invalid_fields="doi|title|authors"
             ),
             "expect_valid": True
         },
         {
-            "name": "有效的 invalid_fields（中文逗号）",
+            "name": "有效的 invalid_fields（带空格）",
             "paper": Paper(
                 doi="10.1609/icwsm.v19i1.35805",
                 title="Test Paper 2",
@@ -38,12 +38,12 @@ def test_paper_invalid_fields_validation():
                 category="Test",
                 paper_url="https://example.com/paper",
                 abstract="Abstract",
-                invalid_fields="1，2，3"
+                invalid_fields="doi | title | authors"
             ),
             "expect_valid": True
         },
         {
-            "name": "有效的 invalid_fields（包含0）",
+            "name": "无效的 invalid_fields（旧ID格式）",
             "paper": Paper(
                 doi="10.1609/icwsm.v19i1.35806",
                 title="Test Paper 3",
@@ -52,12 +52,12 @@ def test_paper_invalid_fields_validation():
                 category="Test",
                 paper_url="https://example.com/paper",
                 abstract="Abstract",
-                invalid_fields="0,1,2"
+                invalid_fields="0|1|2"
             ),
-            "expect_valid": True
+            "expect_valid": False
         },
         {
-            "name": "无效的 invalid_fields（包含负数）",
+            "name": "无效的 invalid_fields（旧逗号格式）",
             "paper": Paper(
                 doi="10.1609/icwsm.v19i1.35807",
                 title="Test Paper 4",
@@ -66,12 +66,12 @@ def test_paper_invalid_fields_validation():
                 category="Test",
                 paper_url="https://example.com/paper",
                 abstract="Abstract",
-                invalid_fields="-1,2,3"
+                invalid_fields="doi,title"
             ),
             "expect_valid": False
         },
         {
-            "name": "无效的 invalid_fields（包含非整数）",
+            "name": "无效的 invalid_fields（包含不存在variable）",
             "paper": Paper(
                 doi="10.1609/icwsm.v19i1.35808",
                 title="Test Paper 5",
@@ -80,12 +80,12 @@ def test_paper_invalid_fields_validation():
                 category="Test",
                 paper_url="https://example.com/paper",
                 abstract="Abstract",
-                invalid_fields="1,abc,3"
+                invalid_fields="doi|unknown_field|authors"
             ),
             "expect_valid": False
         },
         {
-            "name": "无效的 invalid_fields（浮点数）",
+            "name": "无效的 invalid_fields（非法变量名）",
             "paper": Paper(
                 doi="10.1609/icwsm.v19i1.35809",
                 title="Test Paper 6",
@@ -94,7 +94,7 @@ def test_paper_invalid_fields_validation():
                 category="Test",
                 paper_url="https://example.com/paper",
                 abstract="Abstract",
-                invalid_fields="1.5,2.5"
+                invalid_fields="bad-name|doi"
             ),
             "expect_valid": False
         },
@@ -126,7 +126,7 @@ def test_paper_invalid_fields_validation():
         expect_valid = test_case["expect_valid"]
         
         # 验证论文
-        valid, errors = paper.validate_paper_fields(
+        valid, errors, _ = paper.validate_paper_fields(
             config,
             check_required=True,
             check_non_empty=True

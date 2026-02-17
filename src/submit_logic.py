@@ -135,7 +135,7 @@ class SubmitLogic:
             if cat and cat != "All Categories":
                 raw_cat = p.category if p.category else ""
                 # 支持多分类匹配
-                p_cats = [c.strip() for c in re.split(r'[;；]', raw_cat) if c.strip()]
+                p_cats = [c.strip() for c in str(raw_cat).split('|') if c.strip()]
                 if cat not in p_cats:
                     continue
             
@@ -276,6 +276,14 @@ class SubmitLogic:
         placeholder = Paper(title=self.PLACEHOLDER, uid=new_uid)
         self.papers.append(placeholder)
         return placeholder
+
+    def ensure_paper_uid(self, paper: Paper) -> str:
+        """确保论文存在 uid，供资源暂存与规范化流程复用"""
+        if not getattr(paper, 'uid', ''):
+            paper.uid = generate_paper_uid(getattr(paper, 'title', ''), getattr(paper, 'doi', ''))
+            if not paper.uid:
+                paper.uid = str(uuid.uuid4())[:8]
+        return paper.uid
 
     def delete_paper(self, index: int) -> bool:
         """删除指定索引的论文"""
@@ -481,38 +489,195 @@ class SubmitLogic:
 
     # ================= Assets Import (New) =================
     
-    def import_file_asset(self, src_path: str, asset_type: str) -> str:
+    def import_file_asset(self, src_path: str, asset_type: str, paper_uid: str = "") -> Tuple[bool, str, str]:
         """
         GUI 临时导入文件资源：
-        1. 将文件复制到 assets/temp/ 目录 (防止源文件被移动/删除)
-        2. 返回 assets/temp/filename 相对路径供 GUI 显示
-        3. 保存时 (perform_save -> normalize_assets) 会将其移动到 assets/{uid}/
+        1. 将文件复制到 assets/temp/{uid}/
+        2. 返回临时相对路径供 GUI 显示
+        3. 真正规范化在“确认(✓)”或保存时执行
         """
         if not src_path or not os.path.exists(src_path):
-            return ""
-        
-        # 临时目录 assets/temp/
-        temp_dir = os.path.join(BASE_DIR, self.assets_dir, 'temp')
+            return False, "", "源文件不存在"
+
+        uid = (paper_uid or "").strip() or "unknown"
+        temp_dir = os.path.join(BASE_DIR, self.assets_dir, 'temp', uid)
         ensure_directory(temp_dir)
-        
+
         filename = os.path.basename(src_path)
-        # 防止重名：加时间戳
         name, ext = os.path.splitext(filename)
         timestamp = int(time.time())
-        # 简单检查是否存在，存在则加后缀
         if os.path.exists(os.path.join(temp_dir, filename)):
             filename = f"{name}_{timestamp}{ext}"
-            
+
         dest_path = os.path.join(temp_dir, filename)
-        
         try:
             shutil.copy2(src_path, dest_path)
-            # 返回相对路径 (正斜杠)
-            rel_path = f"{self.assets_dir}temp/{filename}".replace('\\', '/')
-            return rel_path
+            rel_path = os.path.relpath(dest_path, BASE_DIR).replace('\\', '/')
+            return True, rel_path, ""
         except Exception as e:
-            print(f"Import file failed: {e}")
-            return ""
+            return False, "", f"复制失败: {e}"
+
+    def confirm_file_field_for_paper(self, paper: Paper, field_name: str, raw_value: Optional[str] = None) -> Tuple[bool, str, str]:
+        """对单个 file 字段执行规范化（复制到 assets/{uid}/ 并回填标准相对路径）"""
+        if field_name not in ('pipeline_image', 'paper_file'):
+            return False, "", f"不支持的字段: {field_name}"
+
+        old_uid = getattr(paper, 'uid', '')
+        old_pipeline = getattr(paper, 'pipeline_image', '')
+        old_paper_file = getattr(paper, 'paper_file', '')
+
+        raw_val = getattr(paper, field_name, "") if raw_value is None else raw_value
+        if not raw_val:
+            return True, "", ""
+
+        # 预检查：字段中的每个路径都必须可解析并存在
+        items = [x.strip() for x in str(raw_val).split('|') if x.strip()]
+        for item in items:
+            resolved = self.update_utils.resolve_asset_path(item, field_name)
+            if not resolved or not os.path.exists(resolved):
+                return False, "", f"文件不存在或无法解析: {item}"
+
+        try:
+            setattr(paper, field_name, str(raw_val).strip())
+            self.update_utils.normalize_asset_fields(paper, [field_name], strict=True)
+            return True, getattr(paper, field_name, "") or "", ""
+        except Exception as e:
+            # 事务性回滚，保证失败时无修改
+            paper.uid = old_uid
+            paper.pipeline_image = old_pipeline
+            paper.paper_file = old_paper_file
+            return False, "", str(e)
+
+    def clear_temp_assets_for_paper(self, paper_uid: str, field_name: Optional[str] = None):
+        """清理 assets/temp/{uid} 下的临时资源（可按字段）"""
+        if not paper_uid:
+            return
+        uid_dir = os.path.join(BASE_DIR, self.assets_dir, 'temp', paper_uid)
+        if os.path.isdir(uid_dir):
+            shutil.rmtree(uid_dir, ignore_errors=True)
+
+    def clear_all_temp_assets(self):
+        temp_root = os.path.join(BASE_DIR, self.assets_dir, 'temp')
+        if os.path.isdir(temp_root):
+            shutil.rmtree(temp_root, ignore_errors=True)
+
+    def _iter_existing_update_files(self) -> List[str]:
+        paths = self.settings['paths']
+        out: List[str] = []
+        for k in ['update_json', 'update_csv', 'my_update_json', 'my_update_csv']:
+            p = paths.get(k)
+            if p and os.path.exists(p):
+                out.append(p)
+        for p in paths.get('extra_update_files_list', []):
+            if p and os.path.exists(p):
+                out.append(p)
+        return list(dict.fromkeys(out))
+
+    def _collect_asset_reference_papers(self) -> List[Paper]:
+        collected: List[Paper] = []
+
+        db_path = self.settings['paths'].get('database')
+        if db_path and os.path.exists(db_path):
+            success, papers = self.update_utils.read_data(db_path)
+            if success:
+                collected.extend(papers)
+
+        for fpath in self._iter_existing_update_files():
+            success, papers = self.update_utils.read_data(fpath)
+            if success:
+                collected.extend(papers)
+
+        if self.papers:
+            collected.extend(self.papers)
+
+        return collected
+
+    def cleanup_redundant_assets(self) -> Dict[str, Any]:
+        """
+        清除冗余资源并返回审计报告：
+        - 未被任何论文条目引用的 uid 文件夹
+        - 已存在 uid 文件夹中未被字段引用的文件
+        - 论文字段引用缺失的文件
+        """
+        assets_root = os.path.join(BASE_DIR, self.assets_dir)
+        report: Dict[str, Any] = {
+            'deleted_uid_dirs': [],
+            'deleted_files': [],
+            'papers_with_unreferenced_assets': [],
+            'missing_references': [],
+        }
+        if not os.path.isdir(assets_root):
+            return report
+
+        papers = self._collect_asset_reference_papers()
+
+        uid_to_refs: Dict[str, set] = {}
+        uid_to_title: Dict[str, str] = {}
+        for p in papers:
+            uid = (getattr(p, 'uid', '') or '').strip()
+            if not uid:
+                continue
+            if uid not in uid_to_title:
+                uid_to_title[uid] = getattr(p, 'title', '') or ''
+            ref_set = uid_to_refs.setdefault(uid, set())
+            for field_name in ('pipeline_image', 'paper_file'):
+                raw_val = getattr(p, field_name, '') or ''
+                if not raw_val:
+                    continue
+                parts = [x.strip() for x in str(raw_val).split('|') if x.strip()]
+                for item in parts:
+                    ref_set.add(item.replace('\\', '/'))
+                    resolved = self.update_utils.resolve_asset_path(item, field_name)
+                    if not resolved or not os.path.exists(resolved):
+                        report['missing_references'].append({
+                            'uid': uid,
+                            'title': getattr(p, 'title', ''),
+                            'field': field_name,
+                            'reference': item,
+                        })
+
+        for entry in os.listdir(assets_root):
+            if entry == 'temp':
+                continue
+            uid_dir = os.path.join(assets_root, entry)
+            if not os.path.isdir(uid_dir):
+                continue
+            uid = entry
+            ref_set = uid_to_refs.get(uid, set())
+            if not ref_set:
+                shutil.rmtree(uid_dir, ignore_errors=True)
+                report['deleted_uid_dirs'].append(uid)
+                continue
+
+            referenced_files_abs = set()
+            for rel_ref in ref_set:
+                ref_abs = os.path.join(BASE_DIR, rel_ref)
+                if os.path.exists(ref_abs):
+                    referenced_files_abs.add(os.path.normpath(ref_abs))
+
+            unreferenced_here = []
+            for root, _, files in os.walk(uid_dir):
+                for fn in files:
+                    abs_file = os.path.normpath(os.path.join(root, fn))
+                    if abs_file not in referenced_files_abs:
+                        rel_file = os.path.relpath(abs_file, BASE_DIR).replace('\\', '/')
+                        unreferenced_here.append(rel_file)
+                        try:
+                            os.remove(abs_file)
+                            report['deleted_files'].append(rel_file)
+                        except Exception:
+                            pass
+
+            if unreferenced_here:
+                report['papers_with_unreferenced_assets'].append({
+                    'uid': uid,
+                    'title': uid_to_title.get(uid, ''),
+                    'files': unreferenced_here,
+                })
+
+        return report
+
+
 
     # ================= PR 提交逻辑 =================
 

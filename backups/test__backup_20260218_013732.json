@@ -5,10 +5,7 @@
       "title": "CAMEL: Capturing metaphorical alignment with context disentangling for multimodal emotion recognition",
       "authors": "Linhao Zhang, Li Jin, Guangluan Xu, Xiaoyu Li, Cai Xu, Kaiwen Wei, Nayu Liu, Haonan Liu",
       "date": "2024-03-24",
-      "category": [
-        "Other",
-        "Hate Speech Analysis"
-      ],
+      "category": "Other;Hate Speech Analysis",
       "summary_motivation": "",
       "summary_innovation": "",
       "summary_method": "",
@@ -19,7 +16,7 @@
       "conference": "AAAI",
       "title_translation": "",
       "analogy_summary": "TLDR: This work proposes to leverage a conditional generative approach for capturing metaphorical analogies in MER, and incorporates a disentangled contrastive matching mechanism, which undergoes curricular adjustment to regulate its intensity during the learning process.",
-      "pipeline_image": [],
+      "pipeline_image": "",
       "abstract": "Understanding the emotional polarity of multimodal content with metaphorical characteristics, such as memes, poses a significant challenge in Multimodal Emotion Recognition (MER). Previous MER researches have overlooked the phenomenon of metaphorical alignment in multimedia content, which involves non-literal associations between concepts to convey implicit emotional tones.  Metaphor-agnostic MER methods may be misinformed by the isolated unimodal emotions, which are distinct from the real emotions blended in multimodal metaphors. Moreover, contextual semantics can further affect the emotions associated with similar metaphors, leading to the challenge of maintaining contextual compatibility. To address the issue of metaphorical alignment in MER, we propose to leverage a conditional generative approach for capturing metaphorical analogies. Our approach formulates schematic prompts and corresponding references based on theoretical foundations, which allows the model to better grasp metaphorical nuances. In order to maintain contextual sensitivity, we incorporate a disentangled contrastive matching mechanism, which undergoes curricular adjustment to regulate its intensity during the learning process. The automatic and human evaluation experiments on two benchmarks prove that, our model provides considerable and stable improvements in recognizing multimodal emotion with metaphor attributes.",
       "contributor": "",
       "notes": "",
@@ -27,7 +24,7 @@
       "status": "unread",
       "submission_time": "",
       "conflict_marker": false,
-      "invalid_fields": [],
+      "invalid_fields": "",
       "is_placeholder": false
     },
     {
@@ -35,9 +32,7 @@
       "title": "Extracting affect aggregates from longitudinal social media data with temporal adapters for large language models",
       "authors": "Georg Ahnert, Max Pellert, David Garcia, Markus Strohmaier",
       "date": "2025-06-07",
-      "category": [
-        "Simulation and Deduction"
-      ],
+      "category": "Simulation and Deduction",
       "summary_motivation": "",
       "summary_innovation": "",
       "summary_method": "",
@@ -48,7 +43,7 @@
       "conference": "Proceedings of the International AAAI Conference on Web and Social Media",
       "title_translation": "",
       "analogy_summary": "TLDR: This work fine-tune Temporal Adapters for Llama 3 8B on full timelines from a panel of British Twitter users and extract longitudinal aggregates of emotions and attitudes with established questionnaires, and extends the analysis of affect in LLMs to a longitudinal setting through Temporal Adapters.",
-      "pipeline_image": [],
+      "pipeline_image": "",
       "abstract": "This paper proposes temporally aligned Large Language Models (LLMs) as a tool for longitudinal analysis of social media data. We fine-tune Temporal Adapters for Llama 3 8B on full timelines from a panel of British Twitter users and extract longitudinal aggregates of emotions and attitudes with established questionnaires. We focus our analysis on the beginning of the COVID-19 pandemic that had a strong impact on public opinion and collective emotions. We validate our estimates against representative British survey data and find strong positive and significant correlations for several collective emotions. The estimates obtained are robust across multiple training seeds and prompt formulations, and in line with collective emotions extracted using a traditional classification model trained on labeled data. We demonstrate the flexibility of our method on questions of public opinion for which no pre-trained classifier is available. Our work extends the analysis of affect in LLMs to a longitudinal setting through Temporal Adapters. It enables flexible and new approaches to the longitudinal analysis of social media data.",
       "contributor": "",
       "notes": "",
@@ -56,7 +51,7 @@
       "status": "unread",
       "submission_time": "",
       "conflict_marker": false,
-      "invalid_fields": [],
+      "invalid_fields": "",
       "is_placeholder": false
     },
     {
@@ -64,9 +59,7 @@
       "title": "From individuals to crowds: Dual-level public response prediction in social media",
       "authors": "Jinghui Zhang, Kaiyang Wan, Longwei Xu, Ao Li, Zongfang Liu, Xiuying Chen",
       "date": "2025-10-27",
-      "category": [
-        "Simulation and Deduction"
-      ],
+      "category": "Simulation and Deduction",
       "summary_motivation": "收到收到的地方",
       "summary_innovation": "",
       "summary_method": "",
@@ -77,7 +70,7 @@
       "conference": "MM '25",
       "title_translation": "",
       "analogy_summary": "TLDR: Experimental results on SentiWeibo and related LaMP benchmark demonstrate that SocialAlign surpasses strong baselines, showing improved accuracy, interpretability, and generalization in public response prediction.",
-      "pipeline_image": [],
+      "pipeline_image": "",
       "abstract": "Public response prediction is critical for understanding how individuals or groups might react to specific events, policies, or social phenomena, making it highly valuable for crisis management, policy-making, and social media analysis. However, existing works face notable limitations. First, they lack micro-level personalization, producing generic responses that ignore individual user preferences. Moreover, they overlook macro-level sentiment distribution and only deal with individual-level sentiment, constraining them from analyzing broader societal trends and group sentiment dynamics. To address these challenges, we propose SocialAlign, a unified framework that predicts real-world responses at both micro and macro levels in social contexts. At the micro level, SocialAlign employs SocialLLM with an articulate Personalized Analyze-Compose LoRA (PAC-LoRA) structure, which deploys specialized expert modules for content analysis and response generation across diverse topics and user profiles, enabling the generation of personalized comments with corresponding sentiments. At the macro level, it models group sentiment distributions and aligns predictions with real-world sentiment trends derived from social media data. To evaluate SocialAlign in real-world scenarios, we introduce SentiWeibo, a large-scale dataset curated from authentic social interactions on the Weibo platform. Experimental results on our SentiWeibo and related LaMP benchmark demonstrate that SocialAlign surpasses strong baselines, showing improved accuracy, interpretability, and generalization in public response prediction. We hope our work inspires further research in public response prediction and computational social science: https://github.com/Znull-1220/SocialAlign.",
       "contributor": "",
       "notes": "",
@@ -85,7 +78,7 @@
       "status": "unread",
       "submission_time": "",
       "conflict_marker": false,
-      "invalid_fields": [],
+      "invalid_fields": "",
       "is_placeholder": false
     },
     {
@@ -93,9 +86,7 @@
       "title": "LLMs to the Moon? Reddit Market Sentiment Analysis with Large Language Models",
       "authors": "Xiang Deng, Vasilisa Bashlovkina, Feng Han, Simon Baumgartner, Michael Bendersky",
       "date": "2023-04-30",
-      "category": [
-        "Hate Speech Analysis"
-      ],
+      "category": "Hate Speech Analysis",
       "summary_motivation": "",
       "summary_innovation": "",
       "summary_method": "",
@@ -106,7 +97,7 @@
       "conference": "WWW '23 Companion",
       "title_translation": "",
       "analogy_summary": "TLDR: This case study conducts a case study approaching market sentiment analysis on social media content with semi-supervised learning using a large language model (LLM), finding that prompting the LLM to produce Chain-of-Thought summaries and forcing it through several reasoning paths helps generate more stable and accurate labels.",
-      "pipeline_image": [],
+      "pipeline_image": "",
       "abstract": "Market sentiment analysis on social media content requires knowledge of both financial markets and social media jargon, which makes it a challenging task for human raters. The resulting lack of high-quality labeled data stands in the way of conventional supervised learning methods. In this work, we conduct a case study approaching this problem with semi-supervised learning using a large language model (LLM). We select Reddit as the target social media platform due to its broad coverage of topics and content types. Our pipeline first generates weak financial sentiment labels for Reddit posts with an LLM and then uses that data to train a small model that can be served in production. We find that prompting the LLM to produce Chain-of-Thought summaries and forcing it through several reasoning paths helps generate more stable and accurate labels, while training the student model using a regression loss further improves distillation quality. With only a handful of prompts, the final model performs on par with existing supervised models. Though production applications of our model are limited by ethical considerations, the model’s competitive performance points to the great potential of using LLMs for tasks that otherwise require skill-intensive annotation.",
       "contributor": "",
       "notes": "",
@@ -114,7 +105,7 @@
       "status": "unread",
       "submission_time": "",
       "conflict_marker": false,
-      "invalid_fields": [],
+      "invalid_fields": "",
       "is_placeholder": false
     },
     {
@@ -122,9 +113,7 @@
       "title": "Multi-label emotion analysis in conversation via multimodal knowledge distillation",
       "authors": "Sidharth Anand∗,Naresh Kumar Devulapally∗,Sreyasee Das Bhattacharjee,Junsong Yuan",
       "date": "2023-10-27",
-      "category": [
-        "Sentiment Analysis"
-      ],
+      "category": "Sentiment Analysis",
       "summary_motivation": "Addresses the limitations of single-dominant emotion assumptions by tackling the challenge of multi-label emotion co-occurrence and generalization across diverse socio-demographic groups, particularly varying age populations.\n[翻译] 针对现有多模态方法主要关注单一主导情感的局限性，该研究致力于解决情感标签共现的识别难题，并提升模型在不同社会人口统计学群体（特别是不同年龄段人群）中的泛化能力。",
       "summary_innovation": "将多模态知识蒸馏与标签一致性校准损失（LCC）相结合，减轻了模型对简单标签的过拟合（保证置信度相近）；构建了一个利用蒸馏方法的整体框架，其目的是为了融合各模态能力",
       "summary_method": "Employing a Multimodal Transformer Network where mode-specific peer branches (visual, audio, textual) collaboratively distill learned probabilistic uncertainty into a fusion branch via cross-network attention and noise contrastive estimation.……\n[翻译] 将三个特定模态的对等分支通过跨网络注意力和噪声对比估计，协同地将其学习到的概率蒸馏到融合分支中，构建了一个拥有四个分支的整体预测模型。[值得关注]视频使用Tubelet embedding技术，将视频切分为时空小块（Spatial-Temporal Tubes），保留时空信息",
@@ -135,9 +124,7 @@
       "conference": "Proceedings of the 31st ACM International Conference on Multimedia",
       "title_translation": "[AI generated] **中文标题：** 基于多模态知识蒸馏的对话多标签情感分析话多标签情感分析",
       "analogy_summary": "三个专家分别处理一个模态，训练的同时将能力蒸馏给融合分支，最终形成一个整体模型，教师（分支专家）与学生（融合专家）一同处理多模态内容，得到情感分类",
-      "pipeline_image": [
-        "figures/SeMuL-PCD.png"
-      ],
+      "pipeline_image": "figures/SeMuL-PCD.png",
       "abstract": "Evaluating speaker emotion in conversations is crucial for various applications requiring human-computer interaction. However, co-occurrences of multiple emotional states (e.g. 'anger' and 'frustration' may occur together or one may influence the occurrence of the other) and their dynamic evolution may vary dramatically due to the speaker's internal (e.g., influence of their personalized socio-cultural-educational and demographic backgrounds) and external contexts. Thus far, the previous focus has been on evaluating only the dominant emotion observed in a speaker at a given time, which is susceptible to producing misleading classification decisions for difficult multi-labels during testing. In this work, we present Self-supervised Multi- Label Peer Collaborative Distillation (SeMuL-PCD) Learning via an efficient Multimodal Transformer Network, in which complementary feedback from multiple mode-specific peer networks (e.g.transcript, audio, visual) are distilled into a single mode-ensembled fusion network for estimating multiple emotions simultaneously. The proposed Multimodal Distillation Loss calibrates the fusion network by minimizing the Kullback-Leibler divergence with the peer networks. Additionally, each peer network is conditioned using a self-supervised contrastive objective to improve the generalization across diverse socio-demographic speaker backgrounds. By enabling peer collaborative learning that allows each network to independently learn their mode-specific discriminative patterns,SeMUL-PCD is effective across different conversation environments. In particular, the model not only outperforms the current state-of-the-art models on several large-scale public datasets (e.g., MOSEI, EmoReact and ElderReact), but with around 17% improved weighted F1-score in the cross-dataset experimental settings. The model also demonstrates an impressive generalization ability across age and demography-diverse populations.",
       "contributor": "anonymous",
       "notes": "【面向结果模型训练】[引用句]\"Transscending the traditional paradigm of identifying single dominant emotions, Anand et al. [2023] proposed SeMuL-PCD to enhance the granularity of affective perception in diverse social contexts; by leveraging a collaborative distillation mechanism that calibrates mode-specific feedback, their model robustly disentangles multi-label emotional co-occurrences across varying demographic backgrounds (e.g., children and the elderly), thereby providing a more nuanced foundation for socially adaptive agents.\"\n[翻译] “为了超越识别单一主导情感的传统范式，Anand等人[2023]提出了SeMuL-PCD，旨在增强不同社会语境下情感感知的粒度；通过利用一种校准模态特定反馈的协作蒸馏机制，该模型能够在不同的人口统计背景（如儿童和老人）下鲁棒地解耦多标签情感的共现关系，从而为具备社会适应能力的智能体提供了更精细的情感理解基础。”",
@@ -145,7 +132,7 @@
       "status": "",
       "submission_time": "",
       "conflict_marker": false,
-      "invalid_fields": [],
+      "invalid_fields": "",
       "is_placeholder": false
     }
   ],

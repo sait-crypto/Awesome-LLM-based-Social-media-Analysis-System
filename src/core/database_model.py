@@ -62,7 +62,7 @@ class Paper:
     status: str = ""  # "" "unread" "reading" "done" "adopted"
     submission_time: str = ""
     conflict_marker: bool = False
-    # 验证相关字段：记录不规范字段的 order 列表（逗号分隔）
+    # 验证相关字段：记录不规范字段的 variable 列表（| 分隔）
     invalid_fields: str = ""
     is_placeholder: bool = False  # 占位符标记，用于表示存在但填写不完整的论文条目
     
@@ -164,48 +164,37 @@ class Paper:
             except Exception: pass
 
         # === 资源路径验证 (Assets) ===
-        # 检查资源是否规范地位于 assets/{uid}/ 下
+        # 仅检查字段值所指向的文件是否存在，不强制其位于规范目录
         for asset_field in ['pipeline_image', 'paper_file']:
-            if should_check(asset_field):
-                from src.core.update_file_utils import get_update_file_utils
-                ufu = get_update_file_utils()
-                # 1. 检查格式: assets/{uid}/filename
-                if not self.uid:
-                    normalized = ufu.normalize_assets(self)  # 生成 UID 和规范化路径（副作用）
-                    self.uid = normalized.uid  # 确保 UID 被设置
-                    self.pipeline_image = normalized.pipeline_image
-                    self.paper_file = normalized.paper_file
-                val = getattr(self, asset_field, "")
-                if val:
-                    # 分割多图情况
-                    paths = [p.strip() for p in re.split(r'[;；]', str(val)) if p.strip()]
-                    for p in paths:
+            if not should_check(asset_field):
+                continue
+            from src.core.update_file_utils import get_update_file_utils
+            ufu = get_update_file_utils()
+            val = getattr(self, asset_field, "")
+            if not val:
+                continue
 
-
-                        if not self.uid:
-                            errors.append(f"{asset_field} 存在资源路径但 Paper UID 为空，无法验证资源路径规范性")
-                            invalid_vars.add(asset_field)
-                            continue
-
-                        elif not p.startswith(f"assets/{self.uid}/") and not p.startswith(f"assets\\{self.uid}\\"):
-                             # 兼容旧路径 figures/xxx, papers/xxx (如果不强制迁移)
-                             # 但如果要求严格 assets，这里应报错
-                             if not (p.startswith("figures") or p.startswith("papers")):
-                                 errors.append(f"{asset_field} 路径不规范: {p} (应在 assets/{self.uid}/ 下)")
-                                 invalid_vars.add(asset_field)
-                        
-                        # 2. 检查文件是否存在
-                        full_path = os.path.join(project_root, p)
-                        if not os.path.exists(full_path):
-                             errors.append(f"{asset_field} 文件不存在: {p}")
-                             invalid_vars.add(asset_field)
+            paths = [p.strip() for p in str(val).split('|') if p.strip()]
+            for p in paths:
+                resolved = ufu.resolve_asset_path(p, asset_field)
+                if not resolved or not os.path.exists(resolved):
+                    errors.append(f"{asset_field} 文件不存在: {p}")
+                    invalid_vars.add(asset_field)
 
         # 1. 特殊字段验证
         
         # 验证 invalid_fields 字段格式
         if should_check('invalid_fields'):
             if self.invalid_fields:
-                invalid_fields_valid, invalid_fields_error = validate_invalid_fields(self.invalid_fields)
+                allowed_vars = {
+                    str(tag.get('variable')).strip()
+                    for tag in active_tags
+                    if tag.get('variable')
+                }
+                invalid_fields_valid, invalid_fields_error = validate_invalid_fields(
+                    self.invalid_fields,
+                    allowed_variables=allowed_vars,
+                )
                 if not invalid_fields_valid:
                     errors.append(f"invalid_fields 字段格式无效: {invalid_fields_error}")
                     invalid_vars.add('invalid_fields')
@@ -309,10 +298,10 @@ class Paper:
                         errors.append(f"字段类型不匹配: {display_name} 应为布尔值")
                         invalid_vars.add(var_name)
                 elif (str(tag_type).startswith('enum')) and var_name == 'category':
-                    # 支持多分类，先按 ';' 分割
+                    # 支持多分类，按 '|' 分割
                     val_str = str(value)
                     try:
-                        parts = [p.strip() for p in re.split(r'[;；]', val_str) if p.strip()]
+                        parts = [p.strip() for p in val_str.split('|') if p.strip()]
                     except Exception:
                         parts = [val_str.strip()]
 
@@ -363,45 +352,41 @@ class Paper:
         # 处理 invalid_fields 字段更新
         # 仅当 no_normalize=False (即允许更新对象状态) 时，才更新 self.invalid_fields
         if not no_normalize:
-            # 准备映射：变量名 -> Order
-            var_to_order = {}
+            # 准备映射：按配置顺序的变量列表
+            ordered_vars = []
             for tag in active_tags:
                 var = tag.get('variable')
-                order = tag.get('order')
-                if var is not None and order is not None:
-                    var_to_order[var] = str(order)
+                if var:
+                    ordered_vars.append(str(var).strip())
+            valid_var_set = set(ordered_vars)
 
-            # 解析当前的 invalid_fields
-            current_invalid_orders = set()
+            # 解析当前的 invalid_fields（仅保留已知 variable）
+            current_invalid_vars = set()
             if self.invalid_fields:
-                parts = str(self.invalid_fields).split(',')
+                parts = [p.strip() for p in str(self.invalid_fields).split('|') if p.strip()]
                 for p in parts:
-                    if p.strip():
-                        current_invalid_orders.add(p.strip())
+                    if p in valid_var_set:
+                        current_invalid_vars.add(p)
 
             if variable is None:
-                # 全量验证模式：重置 invalid_fields 为当前 invalid_vars 对应的 order
-                orders = []
-                for v in sorted(invalid_vars):
-                    if v in var_to_order:
-                        orders.append(var_to_order[v])
-                self.invalid_fields = ",".join(orders)
+                # 全量验证模式：重置 invalid_fields 为当前 invalid_vars 对应的 variable
+                vars_out = [v for v in ordered_vars if v in invalid_vars]
+                self.invalid_fields = '|'.join(vars_out)
             else:
                 # 单字段验证模式：更新当前字段的状态
-                target_order = var_to_order.get(variable)
-                if target_order:
+                target_var = str(variable).strip() if variable else ''
+                if target_var and target_var in valid_var_set:
                     if variable in invalid_vars:
-                        # 验证失败，添加 order
-                        current_invalid_orders.add(target_order)
+                        # 验证失败，添加 variable
+                        current_invalid_vars.add(target_var)
                     else:
-                        # 验证通过，移除 order
-                        if target_order in current_invalid_orders:
-                            current_invalid_orders.remove(target_order)
-                    
-                    # 重新生成字符串，保持排序以便一致性
-                    # 将字符串转int排序再转回str
-                    sorted_orders = sorted(current_invalid_orders, key=lambda x: int(x) if x.isdigit() else 0)
-                    self.invalid_fields = ",".join(sorted_orders)
+                        # 验证通过，移除 variable
+                        if target_var in current_invalid_vars:
+                            current_invalid_vars.remove(target_var)
+
+                    # 重新生成字符串，保持与配置顺序一致
+                    sorted_vars = [v for v in ordered_vars if v in current_invalid_vars]
+                    self.invalid_fields = '|'.join(sorted_vars)
 
         return (len(errors) == 0, errors, list(invalid_vars))
         

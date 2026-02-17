@@ -32,6 +32,39 @@ class UpdateFileUtils:
         
         self.project_root = self.config.project_root
 
+    def _get_array_fields(self) -> Dict[str, str]:
+        out: Dict[str, str] = {}
+        for tag in self.config.get_active_tags():
+            var = tag.get('variable')
+            t = str(tag.get('type', '') or '')
+            if var and t.endswith('[]'):
+                out[var] = t
+        return out
+
+    def _normalize_array_string(self, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, list):
+            items = [str(x).strip() for x in value if str(x).strip()]
+            return '|'.join(items)
+        if isinstance(value, str):
+            s = value.strip()
+            if not s:
+                return ""
+            parts = [x.strip() for x in s.split('|') if x.strip()]
+            return '|'.join(parts)
+        return ""
+
+    def _array_string_to_json_list(self, value: Any) -> List[str]:
+        s = self._normalize_array_string(value)
+        if not s:
+            return []
+        return [x.strip() for x in s.split('|') if x.strip()]
+
+    def _array_string_to_csv_string(self, value: Any) -> str:
+        items = self._array_string_to_json_list(value)
+        return '|'.join(items)
+
     # ================= 统一 IO 接口 =================
 
     def read_data(self, filepath: str) -> Tuple[bool, List[Paper]]:
@@ -98,6 +131,8 @@ class UpdateFileUtils:
 
                     header_ids = [h.strip() for h in rows[1]]
 
+                    array_fields = self._get_array_fields()
+
                     for row_data in rows[2:]:
                         if not any(row_data):
                             continue
@@ -108,7 +143,11 @@ class UpdateFileUtils:
                         paper_dict = {}
                         for i, tag_id in enumerate(header_ids):
                             if not tag_id: continue
-                            paper_dict[tag_id] = row_data[i]
+                            raw_val = row_data[i]
+                            if tag_id in array_fields:
+                                paper_dict[tag_id] = self._normalize_array_string(raw_val)
+                            else:
+                                paper_dict[tag_id] = raw_val
 
                         if paper_dict:
                             papers.append(self._dict_to_paper(paper_dict))
@@ -141,6 +180,7 @@ class UpdateFileUtils:
         display_names = [t.get('table_name', t.get('variable', '')) for t in tags]
         tag_ids = [t.get('variable') for t in tags if t.get('variable')]
         
+        array_fields = self._get_array_fields()
         try:
             with open(filepath, 'w', encoding='utf-8-sig', newline='') as f:
                 writer = csv.writer(f)
@@ -158,6 +198,9 @@ class UpdateFileUtils:
                         # 获取值并转字符串
                         val = paper_dict.get(tid, "")
                         if val is None: val = ""
+
+                        if tid in array_fields:
+                            val = self._array_string_to_csv_string(val)
                         
                         # 处理列表/字典等复杂类型转JSON字符串
                         if isinstance(val, (list, dict)):
@@ -200,7 +243,23 @@ class UpdateFileUtils:
             elif isinstance(data, list):
                 raw_list = data
             
-            return True, [self._dict_to_paper(p) for p in raw_list]
+            array_fields = self._get_array_fields()
+            normalized_list = []
+            for p in raw_list:
+                if not isinstance(p, dict):
+                    continue
+                new_p = dict(p)
+                for var in array_fields.keys():
+                    if var not in new_p:
+                        continue
+                    raw_val = new_p.get(var)
+                    if isinstance(raw_val, list):
+                        new_p[var] = self._normalize_array_string(raw_val)
+                    else:
+                        new_p[var] = ""
+                normalized_list.append(new_p)
+
+            return True, [self._dict_to_paper(p) for p in normalized_list]
         except Exception as e:
             print(f"读取 JSON 失败 {filepath}: {e}")
             return False, []
@@ -239,6 +298,8 @@ class UpdateFileUtils:
             existing_meta['generated_at'] = get_current_timestamp()
             existing_meta['column_ids'] = ordered_ids # 显式记录ID逻辑
 
+            array_fields = self._get_array_fields()
+
             # 2. 准备 Papers 数据 (尽量保证字典键序)
             serialized_papers = []
             for paper in papers:
@@ -247,7 +308,12 @@ class UpdateFileUtils:
                 for tid in ordered_ids:
                     # 确保所有 Active Tag 都在字典中，缺失补空
                     val = raw_dict.get(tid, "")
-                    ordered_dict[tid] = val if val is not None else ""
+                    if val is None:
+                        val = ""
+                    if tid in array_fields:
+                        ordered_dict[tid] = self._array_string_to_json_list(val)
+                    else:
+                        ordered_dict[tid] = val
                 
                 serialized_papers.append(ordered_dict)
             
@@ -273,93 +339,80 @@ class UpdateFileUtils:
         3. 确保 assets/{uid} 目录存在
         4. 将文件移动/复制到 assets/{uid}/ 并更新字段为相对路径
         """
-        has_assets = bool(paper.pipeline_image or paper.paper_file)
-        
-        # 如果没有资源且没有UID，不需要做任何事
-        # (如果业务逻辑要求所有论文必须有UID，可以在这里强制生成)
+        return self.normalize_asset_fields(paper, ['pipeline_image', 'paper_file'])
+
+    def normalize_asset_fields(self, paper: Paper, fields: List[str], strict: bool = False) -> Paper:
+        """按字段规范化资源路径（复制到 assets/{uid}/ 并回填相对路径）"""
+        target_fields = [f for f in fields if f in ('pipeline_image', 'paper_file')]
+        has_assets = any(bool(getattr(paper, f, "")) for f in target_fields)
         if not has_assets and not paper.uid:
             return paper
 
-        # 1. 确保 UID 存在（基于 title+doi 的稳定 hash）
         if not paper.uid:
             paper.uid = generate_paper_uid(getattr(paper, 'title', ''), getattr(paper, 'doi', ''))
-        
-        # 目标目录: assets/{uid}/
+
         paper_asset_dir = os.path.join(self.project_root, self.assets_dir, paper.uid)
         ensure_directory(paper_asset_dir)
-        
-        # 2. 处理 Pipeline Image
-        if paper.pipeline_image:
+
+        if 'pipeline_image' in target_fields and paper.pipeline_image:
             new_paths = []
-            # 支持多图
-            for raw_path in re.split(r'[;；]', paper.pipeline_image):
+            for raw_path in str(paper.pipeline_image).split('|'):
                 clean_path = raw_path.strip()
-                if not clean_path: continue
-                
-                # 尝试定位源文件 (可能是旧路径 figures/xxx 或绝对路径)
+                if not clean_path:
+                    continue
                 src_path = self._resolve_source_path(clean_path, self.legacy_figure_dir)
-                
                 if src_path and os.path.exists(src_path):
                     filename = os.path.basename(src_path)
                     dest_path = os.path.join(paper_asset_dir, filename)
-                    
-                    # 如果目标位置没有文件，或者与源文件不同，则复制
                     try:
                         if not os.path.exists(dest_path) or not os.path.samefile(src_path, dest_path):
                             shutil.copy2(src_path, dest_path)
                     except Exception as e:
+                        if strict:
+                            raise RuntimeError(f"复制资源失败 {src_path} -> {dest_path}: {e}")
                         print(f"复制资源失败 {src_path} -> {dest_path}: {e}")
-
-                    # 使用相对于 project_root 的相对路径，保证保存为相对路径（如 assets/uid/filename）
                     try:
                         rel_path = os.path.relpath(dest_path, self.project_root).replace('\\', '/')
                     except Exception:
-                        # 兜底为传统拼接
                         rel_path = os.path.join(self.assets_dir, paper.uid, filename).replace('\\', '/')
                     new_paths.append(rel_path)
                 else:
-                    # 如果找不到源文件，可能是已经是规范路径了，或者文件丢失
-                    # 保留原值，交给验证环节报错
-                    # 尝试标准化斜杠
-                    norm_clean = clean_path.replace('\\', '/')
-                    assets_prefix = os.path.join(self.assets_dir, paper.uid, '').replace('\\', '/')
-                    if assets_prefix and assets_prefix in norm_clean:
-                        new_paths.append(norm_clean)
-                    else:
-                        print(f"警告: 找不到资源文件 {clean_path}")
-                        new_paths.append(clean_path)
-            
-            paper.pipeline_image = ";".join(new_paths)
+                    if strict:
+                        raise FileNotFoundError(f"找不到资源文件: {clean_path}")
+                    print(f"警告: 找不到资源文件 {clean_path}")
+                    new_paths.append(clean_path.replace('\\', '/'))
+            paper.pipeline_image = '|'.join(new_paths)
 
-        # 3. 处理 Paper File (PDF)
-        if paper.paper_file:
-            clean_path = paper.paper_file.strip()
+        if 'paper_file' in target_fields and paper.paper_file:
+            clean_path = str(paper.paper_file).strip()
             if clean_path:
                 src_path = self._resolve_source_path(clean_path, self.legacy_paper_dir)
-                
                 if src_path and os.path.exists(src_path):
                     filename = os.path.basename(src_path)
                     dest_path = os.path.join(paper_asset_dir, filename)
-                    
                     try:
                         if not os.path.exists(dest_path) or not os.path.samefile(src_path, dest_path):
                             shutil.copy2(src_path, dest_path)
                     except Exception as e:
+                        if strict:
+                            raise RuntimeError(f"复制资源失败 {src_path} -> {dest_path}: {e}")
                         print(f"复制资源失败 {src_path} -> {dest_path}: {e}")
                     try:
                         paper.paper_file = os.path.relpath(dest_path, self.project_root).replace('\\', '/')
                     except Exception:
                         paper.paper_file = os.path.join(self.assets_dir, paper.uid, filename).replace('\\', '/')
                 else:
-                    # 检查是否已经是正确路径
-                    norm_clean = clean_path.replace('\\', '/')
-                    assets_prefix = os.path.join(self.assets_dir, paper.uid, '').replace('\\', '/')
-                    if assets_prefix and assets_prefix in norm_clean:
-                        paper.paper_file = norm_clean
-                    else:
-                        print(f"警告: 找不到论文文件 {clean_path}")
-        
+                    if strict:
+                        raise FileNotFoundError(f"找不到论文文件: {clean_path}")
+                    print(f"警告: 找不到论文文件 {clean_path}")
+                    paper.paper_file = clean_path.replace('\\', '/')
+
         return paper
+
+    def resolve_asset_path(self, path_str: str, asset_field: str) -> Optional[str]:
+        """根据字段解析路径（支持绝对路径、项目相对路径、legacy文件名）"""
+        legacy_dir = self.legacy_figure_dir if asset_field == 'pipeline_image' else self.legacy_paper_dir
+        return self._resolve_source_path(path_str, legacy_dir)
 
     def _resolve_source_path(self, path_str: str, legacy_dir_rel: str) -> Optional[str]:
         """尝试解析文件绝对路径"""
@@ -374,8 +427,11 @@ class UpdateFileUtils:
         # 3. 相对旧目录 (兼容 figures/xxx 这种写法)
         # 如果 path_str 已经包含 legacy_dir_rel (e.g. figures/a.png), p1 已经覆盖
         # 如果 path_str 只是文件名 (a.png) 且 legacy_dir 存在
-        p2 = os.path.join(self.project_root, legacy_dir_rel, os.path.basename(path_str))
-        if os.path.exists(p2): return p2
+        has_dir_part = (os.path.basename(path_str) != path_str)
+        if not has_dir_part:
+            p2 = os.path.join(self.project_root, legacy_dir_rel, os.path.basename(path_str))
+            if os.path.exists(p2):
+                return p2
 
         return None
 
@@ -429,7 +485,7 @@ class UpdateFileUtils:
         s = str(raw_val).strip()
         if not s: return ""
 
-        parts = [p.strip() for p in re.split(r'[;；]', s) if p.strip()]
+        parts = [p.strip() for p in s.split('|') if p.strip()]
         if not parts: return ""
 
         try:
@@ -456,7 +512,7 @@ class UpdateFileUtils:
                 out.append(uname)
             if len(out) >= max_allowed: break
             
-        return ";".join(out)
+        return "|".join(out)
     
     def persist_ai_generated_to_update_files(self, papers: List[Paper], file_path: str):
         """回写 AI 数据到文件"""

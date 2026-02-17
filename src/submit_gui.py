@@ -5,6 +5,7 @@
 """
 import os
 import sys
+import re
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, scrolledtext, simpledialog
 from typing import Dict, List, Any, Optional, Tuple
@@ -56,12 +57,18 @@ class PaperSubmissionGUI:
         self.style.configure("Conflict.Treeview", background=self.color_conflict)
 
         self._suppress_select_event = False
+        self._handling_paper_selection = False
         
-        # 跟踪已导入的文件，避免重复导入
-        # 格式: {'pipeline_image': (源路径, 目标相对路径), 'paper_file': (源路径, 目标相对路径)}
+        # 跟踪已导入的临时文件，避免重复复制
         self._imported_files: Dict[str, Optional[Tuple[str, str]]] = {
             'pipeline_image': None,
             'paper_file': None
+        }
+
+        # file 字段确认(✓)状态
+        self._file_field_states: Dict[str, Dict[str, Any]] = {
+            'pipeline_image': {},
+            'paper_file': {}
         }
 
         self.setup_ui()
@@ -79,6 +86,7 @@ class PaperSubmissionGUI:
     def load_initial_data(self):
         try:
             count = self.logic.load_existing_updates()
+            self._set_current_loaded_file(self.logic.current_file_path or self.logic.primary_update_file)
             if count > 0:
                 self.refresh_list_view()
                 filename = os.path.basename(self.logic.primary_update_file) if self.logic.primary_update_file else "Template"
@@ -401,7 +409,10 @@ class PaperSubmissionGUI:
                 self.field_widgets[variable] = container
 
             # === 2. File Fields (Asset Import) ===
-            elif variable in ['pipeline_image', 'paper_file']:
+            elif variable == 'pipeline_image':
+                self._create_pipeline_file_array_ui(row, variable)
+
+            elif variable == 'paper_file':
                 self._create_file_field_ui(row, variable)
 
             # === 3. Standard Enum ===
@@ -456,7 +467,6 @@ class PaperSubmissionGUI:
                 sv = tk.StringVar()
                 sv.trace_add("write", lambda *args, v=variable, w=entry: self._on_field_change(v, w))
                 entry.config(textvariable=sv)
-                entry.textvariable = sv
                 
                 entry.bind("<Enter>", lambda e: self._bind_global_scroll(self.form_canvas.yview_scroll))
                 self.form_fields[variable] = entry
@@ -466,55 +476,127 @@ class PaperSubmissionGUI:
         
         self.form_frame.columnconfigure(1, weight=1)
 
+    def _get_current_real_index(self) -> int:
+        if self.current_paper_index < 0:
+            return -1
+        if self.current_paper_index >= len(self.filtered_indices):
+            return -1
+        return self.filtered_indices[self.current_paper_index]
+
+    def _get_current_paper(self):
+        ridx = self._get_current_real_index()
+        if ridx < 0:
+            return None
+        if ridx >= len(self.logic.papers):
+            return None
+        return self.logic.papers[ridx]
+
     def _import_file_asset_once(self, src_path: str, asset_type: str, field_name: str) -> str:
-            """
-            智能导入文件资源，避免重复导入
-            Args:
-                src_path: 源文件路径（绝对路径或相对路径）
-                asset_type: 'figure' or 'paper'
-                field_name: 'pipeline_image' or 'paper_file'
-            Returns:
-                相对路径字符串
-            """
-            # 1. 如果是相对路径且文件存在，直接返回（已经在项目中）
-            if not os.path.isabs(src_path):
-                rel_check = os.path.join(BASE_DIR, src_path)
-                if os.path.exists(rel_check):
-                    # 更新跟踪记录
-                    self._imported_files[field_name] = (src_path, src_path)
-                    return src_path
-            
-            # 2. 如果是绝对路径，检查是否已经在项目目录中
-            if os.path.isabs(src_path):
-                try:
-                    # 尝试获取相对于项目的路径
-                    rel_path = os.path.relpath(src_path, BASE_DIR).replace('\\', '/')
-                    # 如果文件在项目目录内，直接使用相对路径
-                    if not rel_path.startswith('..'):
-                        self._imported_files[field_name] = (src_path, rel_path)
-                        return rel_path
-                except ValueError:
-                    # 不同驱动器，无法计算相对路径
-                    pass
-            
-            # 3. 检查是否已经导入过这个源文件 (缓存机制)
-            if field_name in self._imported_files and self._imported_files[field_name]:
-                cached_src, cached_dest = self._imported_files[field_name]
-                # 如果源文件相同，直接返回之前的目标路径
-                if cached_src == src_path:
-                    return cached_dest
-            
-            # 4. 需要导入新文件，调用底层方法 (导入到 assets/temp/)
-            rel_path = self.logic.import_file_asset(src_path, asset_type)
-            if rel_path:
-                # 记录导入信息
-                self._imported_files[field_name] = (src_path, rel_path)
-            return rel_path
+        """导入到 assets/temp/{uid}/{asset_type} 并返回临时相对路径"""
+        if not src_path:
+            return ""
+
+        # 手动输入的相对路径（项目内存在）不复制
+        if not os.path.isabs(src_path):
+            rel_check = os.path.join(BASE_DIR, src_path)
+            if os.path.exists(rel_check):
+                self._imported_files[field_name] = (src_path, src_path)
+                return src_path.replace('\\', '/')
+
+        # 绝对路径但位于项目内：改为相对路径，不复制
+        if os.path.isabs(src_path):
+            try:
+                rel_path = os.path.relpath(src_path, BASE_DIR).replace('\\', '/')
+                if not rel_path.startswith('..') and os.path.exists(src_path):
+                    self._imported_files[field_name] = (src_path, rel_path)
+                    return rel_path
+            except ValueError:
+                pass
+
+        # 缓存命中
+        cached_pair = self._imported_files.get(field_name)
+        if cached_pair:
+            cached_src, cached_dest = cached_pair
+            if cached_src == src_path:
+                return cached_dest
+
+        paper = self._get_current_paper()
+        if not paper:
+            raise RuntimeError("请先选择论文")
+        uid = self.logic.ensure_paper_uid(paper)
+
+        ok, rel_path, err = self.logic.import_file_asset(src_path, asset_type, uid)
+        if not ok:
+            raise RuntimeError(err or "导入失败")
+        self._imported_files[field_name] = (src_path, rel_path)
+        return rel_path
+
+    def _update_file_confirm_button_state(self, variable: str):
+        state = self._file_field_states.get(variable, {})
+        btn = state.get('confirm_btn')
+        sv = state.get('var')
+        if not btn or sv is None:
+            return
+        cur = (sv.get() or '').strip()
+        last = (state.get('last_confirmed') or '').strip()
+        btn.config(state=('normal' if cur != last else 'disabled'))
+
+    def _confirm_single_file_field(self, variable: str, show_popup: bool = True) -> bool:
+        paper = self._get_current_paper()
+        if not paper:
+            return True
+        state = self._file_field_states.get(variable, {})
+        sv = state.get('var')
+        if sv is None:
+            return True
+
+        raw_val = (sv.get() or '').strip()
+
+        try:
+            ok, normalized, err = self.logic.confirm_file_field_for_paper(paper, variable, raw_value=raw_val)
+            if not ok:
+                if show_popup:
+                    messagebox.showerror("资源处理失败", err or "规范化失败")
+                self._update_file_confirm_button_state(variable)
+                return False
+
+            normalized = normalized or ''
+            sv.set(normalized)
+            if variable == 'pipeline_image':
+                self._pipeline_set_rows_from_value(variable, normalized)
+            state['last_confirmed'] = normalized
+            self._update_file_confirm_button_state(variable)
+            self.logic.clear_temp_assets_for_paper(getattr(paper, 'uid', ''), variable)
+            self._validate_single_field_visuals(variable, self._get_current_real_index())
+            return True
+        except Exception as ex:
+            if show_popup:
+                messagebox.showerror("资源处理失败", str(ex))
+            self._update_file_confirm_button_state(variable)
+            return False
+
+    def _confirm_all_pending_file_fields_for_current_paper(self, show_popup: bool = True) -> bool:
+        for variable in ('pipeline_image', 'paper_file'):
+            state = self._file_field_states.get(variable, {})
+            sv = state.get('var')
+            if sv is None:
+                continue
+            cur = (sv.get() or '').strip()
+            last = (state.get('last_confirmed') or '').strip()
+            if cur != last:
+                if not self._confirm_single_file_field(variable, show_popup=show_popup):
+                    return False
+        return True
 
     def _create_file_field_ui(self, row, variable):
         """Helper to create file fields with correct layout, scoping, and Drag-and-Drop"""
         frame = ttk.Frame(self.form_frame)
         frame.grid(row=row, column=1, sticky="we", pady=(2, 2), padx=(5, 0))
+
+        # 0. Confirm Button (Left)
+        btn_confirm = ttk.Button(frame, text="✓", width=3, command=lambda v=variable: self._confirm_single_file_field(v, show_popup=True))
+        btn_confirm.pack(side=tk.LEFT, padx=(0, 4))
+        self.create_tooltip(btn_confirm, "确认该字段：校验并规范化到 assets/{uid}/；失败会中断且不修改")
         
         # 1. Entry (Left side, fill)
         entry = tk.Entry(frame)
@@ -525,9 +607,11 @@ class PaperSubmissionGUI:
         btn_frame.pack(side=tk.RIGHT, padx=(5, 0))
         
         sv = tk.StringVar()
-        sv.trace_add("write", lambda *args, v=variable, w=entry: self._on_field_change(v, w))
+        def on_file_value_change(*args):
+            self._on_field_change(variable, entry)
+            self._update_file_confirm_button_state(variable)
+        sv.trace_add("write", on_file_value_change)
         entry.config(textvariable=sv)
-        entry.textvariable = sv
         
         # 拖放功能支持 (tkinterdnd2)
         def setup_drag_drop(widget):
@@ -552,28 +636,25 @@ class PaperSubmissionGUI:
                 def on_drop(event):
                     """处理文件拖放"""
                     files = self.root.tk.splitlist(event.data)
-                    if files:
-                        file_path = files[0].strip('{}').strip('"')
-                        
-                        # 验证文件类型
-                        if variable == 'pipeline_image':
-                            valid_exts = ('.png', '.jpg', '.jpeg', '.gif', '.bmp')
-                            if not file_path.lower().endswith(valid_exts):
-                                messagebox.showerror("错误", "仅支持图片文件 (PNG, JPG, JPEG, GIF, BMP)")
-                                return
-                        elif variable == 'paper_file':
-                            if not file_path.lower().endswith('.pdf'):
-                                messagebox.showerror("错误", "仅支持 PDF 文件")
-                                return
-                        
-                        # 导入文件
-                        if os.path.exists(file_path):
-                            asset_type = 'figure' if variable == 'pipeline_image' else 'paper'
-                            rel_path = self._import_file_asset_once(file_path, asset_type, variable)
-                            if rel_path:
-                                sv.set(rel_path)
-                        else:
-                            messagebox.showerror("错误", "文件不存在")
+                    if not files:
+                        return
+                    file_path = files[0].strip('{}').strip('"')
+
+                    if not file_path.lower().endswith('.pdf'):
+                        messagebox.showerror("错误", "仅支持 PDF 文件")
+                        return
+
+                    if not os.path.exists(file_path):
+                        messagebox.showerror("错误", "文件不存在")
+                        return
+
+                    try:
+                        asset_type = 'paper'
+                        rel_path = self._import_file_asset_once(file_path, asset_type, variable)
+                        if rel_path:
+                            sv.set(rel_path)
+                    except Exception as ex:
+                        messagebox.showerror("资源处理失败", str(ex))
                 
                 widget.drop_target_register(DND_FILES)
                 widget.dnd_bind('<<Drop>>', on_drop)
@@ -585,93 +666,309 @@ class PaperSubmissionGUI:
         # 应用拖放支持
         setup_drag_drop(entry)
         
-        # FocusOut Event (手动输入路径后的处理)
-        def on_focus_out(event):
-            path = sv.get().strip()
-            if path and os.path.isabs(path) and os.path.exists(path):
-                asset_type = 'figure' if variable == 'pipeline_image' else 'paper'
-                rel_path = self._import_file_asset_once(path, asset_type, variable)
-                if rel_path:
-                    sv.set(rel_path)
-        entry.bind("<FocusOut>", on_focus_out)
-
         # Browse Button
         def browse_file():
-            ft = [("Images", "*.png;*.jpg;*.jpeg")] if variable == 'pipeline_image' else [("PDF", "*.pdf")]
+            ft = [("PDF", "*.pdf")]
             path = filedialog.askopenfilename(filetypes=ft)
             if path:
-                asset_type = 'figure' if variable == 'pipeline_image' else 'paper'
-                rel_path = self._import_file_asset_once(path, asset_type, variable)
-                if rel_path:
-                    sv.set(rel_path)
+                try:
+                    asset_type = 'paper'
+                    rel_path = self._import_file_asset_once(path, asset_type, variable)
+                    if rel_path:
+                        sv.set(rel_path)
+                except Exception as ex:
+                    messagebox.showerror("资源处理失败", str(ex))
         
         btn_browse = ttk.Button(btn_frame, text="📂", width=3, command=browse_file)
         btn_browse.pack(side=tk.LEFT, padx=1)
+        self.create_tooltip(btn_browse, "浏览导入到临时目录（该字段会覆盖当前值），点击✓后才正式规范化")
         
         # Reveal/Open Location (📍)
         def reveal_file():
             path = sv.get().strip()
-            if not path: return
-            abs_path = os.path.abspath(path) if os.path.isabs(path) else os.path.join(BASE_DIR, path)
+            if not path:
+                return
+            refs = [x.strip() for x in str(path).split('|') if x.strip()]
+            if not refs:
+                return
+            first_ref = refs[0]
+            abs_path = os.path.abspath(first_ref) if os.path.isabs(first_ref) else os.path.join(BASE_DIR, first_ref)
             if not os.path.exists(abs_path):
                 return messagebox.showerror("Error", "文件不存在")
+            target_dir = abs_path if os.path.isdir(abs_path) else os.path.dirname(abs_path)
             
             try:
                 if sys.platform == 'win32':
-                    subprocess.run(['explorer', '/select,', abs_path])
+                    os.startfile(target_dir)
                 elif sys.platform == 'darwin':
-                    subprocess.run(['open', '-R', abs_path])
+                    subprocess.run(['open', target_dir])
                 else: # Linux
-                    subprocess.run(['xdg-open', os.path.dirname(abs_path)])
+                    subprocess.run(['xdg-open', target_dir])
             except Exception as e:
                 messagebox.showerror("Error", f"无法定位文件: {e}")
 
         btn_reveal = ttk.Button(btn_frame, text="📍", width=3, command=reveal_file)
         btn_reveal.pack(side=tk.LEFT, padx=1)
+        self.create_tooltip(btn_reveal, "打开当前引用文件所在文件夹")
 
-        # Open (👁️)
-        def open_file():
-            path = sv.get().strip()
-            if not path: return
-            abs_path = os.path.abspath(path) if os.path.isabs(path) else os.path.join(BASE_DIR, path)
-            if os.path.exists(abs_path):
-                try:
-                    if sys.platform == 'win32': os.startfile(abs_path)
-                    elif sys.platform == 'darwin': subprocess.call(['open', abs_path])
-                    else: subprocess.call(['xdg-open', abs_path])
-                except: messagebox.showerror("Error", "无法打开文件")
-        
-        btn_open = ttk.Button(btn_frame, text="👁️", width=3, command=open_file)
-        btn_open.pack(side=tk.LEFT, padx=1)
+        self._file_field_states[variable] = {
+            'var': sv,
+            'confirm_btn': btn_confirm,
+            'last_confirmed': '',
+        }
+        self._update_file_confirm_button_state(variable)
 
-        # Paste (Image only)
-        if variable == 'pipeline_image':
-            def paste_img():
-                try:
-                    from PIL import ImageGrab
-                    img = ImageGrab.grabclipboard()
-                    if img:
-                        import time
-                        temp_path = os.path.join(BASE_DIR, f'temp_paste_{int(time.time())}.png')
-                        img.save(temp_path)
-                        rel_path = self._import_file_asset_once(temp_path, 'figure', variable)
-                        if rel_path: sv.set(rel_path)
-                        try:
-                            os.remove(temp_path)
-                        except:
-                            pass
-                    else:
-                        messagebox.showinfo("Info", "剪贴板中没有图片")
-                except ImportError:
-                    messagebox.showerror("Error", "需要安装 Pillow 库支持粘贴: pip install Pillow")
-                except Exception as ex:
-                    messagebox.showerror("Error", str(ex))
-
-            btn_paste = ttk.Button(btn_frame, text="📋", width=3, command=paste_img)
-            btn_paste.pack(side=tk.LEFT, padx=1)
-        
         self.form_fields[variable] = entry
         self.field_widgets[variable] = entry
+
+    def _pipeline_refresh_row_buttons(self, variable: str):
+        state = self._file_field_states.get(variable, {})
+        rows = state.get('rows', [])
+        for idx, row_data in enumerate(rows):
+            btn = row_data.get('btn')
+            if not btn:
+                continue
+            if idx == 0:
+                btn.config(text='+', state='normal')
+            else:
+                btn.config(text='-', state='normal')
+
+        if rows:
+            first_entry = rows[0].get('entry')
+            if first_entry:
+                self.field_widgets[variable] = first_entry
+
+    def _pipeline_sync_var_from_rows(self, variable: str):
+        state = self._file_field_states.get(variable, {})
+        sv = state.get('var')
+        rows = state.get('rows', [])
+        if sv is None:
+            return
+        values = []
+        for row_data in rows:
+            row_var = row_data.get('sv')
+            if row_var is None:
+                continue
+            val = (row_var.get() or '').strip()
+            if val:
+                values.append(val)
+        joined = '|'.join(values)
+        sv.set(joined)
+
+    def _pipeline_add_row(self, variable: str, initial_value: str = ''):
+        state = self._file_field_states.get(variable, {})
+        container = state.get('rows_container')
+        if container is None:
+            return
+
+        row_frame = ttk.Frame(container)
+        row_frame.pack(fill=tk.X, pady=1)
+
+        btn_add_remove = ttk.Button(row_frame, text='-', width=2)
+        btn_add_remove.pack(side=tk.LEFT, padx=(0, 4))
+
+        entry = tk.Entry(row_frame)
+        entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        btn_frame = ttk.Frame(row_frame)
+        btn_frame.pack(side=tk.RIGHT, padx=(5, 0))
+
+        row_sv = tk.StringVar(value=initial_value)
+
+        def on_row_change(*args):
+            self._pipeline_sync_var_from_rows(variable)
+            self._update_file_confirm_button_state(variable)
+
+        row_sv.trace_add("write", on_row_change)
+        entry.config(textvariable=row_sv)
+
+        def setup_drag_drop(widget):
+            if not hasattr(self.root, '_dnd_available'):
+                try:
+                    self.root.tk.call('package', 'require', 'tkdnd')
+                    self.root._dnd_available = True
+                except Exception:
+                    self.root._dnd_available = False
+
+            if not getattr(self.root, '_dnd_available', False):
+                self.create_tooltip(widget, "使用「📂 浏览」按钮选择文件")
+                return
+
+            try:
+                from tkinterdnd2 import DND_FILES
+
+                def on_drop(event):
+                    files = self.root.tk.splitlist(event.data)
+                    if not files:
+                        return
+                    file_path = files[0].strip('{}').strip('"')
+                    valid_exts = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg')
+                    if not file_path.lower().endswith(valid_exts):
+                        messagebox.showerror("错误", "仅支持图片文件")
+                        return
+                    if not os.path.exists(file_path):
+                        messagebox.showerror("错误", "文件不存在")
+                        return
+                    try:
+                        rel_path = self._import_file_asset_once(file_path, 'figure', variable)
+                        if rel_path:
+                            row_sv.set(rel_path)
+                    except Exception as ex:
+                        messagebox.showerror("资源处理失败", str(ex))
+
+                widget.drop_target_register(DND_FILES)
+                widget.dnd_bind('<<Drop>>', on_drop)
+                self.create_tooltip(widget, "可拖放图片到此，或使用「📂 浏览」按钮")
+            except Exception as e:
+                print(f"DnD Registration failed: {e}")
+
+        setup_drag_drop(entry)
+
+        def browse_file():
+            path = filedialog.askopenfilename(filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp;*.svg")])
+            if not path:
+                return
+            try:
+                rel_path = self._import_file_asset_once(path, 'figure', variable)
+                if rel_path:
+                    row_sv.set(rel_path)
+            except Exception as ex:
+                messagebox.showerror("资源处理失败", str(ex))
+
+        btn_browse = ttk.Button(btn_frame, text="📂", width=3, command=browse_file)
+        btn_browse.pack(side=tk.LEFT, padx=1)
+        self.create_tooltip(btn_browse, "浏览导入图片到临时目录（该行将被覆盖）")
+
+        def reveal_file():
+            path = (row_sv.get() or '').strip()
+            if not path:
+                return
+            abs_path = os.path.abspath(path) if os.path.isabs(path) else os.path.join(BASE_DIR, path)
+            if not os.path.exists(abs_path):
+                return messagebox.showerror("Error", "文件不存在")
+            target_dir = abs_path if os.path.isdir(abs_path) else os.path.dirname(abs_path)
+            try:
+                if sys.platform == 'win32':
+                    os.startfile(target_dir)
+                elif sys.platform == 'darwin':
+                    subprocess.run(['open', target_dir])
+                else:
+                    subprocess.run(['xdg-open', target_dir])
+            except Exception as e:
+                messagebox.showerror("Error", f"无法定位文件: {e}")
+
+        btn_reveal = ttk.Button(btn_frame, text="📍", width=3, command=reveal_file)
+        btn_reveal.pack(side=tk.LEFT, padx=1)
+        self.create_tooltip(btn_reveal, "打开该行文件所在文件夹")
+
+        def paste_img():
+            try:
+                from PIL import ImageGrab
+                img_obj: Any = ImageGrab.grabclipboard()
+                if img_obj is not None and hasattr(img_obj, 'save'):
+                    import time
+                    temp_path = os.path.join(BASE_DIR, f'temp_paste_{int(time.time())}.png')
+                    img_obj.save(temp_path)
+                    rel_path = self._import_file_asset_once(temp_path, 'figure', variable)
+                    if rel_path:
+                        row_sv.set(rel_path)
+                    try:
+                        os.remove(temp_path)
+                    except Exception:
+                        pass
+                else:
+                    messagebox.showinfo("Info", "剪贴板中没有可用图片")
+            except ImportError:
+                messagebox.showerror("Error", "需要安装 Pillow 库支持粘贴: pip install Pillow")
+            except Exception as ex:
+                messagebox.showerror("Error", str(ex))
+
+        btn_paste = ttk.Button(btn_frame, text="📋", width=3, command=paste_img)
+        btn_paste.pack(side=tk.LEFT, padx=1)
+        self.create_tooltip(btn_paste, "从剪贴板导入图片到该行")
+
+        row_data = {
+            'frame': row_frame,
+            'btn': btn_add_remove,
+            'entry': entry,
+            'sv': row_sv,
+        }
+        state.setdefault('rows', []).append(row_data)
+
+        def on_add_or_remove():
+            rows = state.get('rows', [])
+            try:
+                idx = rows.index(row_data)
+            except ValueError:
+                return
+            if idx == 0:
+                if len(rows) >= 8:
+                    messagebox.showwarning('限制', '最多只能添加 8 个 pipeline 图片')
+                    return
+                self._pipeline_add_row(variable, '')
+                self._pipeline_refresh_row_buttons(variable)
+                self._pipeline_sync_var_from_rows(variable)
+            else:
+                row_frame.destroy()
+                rows.pop(idx)
+                if not rows:
+                    self._pipeline_add_row(variable, '')
+                self._pipeline_refresh_row_buttons(variable)
+                self._pipeline_sync_var_from_rows(variable)
+
+        btn_add_remove.config(command=on_add_or_remove)
+        self._pipeline_refresh_row_buttons(variable)
+
+    def _pipeline_set_rows_from_value(self, variable: str, raw_value: str):
+        state = self._file_field_states.get(variable, {})
+        rows = state.get('rows', [])
+        for row_data in rows:
+            frame = row_data.get('frame')
+            if frame is not None:
+                frame.destroy()
+        state['rows'] = []
+
+        items = [x.strip() for x in str(raw_value or '').split('|') if x.strip()]
+        if not items:
+            self._pipeline_add_row(variable, '')
+        else:
+            for item in items:
+                self._pipeline_add_row(variable, item)
+        self._pipeline_refresh_row_buttons(variable)
+        self._pipeline_sync_var_from_rows(variable)
+
+    def _create_pipeline_file_array_ui(self, row, variable):
+        frame = ttk.Frame(self.form_frame)
+        frame.grid(row=row, column=1, sticky="we", pady=(2, 2), padx=(5, 0))
+
+        btn_confirm = ttk.Button(frame, text="✓", width=3, command=lambda v=variable: self._confirm_single_file_field(v, show_popup=True))
+        btn_confirm.pack(side=tk.LEFT, padx=(0, 4), anchor='n')
+        self.create_tooltip(btn_confirm, "确认该字段：校验并规范化到 assets/{uid}/；失败会中断且不修改")
+
+        rows_container = ttk.Frame(frame)
+        rows_container.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        sv = tk.StringVar()
+
+        def on_value_change(*args):
+            self._on_field_change(variable, sv)
+            self._update_file_confirm_button_state(variable)
+
+        sv.trace_add("write", on_value_change)
+
+        self._file_field_states[variable] = {
+            'var': sv,
+            'confirm_btn': btn_confirm,
+            'last_confirmed': '',
+            'rows_container': rows_container,
+            'rows': []
+        }
+
+        self._pipeline_add_row(variable, '')
+        self._update_file_confirm_button_state(variable)
+
+        self.form_fields[variable] = frame
+        self.field_widgets[variable] = frame
 
     def _gui_add_category_row(self, value_display: str = ""):
         container = getattr(self, 'category_container', None)
@@ -747,15 +1044,17 @@ class PaperSubmissionGUI:
         script_frame.grid(row=0, column=0, padx=5, sticky="ns")
         ttk.Button(script_frame, text="🔄 运行更新", command=self.run_update_script, width=12).pack(side=tk.LEFT, padx=5, pady=5)
         ttk.Button(script_frame, text="✅ 运行验证", command=self.run_validate_script, width=12).pack(side=tk.LEFT, padx=5, pady=5)
+        ttk.Button(script_frame, text="🧹 清除冗余资源", command=self.cleanup_redundant_assets, width=14).pack(side=tk.LEFT, padx=5, pady=5)
 
-        # Group 2: File Operations (增加打开数据库)
+        # Group 2: File Operations (增加加载数据库)
         file_frame = ttk.LabelFrame(buttons_frame, text="File Operations")
         file_frame.grid(row=0, column=1, padx=5, sticky="ns")
         
-        ttk.Button(file_frame, text="💾 打开数据库", command=self._open_database_action, width=12).pack(side=tk.LEFT, padx=5, pady=5)
+        ttk.Button(file_frame, text="💾 加载数据库", command=self._open_database_action, width=12).pack(side=tk.LEFT, padx=5, pady=5)
         ttk.Button(file_frame, text="📤 保存文件", command=self.save_all_papers, width=12).pack(side=tk.LEFT, padx=5, pady=5)
         ttk.Button(file_frame, text="📂 加载文件", command=self.load_template, width=12).pack(side=tk.LEFT, padx=5, pady=5)
-        
+        ttk.Button(file_frame, text="📄 打开当前文件", command=self.open_current_file, width=14).pack(side=tk.LEFT, padx=5, pady=5)
+
         if getattr(self.logic, 'pr_enabled', True):
             ttk.Button(file_frame, text="🚀 提交PR", command=self.submit_pr, width=12).pack(side=tk.LEFT, padx=5, pady=5)
         
@@ -851,28 +1150,53 @@ class PaperSubmissionGUI:
 
 
     def on_paper_selected(self, event):
-        if self._suppress_select_event: return
-        selection = self.paper_tree.selection()
-        if not selection:
-            self.current_paper_index = -1
-            self.show_placeholder()
+        if self._suppress_select_event or self._handling_paper_selection:
             return
-        
-        item = selection[0]
-        values = self.paper_tree.item(item, 'values')
-        
-        # values[0] 是显示序号 (1-based)，转换为 0-based index
-        display_index = int(values[0]) - 1
-        
-        if 0 <= display_index < len(self.filtered_indices):
-            # 获取在 logic.papers 中的真实索引
-            self.current_paper_index = display_index # 记录当前显示列表的选中索引
-            real_index = self.filtered_indices[display_index]
+        self._handling_paper_selection = True
+        try:
+            prev_display_index = self.current_paper_index
+            selection = self.paper_tree.selection()
+            if not selection:
+                self.current_paper_index = -1
+                self.show_placeholder()
+                return
+
+            # 切换论文前，先执行 file 字段确认逻辑
+            if not self._confirm_all_pending_file_fields_for_current_paper(show_popup=True):
+                self.paper_tree.unbind('<<TreeviewSelect>>')
+                self._suppress_select_event = True
+                try:
+                    if prev_display_index is not None and 0 <= prev_display_index < len(self.filtered_indices):
+                        old_real = self.filtered_indices[prev_display_index]
+                        if self.paper_tree.exists(str(old_real)):
+                            self.paper_tree.selection_set(str(old_real))
+                            self.paper_tree.focus(str(old_real))
+                    else:
+                        cur_sel = self.paper_tree.selection()
+                        if cur_sel:
+                            self.paper_tree.selection_remove(*cur_sel)
+                finally:
+                    self._suppress_select_event = False
+                    self.paper_tree.after(120, lambda: self.paper_tree.bind('<<TreeviewSelect>>', self.on_paper_selected))
+                return
             
-            self.show_form()
-            self.load_paper_to_form(self.logic.papers[real_index])
-            self._validate_all_fields_visuals(real_index)
-            self.update_status(f"正在编辑: {self.logic.papers[real_index].title[:30]}...")
+            item = selection[0]
+            values = self.paper_tree.item(item, 'values')
+            
+            # values[0] 是显示序号 (1-based)，转换为 0-based index
+            display_index = int(values[0]) - 1
+            
+            if 0 <= display_index < len(self.filtered_indices):
+                # 获取在 logic.papers 中的真实索引
+                self.current_paper_index = display_index # 记录当前显示列表的选中索引
+                real_index = self.filtered_indices[display_index]
+                
+                self.show_form()
+                self.load_paper_to_form(self.logic.papers[real_index])
+                self._validate_all_fields_visuals(real_index)
+                self.update_status(f"正在编辑: {self.logic.papers[real_index].title[:30]}...")
+        finally:
+            self._handling_paper_selection = False
 
     def load_paper_to_form(self, paper):
         self._disable_callbacks = True
@@ -890,7 +1214,7 @@ class PaperSubmissionGUI:
                     self._imported_files[variable] = (value, value)
                 
                 if variable == 'category':
-                    unique_names = [v.strip() for v in str(value).split(';') if v.strip()]
+                    unique_names = [v.strip() for v in str(value).split('|') if v.strip()]
                     current_rows = getattr(self, 'category_rows', [])
                     needed_rows = len(unique_names) if unique_names else 1
                     while len(current_rows) < needed_rows: self._gui_add_category_row('')
@@ -902,6 +1226,9 @@ class PaperSubmissionGUI:
                         display_name = self.category_reverse_mapping.get(uname, '')
                         _, _, combo = current_rows[i]
                         combo.set(display_name)
+
+                elif variable == 'pipeline_image':
+                    self._pipeline_set_rows_from_value(variable, str(value))
                 
                 elif isinstance(widget, ttk.Combobox): widget.set(str(value) if value else "")
                 elif isinstance(widget, tk.BooleanVar): widget.set(bool(value))
@@ -912,6 +1239,11 @@ class PaperSubmissionGUI:
                 elif isinstance(widget, tk.Entry):
                     widget.delete(0, tk.END)
                     widget.insert(0, str(value))
+
+                if variable in ['pipeline_image', 'paper_file']:
+                    state = self._file_field_states.get(variable, {})
+                    state['last_confirmed'] = str(value)
+                    self._update_file_confirm_button_state(variable)
         finally: self._disable_callbacks = False
 
     def _on_field_change(self, variable, widget_or_var):
@@ -924,6 +1256,7 @@ class PaperSubmissionGUI:
         
         new_value = ""
         if variable == 'category': pass
+        elif isinstance(widget_or_var, tk.StringVar): new_value = widget_or_var.get()
         elif isinstance(widget_or_var, tk.BooleanVar): new_value = widget_or_var.get()
         elif isinstance(widget_or_var, scrolledtext.ScrolledText): new_value = widget_or_var.get(1.0, tk.END).strip()
         elif isinstance(widget_or_var, ttk.Combobox): new_value = widget_or_var.get()
@@ -943,7 +1276,7 @@ class PaperSubmissionGUI:
         current_paper = self.logic.papers[real_idx]
         
         unique_names = self._gui_get_category_values()
-        cat_str = ";".join(unique_names)
+        cat_str = "|".join(unique_names)
         current_paper.category = cat_str
         
         self._validate_single_field_visuals('category', real_idx)
@@ -1007,6 +1340,10 @@ class PaperSubmissionGUI:
         bg_color = self.color_normal
         if is_required and is_empty: bg_color = self.color_required_empty
         elif not is_valid and not is_empty: bg_color = self.color_invalid
+
+        if variable == 'pipeline_image':
+            self._apply_pipeline_row_styles(is_required, is_empty)
+            return
         
         try:
             if isinstance(widget, scrolledtext.ScrolledText): widget.config(background=bg_color)
@@ -1017,6 +1354,48 @@ class PaperSubmissionGUI:
                 elif bg_color == self.color_required_empty: style_name = "Required.TCombobox"
                 widget.configure(style=style_name)
         except: pass
+
+    def _apply_pipeline_row_styles(self, is_required: bool, is_empty: bool):
+        state = self._file_field_states.get('pipeline_image', {})
+        rows = state.get('rows', [])
+        if not rows:
+            return
+
+        valid_exts = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg')
+        try:
+            from src.core.update_file_utils import get_update_file_utils
+            ufu = get_update_file_utils()
+        except Exception:
+            ufu = None
+
+        for idx, row_data in enumerate(rows):
+            entry = row_data.get('entry')
+            sv = row_data.get('sv')
+            if entry is None or sv is None:
+                continue
+
+            raw_val = (sv.get() or '').strip()
+            row_bg = self.color_normal
+
+            if is_required and is_empty and idx == 0:
+                row_bg = self.color_required_empty
+
+            if raw_val:
+                ext_ok = raw_val.lower().endswith(valid_exts)
+                exists_ok = False
+                if ext_ok:
+                    try:
+                        resolved = ufu.resolve_asset_path(raw_val, 'pipeline_image') if ufu else None
+                        exists_ok = bool(resolved and os.path.exists(resolved))
+                    except Exception:
+                        exists_ok = False
+                if (not ext_ok) or (not exists_ok):
+                    row_bg = self.color_invalid
+
+            try:
+                entry.config(background=row_bg)
+            except Exception:
+                pass
 
     # ================= 业务操作按钮 =================
 
@@ -1039,6 +1418,18 @@ class PaperSubmissionGUI:
             self.load_paper_to_form(self.logic.papers[real_idx])
             self._validate_all_fields_visuals(real_idx)
             self.update_status("已创建新论文")
+            self.root.after(50, self._focus_first_editable_field)
+
+    def _focus_first_editable_field(self):
+        for key in ['doi', 'title', 'authors', 'abstract']:
+            w = self.form_fields.get(key)
+            if isinstance(w, tk.Entry):
+                try:
+                    w.focus_force()
+                    w.icursor(tk.END)
+                    return
+                except Exception:
+                    pass
 
     def delete_paper(self):
         if self.current_paper_index < 0: return messagebox.showwarning("警告", "请先选择一篇论文")
@@ -1062,6 +1453,9 @@ class PaperSubmissionGUI:
 
     def save_all_papers(self):
         if not self.logic.papers: return messagebox.showwarning("警告", "没有论文可以保存")
+
+        if not self._confirm_all_pending_file_fields_for_current_paper(show_popup=True):
+            return False
         
         # 1. 验证
         invalid_papers = self.logic.validate_papers_for_save()
@@ -1089,6 +1483,7 @@ class PaperSubmissionGUI:
                 return messagebox.showerror("权限错误", "写入数据库需要管理员权限。")
             if messagebox.askyesno("警告", "正在写入核心数据库！\n\n数据库模式仅支持【全量重写】。\n这将用当前列表完全覆盖数据库内容。\n\n是否继续？"):
                 self.logic.save_to_file_rewrite(target_path)
+                self._set_current_loaded_file(target_path)
                 messagebox.showinfo("成功", "数据库已更新")
             return
 
@@ -1108,6 +1503,7 @@ class PaperSubmissionGUI:
         try:
             if choice is False: # No -> Rewrite
                 self.logic.save_to_file_rewrite(target_path)
+                self._set_current_loaded_file(target_path)
                 messagebox.showinfo("成功", "文件已重写保存")
             else: # Yes -> Incremental
                 # 增量模式：检查冲突
@@ -1128,6 +1524,7 @@ class PaperSubmissionGUI:
                         decisions[key] = 'overwrite' if res else 'skip'
                 
                 self.logic.save_to_file_incremental(target_path, decisions)
+                self._set_current_loaded_file(target_path)
                 messagebox.showinfo("成功", "增量保存完成")
                 
         except Exception as e:
@@ -1164,6 +1561,8 @@ class PaperSubmissionGUI:
         ttk.Button(w, text="复制链接", command=lambda: [self.root.clipboard_clear(), self.root.clipboard_append(url)]).pack(pady=10)
 
     def load_template(self):
+        if not self._confirm_all_pending_file_fields_for_current_paper(show_popup=True):
+            return
         # 新增：确认提示
         if self.logic.papers:
             if not messagebox.askyesno("确认", "加载新文件将覆盖当前工作区。\n\n是否继续？(建议先保存)"):
@@ -1172,7 +1571,7 @@ class PaperSubmissionGUI:
         path = filedialog.askopenfilename(title="选择文件", filetypes=[("Data", "*.json *.csv")])
         if not path: return
         
-        # 权限检查：如果用户试图打开数据库文件且不是管理员
+        # 权限检查：如果用户试图加载数据库文件且不是管理员
         try:
             cnt = self.logic.load_papers_from_file(path)
             self.refresh_list_view() # 刷新列表
@@ -1181,10 +1580,11 @@ class PaperSubmissionGUI:
             
             fname = os.path.basename(path)
             messagebox.showinfo("成功", f"已从 {fname} 加载 {cnt} 篇论文")
+            self._set_current_loaded_file(path)
             self.update_status(f"当前文件: {fname}")
             
         except PermissionError:
-            if messagebox.askyesno("需要管理员权限", "打开核心数据库文件需要管理员权限。\n\n是否立即切换模式？"):
+            if messagebox.askyesno("需要管理员权限", "加载核心数据库文件需要管理员权限。\n\n是否立即切换模式？"):
                 self._toggle_admin_mode()
                 if self.logic.is_admin:
                     self.load_template() # 重试
@@ -1193,12 +1593,14 @@ class PaperSubmissionGUI:
 
     def _open_database_action(self):
         """打开数据库文件的快捷操作"""
+        if not self._confirm_all_pending_file_fields_for_current_paper(show_popup=True):
+            return
         if self.logic.papers:
             if not messagebox.askyesno("确认", "加载新文件将覆盖当前工作区。\n\n是否继续？(建议先保存)"):
                 return
             
         if not self.logic.is_admin:
-            if messagebox.askyesno("权限限制", "打开核心数据库需要管理员权限。\n是否立即切换模式？"):
+            if messagebox.askyesno("权限限制", "加载核心数据库需要管理员权限。\n是否立即切换模式？"):
                 self._toggle_admin_mode()
                 if not self.logic.is_admin: return
         
@@ -1208,9 +1610,92 @@ class PaperSubmissionGUI:
             self.refresh_list_view()
             self.current_paper_index = -1
             self.show_placeholder()
+            self._set_current_loaded_file(db_path)
             self.update_status(f"已加载数据库: {os.path.basename(db_path)}")
         except Exception as e:
             messagebox.showerror("Error", str(e))
+
+    def _set_current_loaded_file(self, file_path: str):
+        if not hasattr(self, 'current_file_var'):
+            return
+        if not file_path:
+            self.current_file_var.set("(未加载)")
+            self._refresh_status_bar_text()
+            return
+        abs_path = file_path if os.path.isabs(file_path) else os.path.join(BASE_DIR, file_path)
+        abs_path = os.path.abspath(abs_path)
+        name = os.path.basename(abs_path)
+        self.current_file_var.set(f"{name}({abs_path})")
+        self._refresh_status_bar_text()
+
+    def _get_current_loaded_file(self) -> str:
+        value = self.current_file_var.get().strip() if hasattr(self, 'current_file_var') else ''
+        if not value or value == '(未加载)':
+            return ''
+        if value.endswith(')') and '(' in value:
+            left = value.rfind('(')
+            candidate = value[left + 1:-1].strip()
+            if candidate:
+                return candidate
+        return value
+
+    def _open_file_direct(self, file_path: str):
+        if not file_path:
+            return messagebox.showwarning("提示", "路径为空")
+        abs_path = file_path if os.path.isabs(file_path) else os.path.join(BASE_DIR, file_path)
+        abs_path = os.path.abspath(abs_path)
+        if not os.path.exists(abs_path):
+            return messagebox.showerror("错误", f"文件不存在: {abs_path}")
+        try:
+            if sys.platform == 'win32':
+                os.startfile(abs_path)
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', abs_path])
+            else:
+                subprocess.run(['xdg-open', abs_path])
+        except Exception as e:
+            messagebox.showerror("错误", f"无法打开: {e}")
+
+    def open_current_file(self):
+        target = self._get_current_loaded_file() or self.logic.current_file_path or self.logic.primary_update_file
+        if not target:
+            return messagebox.showwarning("提示", "当前没有活跃文件")
+        self._open_file_direct(target)
+
+    def cleanup_redundant_assets(self):
+        if not messagebox.askyesno("确认", "将清理未被数据库/更新文件引用的 assets 资源，是否继续？"):
+            return
+        try:
+            report = self.logic.cleanup_redundant_assets()
+            deleted_uid = report.get('deleted_uid_dirs', [])
+            deleted_files = report.get('deleted_files', [])
+            unref = report.get('papers_with_unreferenced_assets', [])
+            missing = report.get('missing_references', [])
+
+            lines = [
+                f"已删除未引用 UID 文件夹: {len(deleted_uid)}",
+                f"已删除未引用资源文件: {len(deleted_files)}",
+                f"存在未被字段引用资源的论文UID: {len(unref)}",
+                f"存在引用丢失文件的条目: {len(missing)}",
+                "",
+            ]
+
+            if unref:
+                lines.append("[未被字段引用的论文资源]")
+                for item in unref[:20]:
+                    title = (item.get('title', '') or '')[:24]
+                    lines.append(f"- {title} | uid={item.get('uid')} files={len(item.get('files', []))}")
+                lines.append("")
+
+            if missing:
+                lines.append("[引用丢失资源]")
+                for item in missing[:30]:
+                    lines.append(f"- {item.get('title', '')[:24]} | {item.get('field')} -> {item.get('reference')}")
+
+            messagebox.showinfo("清理完成", "\n".join(lines[:120]))
+            self.update_status("冗余资源清理完成")
+        except Exception as e:
+            messagebox.showerror("清理失败", str(e))
 
     def run_update_script(self):
         if messagebox.askyesno("Run Update", "将合并更新文件到数据库并生成 README。\n此操作会修改核心数据库。\n\n是否继续？"):
@@ -1884,11 +2369,34 @@ class PaperSubmissionGUI:
     def setup_status_bar(self, parent):
         self.status_var = tk.StringVar()
         self.status_var.set("就绪")
-        status_bar = ttk.Label(parent, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.grid(row=4, column=0, columnspan=2, sticky="we", pady=(5, 0))
+        self.current_file_var = tk.StringVar()
+        self.current_file_var.set("(未加载)")
+        self.status_bar_var = tk.StringVar()
+
+        status_label = tk.Label(
+            parent,
+            textvariable=self.status_bar_var,
+            relief=tk.SUNKEN,
+            anchor=tk.W,
+            padx=6,
+        )
+        status_label.grid(row=4, column=0, columnspan=2, sticky="we", pady=(5, 0))
+        self._refresh_status_bar_text()
+
+    def _refresh_status_bar_text(self):
+        if not hasattr(self, 'status_bar_var'):
+            return
+        status_msg = (self.status_var.get() or '').strip() if hasattr(self, 'status_var') else ''
+        current_file = (self.current_file_var.get() or '').strip() if hasattr(self, 'current_file_var') else ''
+        if not status_msg:
+            status_msg = "就绪"
+        if not current_file:
+            current_file = "(未加载)"
+        self.status_bar_var.set(f"{status_msg}  |  当前加载文件: {current_file}")
 
     def update_status(self, message):
         self.status_var.set(message)
+        self._refresh_status_bar_text()
         self.root.update_idletasks()
 
     def show_placeholder(self):
@@ -2100,16 +2608,16 @@ class PaperSubmissionGUI:
             rb1.grid(row=row, column=1, sticky="nsew", pady=1)
             
             if ftype == 'text':
-                wb = scrolledtext.ScrolledText(scroll_frame, height=4, width=30, font=("Arial", 9))
+                wb = scrolledtext.ScrolledText(scroll_frame, height=4, width=30, font=("Arial", 9), background=bg_color)
                 wb.insert(1.0, str(val_base))
             else:
-                wb = tk.Entry(scroll_frame, font=("Arial", 9), relief="flat", bg="white")
+                wb = tk.Entry(scroll_frame, font=("Arial", 9), relief="flat", bg=bg_color)
                 wb.insert(0, str(val_base))
             wb.grid(row=row, column=2, sticky="nsew", pady=1, padx=2)
             self.conflict_ui_data[field]['w_base'] = wb
             
             # Separator
-            line = tk.Frame(scroll_frame, width=2, bg="#cccccc")
+            line = tk.Frame(scroll_frame, width=2, bg=bg_color)
             line.grid(row=row, column=3, sticky="ns", pady=1)
             
             # Conflict Side (复选框在前)
@@ -2117,10 +2625,10 @@ class PaperSubmissionGUI:
             rb2.grid(row=row, column=4, sticky="nsew", pady=1)
             
             if ftype == 'text':
-                wc = scrolledtext.ScrolledText(scroll_frame, height=4, width=30, font=("Arial", 9))
+                wc = scrolledtext.ScrolledText(scroll_frame, height=4, width=30, font=("Arial", 9), background=bg_color)
                 wc.insert(1.0, str(val_conflict))
             else:
-                wc = tk.Entry(scroll_frame, font=("Arial", 9), relief="flat", bg="white")
+                wc = tk.Entry(scroll_frame, font=("Arial", 9), relief="flat", bg=bg_color)
                 wc.insert(0, str(val_conflict))
             wc.grid(row=row, column=5, sticky="nsew", pady=1, padx=2)
             self.conflict_ui_data[field]['w_conflict'] = wc
@@ -2250,10 +2758,14 @@ class PaperSubmissionGUI:
 
 
     def on_closing(self):
+        if not self._confirm_all_pending_file_fields_for_current_paper(show_popup=False):
+            messagebox.showwarning("提示", "存在未完成的文件字段确认，请先处理后再关闭。")
+            return
         if self.logic.papers:
             choice = messagebox.askyesnocancel("确认", "注意！是否保存当前所有论文？如果否，当前所有内容会丢失")
             if choice is None: return
             if choice and self.save_all_papers() == False: return
+        self.logic.clear_all_temp_assets()
         self.root.destroy()
 
     def add_from_zotero_meta(self):
