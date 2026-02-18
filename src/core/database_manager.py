@@ -185,7 +185,7 @@ class DatabaseManager:
         category_groups = {}
         for main_paper, conflict_list in non_conflict_papers:
             # 取第一个分类
-            cat = str(main_paper.category).split(';')[0].strip() if main_paper.category else "Uncategorized"
+            cat = str(main_paper.category).split('|')[0].strip() if main_paper.category else "Uncategorized"
             if cat not in category_groups:
                 category_groups[cat] = []
             category_groups[cat].append((main_paper, conflict_list))

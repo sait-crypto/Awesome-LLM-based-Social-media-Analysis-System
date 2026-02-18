@@ -6,6 +6,7 @@
 import os
 import sys
 import re
+import copy
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, scrolledtext, simpledialog
 from typing import Dict, List, Any, Optional, Tuple
@@ -55,6 +56,13 @@ class PaperSubmissionGUI:
         self.style.map('Invalid.TCombobox', fieldbackground=[('readonly', self.color_invalid)])
         self.style.map('Required.TCombobox', fieldbackground=[('readonly', self.color_required_empty)])
         self.style.configure("Conflict.Treeview", background=self.color_conflict)
+        self.style.configure('NeedsConfirm.TButton', foreground="#0D9ABA")
+
+        try:
+            pipeline_cfg_max = int(self.settings['database'].get('max_pipeline_images_per_paper', 4))
+        except Exception:
+            pipeline_cfg_max = 4
+        self._gui_pipeline_max = max(1, min(pipeline_cfg_max, 6))
 
         self._suppress_select_event = False
         self._handling_paper_selection = False
@@ -420,7 +428,7 @@ class PaperSubmissionGUI:
                 values = tag.get('options', [])
                 # Hardcoded fallback for status if not in config
                 if variable == 'status' and not values: 
-                    values = ['unread', 'reading', 'done', 'skimmed', 'adopted']
+                    values = ['unread', 'reading', 'done', 'skimmed', 'adopted', 'conflict']
                 
                 combo = ttk.Combobox(self.form_frame, values=values, state='readonly')
                 combo.grid(row=row, column=1, sticky="we", pady=(2, 2), padx=(5, 0))
@@ -436,6 +444,9 @@ class PaperSubmissionGUI:
                 var.trace_add("write", lambda *args, v=variable, val=var: self._on_field_change(v, val))
                 checkbox = ttk.Checkbutton(self.form_frame, variable=var)
                 checkbox.grid(row=row, column=1, sticky=tk.W, pady=(2, 2), padx=(5, 0))
+                if variable == 'conflict_marker':
+                    checkbox.bind("<Button-1>", lambda e, val=var: self._on_conflict_marker_click(e, val))
+                    checkbox.bind("<Key-space>", lambda e, val=var: self._on_conflict_marker_click(e, val))
                 self.form_fields[variable] = var
                 self.field_widgets[variable] = checkbox 
                 
@@ -539,7 +550,26 @@ class PaperSubmissionGUI:
             return
         cur = (sv.get() or '').strip()
         last = (state.get('last_confirmed') or '').strip()
-        btn.config(state=('normal' if cur != last else 'disabled'))
+        needs_confirm = self._needs_file_confirmation(variable, cur, last)
+        btn.config(state=('normal' if needs_confirm else 'disabled'))
+        btn.config(style=('NeedsConfirm.TButton' if needs_confirm else 'TButton'))
+
+    def _needs_file_confirmation(self, variable: str, cur: str, last: str) -> bool:
+        if cur != last:
+            return True
+        if not cur:
+            return False
+        paper = self._get_current_paper()
+        if not paper:
+            return False
+        try:
+            paper_shadow = copy.deepcopy(paper)
+            ok, normalized, _ = self.logic.confirm_file_field_for_paper(paper_shadow, variable, raw_value=cur)
+            if not ok:
+                return True
+            return (normalized or '').strip() != cur
+        except Exception:
+            return True
 
     def _confirm_single_file_field(self, variable: str, show_popup: bool = True) -> bool:
         paper = self._get_current_paper()
@@ -583,7 +613,7 @@ class PaperSubmissionGUI:
                 continue
             cur = (sv.get() or '').strip()
             last = (state.get('last_confirmed') or '').strip()
-            if cur != last:
+            if self._needs_file_confirmation(variable, cur, last):
                 if not self._confirm_single_file_field(variable, show_popup=show_popup):
                     return False
         return True
@@ -658,13 +688,68 @@ class PaperSubmissionGUI:
                 
                 widget.drop_target_register(DND_FILES)
                 widget.dnd_bind('<<Drop>>', on_drop)
-                self.create_tooltip(widget, "可拖放文件到此，或使用「📂 浏览」按钮")
+                self.create_tooltip(widget, "可拖放文件到此，或使用「📂」导入")
                 
             except Exception as e:
                 print(f"DnD Registration failed: {e}")
         
         # 应用拖放支持
         setup_drag_drop(entry)
+
+        def _import_pdf_from_text_path(path_text: str) -> bool:
+            candidate = str(path_text or '').strip()
+            if not candidate:
+                return False
+            candidate = candidate.splitlines()[0].strip() if candidate else ''
+            candidate = candidate.strip('{}').strip('"').strip("'")
+            if not candidate:
+                return False
+            if not candidate.lower().endswith('.pdf'):
+                return False
+            if not os.path.exists(candidate):
+                return False
+            try:
+                rel_path = self._import_file_asset_once(candidate, 'paper', variable)
+                if rel_path:
+                    sv.set(rel_path)
+                    return True
+            except Exception as ex:
+                messagebox.showerror("资源处理失败", str(ex))
+            return False
+
+        def import_clipboard_pdf(show_empty_info: bool = False) -> bool:
+            try:
+                from PIL import ImageGrab
+                clip_obj: Any = ImageGrab.grabclipboard()
+                if isinstance(clip_obj, list):
+                    for item in clip_obj:
+                        if _import_pdf_from_text_path(str(item)):
+                            return True
+                elif isinstance(clip_obj, str):
+                    if _import_pdf_from_text_path(clip_obj):
+                        return True
+            except ImportError:
+                pass
+            except Exception:
+                pass
+
+            try:
+                clip_text = self.root.clipboard_get()
+            except Exception:
+                clip_text = ''
+
+            ok = _import_pdf_from_text_path(clip_text)
+            if (not ok) and show_empty_info:
+                messagebox.showinfo("Info", "剪贴板中没有可用的 PDF 文件路径")
+            return ok
+
+        def on_ctrl_v(event):
+            if import_clipboard_pdf(show_empty_info=False):
+                return "break"
+            return None
+
+        entry.bind("<Control-v>", on_ctrl_v)
+        entry.bind("<Control-V>", on_ctrl_v)
         
         # Browse Button
         def browse_file():
@@ -681,7 +766,27 @@ class PaperSubmissionGUI:
         
         btn_browse = ttk.Button(btn_frame, text="📂", width=3, command=browse_file)
         btn_browse.pack(side=tk.LEFT, padx=1)
-        self.create_tooltip(btn_browse, "浏览导入到临时目录（该字段会覆盖当前值），点击✓后才正式规范化")
+        self.create_tooltip(btn_browse, "导入文件到临时目录（覆盖当前值）")
+
+        def paste_file():
+            import_clipboard_pdf(show_empty_info=True)
+
+        btn_paste = ttk.Button(btn_frame, text="📋", width=3, command=paste_file)
+        btn_paste.pack(side=tk.LEFT, padx=1)
+        self.create_tooltip(btn_paste, "从剪贴板导入文件（与 Ctrl+V 相同）")
+
+        def open_file():
+            path = sv.get().strip()
+            if not path:
+                return
+            refs = [x.strip() for x in str(path).split('|') if x.strip()]
+            if not refs:
+                return
+            self._open_file_direct(refs[0], choose_app=True)
+
+        btn_open = ttk.Button(btn_frame, text="👁️", width=3, command=open_file)
+        btn_open.pack(side=tk.LEFT, padx=1)
+        self.create_tooltip(btn_open, "打开当前引用文件")
         
         # Reveal/Open Location (📍)
         def reveal_file():
@@ -691,21 +796,7 @@ class PaperSubmissionGUI:
             refs = [x.strip() for x in str(path).split('|') if x.strip()]
             if not refs:
                 return
-            first_ref = refs[0]
-            abs_path = os.path.abspath(first_ref) if os.path.isabs(first_ref) else os.path.join(BASE_DIR, first_ref)
-            if not os.path.exists(abs_path):
-                return messagebox.showerror("Error", "文件不存在")
-            target_dir = abs_path if os.path.isdir(abs_path) else os.path.dirname(abs_path)
-            
-            try:
-                if sys.platform == 'win32':
-                    os.startfile(target_dir)
-                elif sys.platform == 'darwin':
-                    subprocess.run(['open', target_dir])
-                else: # Linux
-                    subprocess.run(['xdg-open', target_dir])
-            except Exception as e:
-                messagebox.showerror("Error", f"无法定位文件: {e}")
+            self._reveal_in_file_manager(refs[0], select_file=True)
 
         btn_reveal = ttk.Button(btn_frame, text="📍", width=3, command=reveal_file)
         btn_reveal.pack(side=tk.LEFT, padx=1)
@@ -729,7 +820,8 @@ class PaperSubmissionGUI:
             if not btn:
                 continue
             if idx == 0:
-                btn.config(text='+', state='normal')
+                can_add = len(rows) < self._gui_pipeline_max
+                btn.config(text='+', state=('normal' if can_add else 'disabled'))
             else:
                 btn.config(text='-', state='normal')
 
@@ -774,10 +866,42 @@ class PaperSubmissionGUI:
         btn_frame.pack(side=tk.RIGHT, padx=(5, 0))
 
         row_sv = tk.StringVar(value=initial_value)
+        row_data: Dict[str, Any] = {}
+
+        def hide_preview():
+            preview_frame = row_data.get('preview_frame')
+            if preview_frame is not None:
+                try:
+                    preview_frame.destroy()
+                except Exception:
+                    pass
+            row_data['preview_frame'] = None
+            row_data['preview_visible'] = False
+            btn = row_data.get('preview_btn')
+            if btn is not None:
+                btn.config(text='▼')
+
+        def resolve_preview_path(raw_path: str) -> str:
+            clean = (raw_path or '').strip()
+            if not clean:
+                return ''
+            try:
+                from src.core.update_file_utils import get_update_file_utils
+                ufu = get_update_file_utils()
+                resolved = ufu.resolve_asset_path(clean, 'pipeline_image')
+                if resolved:
+                    return resolved
+            except Exception:
+                pass
+            if os.path.isabs(clean):
+                return clean
+            return os.path.abspath(os.path.join(BASE_DIR, clean))
 
         def on_row_change(*args):
             self._pipeline_sync_var_from_rows(variable)
             self._update_file_confirm_button_state(variable)
+            if row_data.get('preview_visible'):
+                hide_preview()
 
         row_sv.trace_add("write", on_row_change)
         entry.config(textvariable=row_sv)
@@ -818,7 +942,7 @@ class PaperSubmissionGUI:
 
                 widget.drop_target_register(DND_FILES)
                 widget.dnd_bind('<<Drop>>', on_drop)
-                self.create_tooltip(widget, "可拖放图片到此，或使用「📂 浏览」按钮")
+                self.create_tooltip(widget, "可拖放图片到此，或使用「📂」导入")
             except Exception as e:
                 print(f"DnD Registration failed: {e}")
 
@@ -837,61 +961,161 @@ class PaperSubmissionGUI:
 
         btn_browse = ttk.Button(btn_frame, text="📂", width=3, command=browse_file)
         btn_browse.pack(side=tk.LEFT, padx=1)
-        self.create_tooltip(btn_browse, "浏览导入图片到临时目录（该行将被覆盖）")
+        self.create_tooltip(btn_browse, "导入图片到临时目录（覆盖当前行）")
+
+        def paste_img():
+            import_clipboard_image(show_empty_info=True)
+
+        btn_paste = ttk.Button(btn_frame, text="📋", width=3, command=paste_img)
+        btn_paste.pack(side=tk.LEFT, padx=1)
+        self.create_tooltip(btn_paste, "从剪贴板导入图片（与 Ctrl+V 相同）")
+
+        def open_file():
+            path = (row_sv.get() or '').strip()
+            if not path:
+                return
+            self._open_file_direct(path, choose_app=True)
+
+        btn_open = ttk.Button(btn_frame, text="👁️", width=3, command=open_file)
+        btn_open.pack(side=tk.LEFT, padx=1)
+        self.create_tooltip(btn_open, "打开当前引用文件")
 
         def reveal_file():
             path = (row_sv.get() or '').strip()
             if not path:
                 return
-            abs_path = os.path.abspath(path) if os.path.isabs(path) else os.path.join(BASE_DIR, path)
-            if not os.path.exists(abs_path):
-                return messagebox.showerror("Error", "文件不存在")
-            target_dir = abs_path if os.path.isdir(abs_path) else os.path.dirname(abs_path)
-            try:
-                if sys.platform == 'win32':
-                    os.startfile(target_dir)
-                elif sys.platform == 'darwin':
-                    subprocess.run(['open', target_dir])
-                else:
-                    subprocess.run(['xdg-open', target_dir])
-            except Exception as e:
-                messagebox.showerror("Error", f"无法定位文件: {e}")
+            self._reveal_in_file_manager(path, select_file=True)
 
         btn_reveal = ttk.Button(btn_frame, text="📍", width=3, command=reveal_file)
         btn_reveal.pack(side=tk.LEFT, padx=1)
-        self.create_tooltip(btn_reveal, "打开该行文件所在文件夹")
+        self.create_tooltip(btn_reveal, "打开当前引用文件所在文件夹")
 
-        def paste_img():
+        def toggle_preview():
+            if row_data.get('preview_visible'):
+                hide_preview()
+                return
+
+            path = (row_sv.get() or '').strip()
+            if not path:
+                return messagebox.showinfo("提示", "当前行没有图片路径")
+
+            abs_path = resolve_preview_path(path)
+            if not abs_path or (not os.path.exists(abs_path)):
+                return messagebox.showerror("错误", "图片文件不存在")
+
+            try:
+                from PIL import Image, ImageTk
+            except ImportError:
+                return messagebox.showerror("错误", "需要安装 Pillow 库支持图片预览: pip install Pillow")
+
+            try:
+                img = Image.open(abs_path)
+                img.thumbnail((420, 240), Image.Resampling.LANCZOS)
+                tk_img = ImageTk.PhotoImage(img)
+            except Exception as ex:
+                return messagebox.showerror("错误", f"无法预览图片: {ex}")
+
+            preview_frame = ttk.Frame(container)
+            preview_frame.pack(fill=tk.X, padx=(22, 0), pady=(0, 4), after=row_frame)
+            img_label = ttk.Label(preview_frame, image=tk_img)
+            img_label.image = tk_img
+            img_label.pack(anchor='w')
+            img_label.bind('<Button-1>', lambda e: self._open_file_direct(path, choose_app=True))
+
+            row_data['preview_frame'] = preview_frame
+            row_data['preview_visible'] = True
+            btn_preview.config(text='▲')
+
+        btn_preview = ttk.Button(btn_frame, text="▼", width=3, command=toggle_preview)
+        btn_preview.pack(side=tk.LEFT, padx=1)
+        self.create_tooltip(btn_preview, "展开/收起当前图片预览")
+
+        def import_clipboard_image(show_empty_info: bool = True) -> bool:
             try:
                 from PIL import ImageGrab
                 img_obj: Any = ImageGrab.grabclipboard()
-                if img_obj is not None and hasattr(img_obj, 'save'):
-                    import time
-                    temp_path = os.path.join(BASE_DIR, f'temp_paste_{int(time.time())}.png')
-                    img_obj.save(temp_path)
-                    rel_path = self._import_file_asset_once(temp_path, 'figure', variable)
-                    if rel_path:
-                        row_sv.set(rel_path)
+
+                def _import_image_path(path_text: str) -> bool:
+                    candidate = str(path_text or '').strip()
+                    if not candidate:
+                        return False
+                    candidate = candidate.splitlines()[0].strip() if candidate else ''
+                    candidate = candidate.strip('{}').strip('"').strip("'")
+                    valid_exts = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg')
+                    if not candidate.lower().endswith(valid_exts):
+                        return False
+                    if not os.path.exists(candidate):
+                        return False
                     try:
-                        os.remove(temp_path)
-                    except Exception:
-                        pass
-                else:
+                        rel_path = self._import_file_asset_once(candidate, 'figure', variable)
+                        if rel_path:
+                            row_sv.set(rel_path)
+                            return True
+                    except Exception as ex:
+                        messagebox.showerror("资源处理失败", str(ex))
+                    return False
+
+                if img_obj is not None and hasattr(img_obj, 'save'):
+                    import tempfile
+                    tmp = tempfile.NamedTemporaryFile(prefix='paste_', suffix='.png', delete=False)
+                    temp_path = tmp.name
+                    tmp.close()
+                    try:
+                        img_obj.save(temp_path)
+                        rel_path = self._import_file_asset_once(temp_path, 'figure', variable)
+                        if rel_path:
+                            row_sv.set(rel_path)
+                            return True
+                        return False
+                    finally:
+                        try:
+                            os.remove(temp_path)
+                        except Exception:
+                            pass
+
+                if isinstance(img_obj, list):
+                    for item in img_obj:
+                        if _import_image_path(str(item)):
+                            return True
+
+                if isinstance(img_obj, str):
+                    if _import_image_path(img_obj):
+                        return True
+
+                try:
+                    clip_text = self.root.clipboard_get()
+                except Exception:
+                    clip_text = ''
+
+                if _import_image_path(clip_text):
+                    return True
+
+                if show_empty_info:
                     messagebox.showinfo("Info", "剪贴板中没有可用图片")
+                return False
             except ImportError:
                 messagebox.showerror("Error", "需要安装 Pillow 库支持粘贴: pip install Pillow")
+                return False
             except Exception as ex:
                 messagebox.showerror("Error", str(ex))
+                return False
 
-        btn_paste = ttk.Button(btn_frame, text="📋", width=3, command=paste_img)
-        btn_paste.pack(side=tk.LEFT, padx=1)
-        self.create_tooltip(btn_paste, "从剪贴板导入图片到该行")
+        def on_ctrl_v(event):
+            if import_clipboard_image(show_empty_info=False):
+                return "break"
+            return None
+
+        entry.bind("<Control-v>", on_ctrl_v)
+        entry.bind("<Control-V>", on_ctrl_v)
 
         row_data = {
             'frame': row_frame,
             'btn': btn_add_remove,
             'entry': entry,
             'sv': row_sv,
+            'preview_btn': btn_preview,
+            'preview_frame': None,
+            'preview_visible': False,
         }
         state.setdefault('rows', []).append(row_data)
 
@@ -902,13 +1126,13 @@ class PaperSubmissionGUI:
             except ValueError:
                 return
             if idx == 0:
-                if len(rows) >= 8:
-                    messagebox.showwarning('限制', '最多只能添加 8 个 pipeline 图片')
+                if len(rows) >= self._gui_pipeline_max:
                     return
                 self._pipeline_add_row(variable, '')
                 self._pipeline_refresh_row_buttons(variable)
                 self._pipeline_sync_var_from_rows(variable)
             else:
+                hide_preview()
                 row_frame.destroy()
                 rows.pop(idx)
                 if not rows:
@@ -923,12 +1147,21 @@ class PaperSubmissionGUI:
         state = self._file_field_states.get(variable, {})
         rows = state.get('rows', [])
         for row_data in rows:
+            preview_frame = row_data.get('preview_frame')
+            if preview_frame is not None:
+                try:
+                    preview_frame.destroy()
+                except Exception:
+                    pass
             frame = row_data.get('frame')
             if frame is not None:
                 frame.destroy()
         state['rows'] = []
 
         items = [x.strip() for x in str(raw_value or '').split('|') if x.strip()]
+        if len(items) > self._gui_pipeline_max:
+            items = items[:self._gui_pipeline_max]
+
         if not items:
             self._pipeline_add_row(variable, '')
         else:
@@ -1200,6 +1433,7 @@ class PaperSubmissionGUI:
 
     def load_paper_to_form(self, paper):
         self._disable_callbacks = True
+        real_idx = self._get_current_real_index()
         
         # 清空文件导入缓存
         self._imported_files = {'pipeline_image': None, 'paper_file': None}
@@ -1244,6 +1478,8 @@ class PaperSubmissionGUI:
                     state = self._file_field_states.get(variable, {})
                     state['last_confirmed'] = str(value)
                     self._update_file_confirm_button_state(variable)
+                    if real_idx >= 0:
+                        self._validate_single_field_visuals(variable, real_idx)
         finally: self._disable_callbacks = False
 
     def _on_field_change(self, variable, widget_or_var):
@@ -1253,6 +1489,7 @@ class PaperSubmissionGUI:
         # 获取真实论文对象
         real_idx = self.filtered_indices[self.current_paper_index]
         current_paper = self.logic.papers[real_idx]
+        old_value = getattr(current_paper, variable, "")
         
         new_value = ""
         if variable == 'category': pass
@@ -1261,12 +1498,67 @@ class PaperSubmissionGUI:
         elif isinstance(widget_or_var, scrolledtext.ScrolledText): new_value = widget_or_var.get(1.0, tk.END).strip()
         elif isinstance(widget_or_var, ttk.Combobox): new_value = widget_or_var.get()
         elif isinstance(widget_or_var, tk.Entry): new_value = widget_or_var.get()
+
+        if variable == 'conflict_marker':
+            old_bool = bool(old_value)
+            new_bool = bool(new_value)
+
+            # 存在基论文时，禁止直接取消冲突标记，要求走“处理冲突”流程
+            if old_bool and not new_bool:
+                base_idx = self.logic.find_base_paper_index(real_idx)
+                if base_idx != -1:
+                    messagebox.showwarning(
+                        "冲突处理提示",
+                        "检测到该冲突条目存在基论文，不能直接取消冲突标记。\n请在左侧列表右键该条目，使用“⚔️ 处理冲突...”完成合并后自动取消。"
+                    )
+                    return
+
+            # 勾选冲突标记后，同步状态字段
+            if new_bool and hasattr(current_paper, 'status'):
+                setattr(current_paper, 'status', 'conflict')
+                status_widget = self.form_fields.get('status')
+                if status_widget is not None:
+                    self._disable_callbacks = True
+                    try:
+                        if isinstance(status_widget, ttk.Combobox):
+                            status_widget.set('conflict')
+                        elif isinstance(status_widget, tk.Entry):
+                            status_widget.delete(0, tk.END)
+                            status_widget.insert(0, 'conflict')
+                    finally:
+                        self._disable_callbacks = False
         
         setattr(current_paper, variable, new_value)
         self._validate_single_field_visuals(variable, real_idx)
         
-        if variable in ['title', 'authors']: 
+        if variable in ['title', 'authors', 'conflict_marker']:
             self._refresh_list_item(self.current_paper_index, current_paper)
+
+    def _on_conflict_marker_click(self, event, bool_var):
+        """在复选框切换前拦截：存在基论文时禁止直接取消冲突标记。"""
+        if getattr(self, '_disable_callbacks', False):
+            return None
+        if self.current_paper_index < 0:
+            return "break"
+
+        # 当前值为 True 时，点击后将变为 False（取消勾选）
+        try:
+            will_uncheck = bool(bool_var.get())
+        except Exception:
+            will_uncheck = False
+
+        if will_uncheck:
+            real_idx = self._get_current_real_index()
+            if real_idx >= 0:
+                base_idx = self.logic.find_base_paper_index(real_idx)
+                if base_idx != -1:
+                    messagebox.showwarning(
+                        "冲突处理提示",
+                        "检测到该冲突条目存在基论文，不能直接取消冲突标记。\n请在左侧列表右键该条目，使用“⚔️ 处理冲突...”完成合并后自动取消。"
+                    )
+                    return "break"
+
+        return None
 
     def _on_category_change(self, variable=None, widget_or_var=None):
         if getattr(self, '_disable_callbacks', False): return
@@ -1639,22 +1931,85 @@ class PaperSubmissionGUI:
                 return candidate
         return value
 
-    def _open_file_direct(self, file_path: str):
+    def _open_file_direct(self, file_path: str, choose_app: bool = False):
         if not file_path:
             return messagebox.showwarning("提示", "路径为空")
         abs_path = file_path if os.path.isabs(file_path) else os.path.join(BASE_DIR, file_path)
-        abs_path = os.path.abspath(abs_path)
+        abs_path = os.path.normpath(os.path.abspath(abs_path))
         if not os.path.exists(abs_path):
             return messagebox.showerror("错误", f"文件不存在: {abs_path}")
         try:
             if sys.platform == 'win32':
-                os.startfile(abs_path)
+                if choose_app:
+                    launched = False
+                    try:
+                        result = subprocess.run(
+                            [
+                                'powershell',
+                                '-NoProfile',
+                                '-Command',
+                                f"Start-Process -FilePath '{abs_path.replace("'", "''")}' -Verb OpenAs"
+                            ],
+                            check=False,
+                            capture_output=True,
+                            text=True,
+                        )
+                        launched = (result.returncode == 0)
+                    except Exception:
+                        launched = False
+
+                    if not launched:
+                        try:
+                            import ctypes
+                            rc = ctypes.windll.shell32.ShellExecuteW(None, 'openas', abs_path, None, None, 1)
+                            launched = rc > 32
+                        except Exception:
+                            launched = False
+
+                    if not launched:
+                        try:
+                            os.startfile(abs_path)
+                            messagebox.showwarning("提示", "无法打开“打开方式”对话框，已改为默认程序打开。")
+                            launched = True
+                        except Exception:
+                            launched = False
+
+                    if not launched:
+                        raise RuntimeError("打开方式对话框启动失败")
+                else:
+                    os.startfile(abs_path)
             elif sys.platform == 'darwin':
                 subprocess.run(['open', abs_path])
             else:
                 subprocess.run(['xdg-open', abs_path])
         except Exception as e:
             messagebox.showerror("错误", f"无法打开: {e}")
+
+    def _reveal_in_file_manager(self, path: str, select_file: bool = True):
+        if not path:
+            return messagebox.showwarning("提示", "路径为空")
+        abs_path = path if os.path.isabs(path) else os.path.join(BASE_DIR, path)
+        abs_path = os.path.normpath(os.path.abspath(abs_path))
+        if not os.path.exists(abs_path):
+            return messagebox.showerror("错误", f"文件不存在: {abs_path}")
+        try:
+            if sys.platform == 'win32':
+                if select_file and os.path.isfile(abs_path):
+                    subprocess.Popen(['explorer.exe', '/select,', abs_path])
+                else:
+                    target_dir = abs_path if os.path.isdir(abs_path) else os.path.dirname(abs_path)
+                    os.startfile(os.path.normpath(target_dir))
+            elif sys.platform == 'darwin':
+                if select_file and os.path.isfile(abs_path):
+                    subprocess.run(['open', '-R', abs_path])
+                else:
+                    target_dir = abs_path if os.path.isdir(abs_path) else os.path.dirname(abs_path)
+                    subprocess.run(['open', target_dir])
+            else:
+                target_dir = abs_path if os.path.isdir(abs_path) else os.path.dirname(abs_path)
+                subprocess.run(['xdg-open', target_dir])
+        except Exception as e:
+            messagebox.showerror("错误", f"无法定位文件: {e}")
 
     def open_current_file(self):
         target = self._get_current_loaded_file() or self.logic.current_file_path or self.logic.primary_update_file

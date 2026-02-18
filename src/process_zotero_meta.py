@@ -121,8 +121,8 @@ class ZoteroProcessor:
 
         # 6. 提取分类信息 (从tags字段)
         categories_list = self._extract_categories_from_tags(item.get("tags", []))
-        # 将分类列表转换为分号分隔的字符串
-        categories_str = ";".join(categories_list) if categories_list else ""
+        # 适配新格式：[] 字段统一使用 | 分隔字符串（JSON 落盘时会转为列表）
+        categories_str = "|".join(categories_list) if categories_list else ""
         
         # 7. 构建Paper对象
         # 注意：这里创建的是基础Paper，不包含ID等数据库特定的信息
@@ -140,7 +140,7 @@ class ZoteroProcessor:
             # 设置默认值
             show_in_readme=True,
             status="unread",
-            category=categories_str  # 设置分类（分号分隔的字符串）
+            category=categories_str  # 设置分类（| 分隔字符串）
         )
         return paper
 
@@ -185,8 +185,8 @@ class ZoteroProcessor:
             # 移除"cat "前缀（不区分大小写）
             category_part = tag_value[4:].strip()
             
-            # 按分号分隔多个分类
-            cat_names = [c.strip() for c in category_part.split(";") if c.strip()]
+            # 支持 ; / ； / | 混合分隔输入
+            cat_names = [c.strip() for c in re.split(r'[;；|]', category_part) if c.strip()]
             
             # 添加到结果列表
             categories.extend(cat_names)

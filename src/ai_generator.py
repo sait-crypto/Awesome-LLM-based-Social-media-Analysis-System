@@ -158,7 +158,7 @@ Abstract: {paper.abstract}
 Context: {paper_text[:2000]}
 
 Response Format:
-ID1;ID2
+ID1|ID2
 Reasoning: ...
 """
         response = self._call_api(prompt, max_tokens=300)
@@ -172,14 +172,14 @@ Reasoning: ...
         
         # 验证分类是否存在
         valid_ids = [c['unique_name'] for c in categories]
-        parts = suggested_cat.split(';')
+        parts = suggested_cat.split('|')
         clean_parts = []
         for p in parts:
             p = p.replace('ID:', '').replace('id:', '').replace('ID', '').replace('id', '').strip()
             if p in valid_ids:
                 clean_parts.append(p)
         
-        final_cat = ";".join(clean_parts)
+        final_cat = "|".join(clean_parts)
         if not final_cat and "Uncategorized" not in suggested_cat and "NEW:" not in suggested_cat:
              # 如果解析失败，把整个回复当做 reasoning
              return "", response
@@ -190,7 +190,7 @@ Reasoning: ...
         """通用单字段生成"""
         if not self.is_available(): return ""
         
-        category_name = self.config_loader.get_category_field(paper.category.split(';')[0], 'name') if paper.category else "General"
+        category_name = self.config_loader.get_category_field(paper.category.split('|')[0], 'name') if paper.category else "General"
         
         base_prompt = f"""Paper: {paper.title}
 Category: {category_name}
