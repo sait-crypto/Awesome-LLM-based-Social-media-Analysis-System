@@ -33,6 +33,7 @@ my_submit.json
 **/*my_submit*
 figures_temp/
 from_others/
+数据库相关文件备份/
 
 # 配置文件中的敏感信息
 

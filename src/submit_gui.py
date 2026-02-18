@@ -7,6 +7,7 @@ import os
 import sys
 import re
 import copy
+import configparser
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, scrolledtext, simpledialog
 from typing import Dict, List, Any, Optional, Tuple
@@ -66,6 +67,7 @@ class PaperSubmissionGUI:
 
         self._suppress_select_event = False
         self._handling_paper_selection = False
+        self._skip_next_selection_confirm = False
         
         # 跟踪已导入的临时文件，避免重复复制
         self._imported_files: Dict[str, Optional[Tuple[str, str]]] = {
@@ -78,6 +80,8 @@ class PaperSubmissionGUI:
             'pipeline_image': {},
             'paper_file': {}
         }
+
+        self._field_vars: Dict[str, Any] = {}
 
         self.setup_ui()
         
@@ -257,11 +261,12 @@ class PaperSubmissionGUI:
         self.paper_tree.heading("Title", text="Title")
         self.paper_tree.heading("Status", text="Status")
         
-        self.paper_tree.column("ID", width=40, anchor="center")
-        self.paper_tree.column("Title", width=200)
-        self.paper_tree.column("Status", width=60, anchor="center")
+        self.paper_tree.column("ID", width=40, anchor="center", stretch=False)
+        self.paper_tree.column("Title", width=200, stretch=True)
+        self.paper_tree.column("Status", width=70, anchor="center", stretch=False)
         
         self.paper_tree.tag_configure('conflict', background=self.color_conflict)
+        self.paper_tree.tag_configure('invalid', background=self.color_invalid)
         
         scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.paper_tree.yview)
         self.paper_tree.configure(yscrollcommand=scrollbar.set)
@@ -273,7 +278,7 @@ class PaperSubmissionGUI:
         self.paper_tree.bind('<Enter>', lambda e: self._bind_global_scroll(self.paper_tree.yview_scroll))
         
         self.paper_tree.bind("<Button-3>", self._show_context_menu)
-        self.paper_tree.bind("<Button-1>", self._on_drag_start)
+        self.paper_tree.bind("<Button-1>", self._on_tree_left_button)
         self.paper_tree.bind("<B1-Motion>", self._on_drag_motion)
         self.paper_tree.bind("<ButtonRelease-1>", self._on_drag_release)
         
@@ -362,6 +367,7 @@ class PaperSubmissionGUI:
         
         self.form_fields = {}
         self.field_widgets = {}
+        self._field_vars = {}
         
         for tag in active_tags:
             # 逻辑：如果是系统字段且不是管理员模式，隐藏
@@ -478,6 +484,10 @@ class PaperSubmissionGUI:
                 sv = tk.StringVar()
                 sv.trace_add("write", lambda *args, v=variable, w=entry: self._on_field_change(v, w))
                 entry.config(textvariable=sv)
+                entry.textvariable = sv
+                self._field_vars[variable] = sv
+                entry.bind("<KeyRelease>", lambda e, v=variable, w=entry: self._on_field_change(v, w))
+                entry.bind("<FocusOut>", lambda e, v=variable, w=entry: self._on_field_change(v, w))
                 
                 entry.bind("<Enter>", lambda e: self._bind_global_scroll(self.form_canvas.yview_scroll))
                 self.form_fields[variable] = entry
@@ -501,6 +511,48 @@ class PaperSubmissionGUI:
         if ridx >= len(self.logic.papers):
             return None
         return self.logic.papers[ridx]
+
+    def _is_dnd_available(self) -> bool:
+        if not hasattr(self.root, '_dnd_available'):
+            try:
+                self.root.tk.call('package', 'require', 'tkdnd')
+                self.root._dnd_available = True
+            except Exception:
+                self.root._dnd_available = False
+        return bool(getattr(self.root, '_dnd_available', False))
+
+    def _setup_file_drop_target(
+        self,
+        widget,
+        on_file_path,
+        tooltip_ready: str,
+        tooltip_fallback: str,
+    ) -> bool:
+        if not self._is_dnd_available():
+            self.create_tooltip(widget, tooltip_fallback)
+            return False
+
+        try:
+            from tkinterdnd2 import DND_FILES
+        except Exception as ex:
+            self.update_status(f"拖放初始化失败: {ex}")
+            self.create_tooltip(widget, tooltip_fallback)
+            return False
+
+        def on_drop(event):
+            files = self.root.tk.splitlist(event.data)
+            if not files:
+                return
+            file_path = files[0].strip('{}').strip('"')
+            try:
+                on_file_path(file_path)
+            except Exception as ex:
+                messagebox.showerror("资源处理失败", str(ex))
+
+        widget.drop_target_register(DND_FILES)
+        widget.dnd_bind('<<Drop>>', on_drop)
+        self.create_tooltip(widget, tooltip_ready)
+        return True
 
     def _import_file_asset_once(self, src_path: str, asset_type: str, field_name: str) -> str:
         """导入到 assets/temp/{uid}/{asset_type} 并返回临时相对路径"""
@@ -605,7 +657,8 @@ class PaperSubmissionGUI:
             self._update_file_confirm_button_state(variable)
             return False
 
-    def _confirm_all_pending_file_fields_for_current_paper(self, show_popup: bool = True) -> bool:
+    def _confirm_all_pending_file_fields_for_current_paper(self, show_popup: bool = True, block_on_error: bool = True) -> bool:
+        had_error = False
         for variable in ('pipeline_image', 'paper_file'):
             state = self._file_field_states.get(variable, {})
             sv = state.get('var')
@@ -615,8 +668,10 @@ class PaperSubmissionGUI:
             last = (state.get('last_confirmed') or '').strip()
             if self._needs_file_confirmation(variable, cur, last):
                 if not self._confirm_single_file_field(variable, show_popup=show_popup):
-                    return False
-        return True
+                    had_error = True
+                    if block_on_error:
+                        return False
+        return not had_error if block_on_error else True
 
     def _create_file_field_ui(self, row, variable):
         """Helper to create file fields with correct layout, scoping, and Drag-and-Drop"""
@@ -644,57 +699,23 @@ class PaperSubmissionGUI:
         entry.config(textvariable=sv)
         
         # 拖放功能支持 (tkinterdnd2)
-        def setup_drag_drop(widget):
-            """设置拖放支持"""
-            # 检查是否有全局拖放支持标记 (在main中初始化)
-            if not hasattr(self.root, '_dnd_available'):
-                # 简单检测是否是 DnD 实例
-                try:
-                    self.root.tk.call('package', 'require', 'tkdnd')
-                    self.root._dnd_available = True
-                except:
-                    self.root._dnd_available = False
-            
-            if not getattr(self.root, '_dnd_available', False):
-                self.create_tooltip(widget, "使用「📂 浏览」按钮选择文件")
+        def on_drop_pdf_file(file_path: str):
+            if not file_path.lower().endswith('.pdf'):
+                messagebox.showerror("错误", "仅支持 PDF 文件")
                 return
-                
-            # 拖放可用，注册目标
-            try:
-                from tkinterdnd2 import DND_FILES
-                
-                def on_drop(event):
-                    """处理文件拖放"""
-                    files = self.root.tk.splitlist(event.data)
-                    if not files:
-                        return
-                    file_path = files[0].strip('{}').strip('"')
+            if not os.path.exists(file_path):
+                messagebox.showerror("错误", "文件不存在")
+                return
+            rel_path = self._import_file_asset_once(file_path, 'paper', variable)
+            if rel_path:
+                sv.set(rel_path)
 
-                    if not file_path.lower().endswith('.pdf'):
-                        messagebox.showerror("错误", "仅支持 PDF 文件")
-                        return
-
-                    if not os.path.exists(file_path):
-                        messagebox.showerror("错误", "文件不存在")
-                        return
-
-                    try:
-                        asset_type = 'paper'
-                        rel_path = self._import_file_asset_once(file_path, asset_type, variable)
-                        if rel_path:
-                            sv.set(rel_path)
-                    except Exception as ex:
-                        messagebox.showerror("资源处理失败", str(ex))
-                
-                widget.drop_target_register(DND_FILES)
-                widget.dnd_bind('<<Drop>>', on_drop)
-                self.create_tooltip(widget, "可拖放文件到此，或使用「📂」导入")
-                
-            except Exception as e:
-                print(f"DnD Registration failed: {e}")
-        
-        # 应用拖放支持
-        setup_drag_drop(entry)
+        self._setup_file_drop_target(
+            entry,
+            on_drop_pdf_file,
+            tooltip_ready="可拖放文件到此，或使用「📂」导入",
+            tooltip_fallback="使用「📂 浏览」按钮选择文件",
+        )
 
         def _import_pdf_from_text_path(path_text: str) -> bool:
             candidate = str(path_text or '').strip()
@@ -906,47 +927,24 @@ class PaperSubmissionGUI:
         row_sv.trace_add("write", on_row_change)
         entry.config(textvariable=row_sv)
 
-        def setup_drag_drop(widget):
-            if not hasattr(self.root, '_dnd_available'):
-                try:
-                    self.root.tk.call('package', 'require', 'tkdnd')
-                    self.root._dnd_available = True
-                except Exception:
-                    self.root._dnd_available = False
-
-            if not getattr(self.root, '_dnd_available', False):
-                self.create_tooltip(widget, "使用「📂 浏览」按钮选择文件")
+        def on_drop_image_file(file_path: str):
+            valid_exts = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg')
+            if not file_path.lower().endswith(valid_exts):
+                messagebox.showerror("错误", "仅支持图片文件")
                 return
+            if not os.path.exists(file_path):
+                messagebox.showerror("错误", "文件不存在")
+                return
+            rel_path = self._import_file_asset_once(file_path, 'figure', variable)
+            if rel_path:
+                row_sv.set(rel_path)
 
-            try:
-                from tkinterdnd2 import DND_FILES
-
-                def on_drop(event):
-                    files = self.root.tk.splitlist(event.data)
-                    if not files:
-                        return
-                    file_path = files[0].strip('{}').strip('"')
-                    valid_exts = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg')
-                    if not file_path.lower().endswith(valid_exts):
-                        messagebox.showerror("错误", "仅支持图片文件")
-                        return
-                    if not os.path.exists(file_path):
-                        messagebox.showerror("错误", "文件不存在")
-                        return
-                    try:
-                        rel_path = self._import_file_asset_once(file_path, 'figure', variable)
-                        if rel_path:
-                            row_sv.set(rel_path)
-                    except Exception as ex:
-                        messagebox.showerror("资源处理失败", str(ex))
-
-                widget.drop_target_register(DND_FILES)
-                widget.dnd_bind('<<Drop>>', on_drop)
-                self.create_tooltip(widget, "可拖放图片到此，或使用「📂」导入")
-            except Exception as e:
-                print(f"DnD Registration failed: {e}")
-
-        setup_drag_drop(entry)
+        self._setup_file_drop_target(
+            entry,
+            on_drop_image_file,
+            tooltip_ready="可拖放图片到此，或使用「📂」导入",
+            tooltip_fallback="使用「📂 浏览」按钮选择文件",
+        )
 
         def browse_file():
             path = filedialog.askopenfilename(filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp;*.svg")])
@@ -1258,7 +1256,8 @@ class PaperSubmissionGUI:
                         if self.category_rows and len(self.category_rows) < self._gui_category_max:
                             self.category_rows[0][1].config(state='normal')
                         self._on_category_change()
-                    except Exception: pass
+                    except Exception as ex:
+                        self.update_status(f"分类操作失败: {ex}")
             return on_btn_click
 
         btn.config(command=make_button_callback(row_frame, is_first))
@@ -1285,6 +1284,9 @@ class PaperSubmissionGUI:
         
         ttk.Button(file_frame, text="💾 加载数据库", command=self._open_database_action, width=12).pack(side=tk.LEFT, padx=5, pady=5)
         ttk.Button(file_frame, text="📤 保存文件", command=self.save_all_papers, width=12).pack(side=tk.LEFT, padx=5, pady=5)
+        self.save_policy_btn = ttk.Button(file_frame, text="", command=self._change_save_validation_strategy, width=18)
+        self.save_policy_btn.pack(side=tk.LEFT, padx=5, pady=5)
+        self._refresh_save_policy_button_text()
         ttk.Button(file_frame, text="📂 加载文件", command=self.load_template, width=12).pack(side=tk.LEFT, padx=5, pady=5)
         ttk.Button(file_frame, text="📄 打开当前文件", command=self.open_current_file, width=14).pack(side=tk.LEFT, padx=5, pady=5)
 
@@ -1343,12 +1345,70 @@ class PaperSubmissionGUI:
 
     def _update_admin_ui_state(self):
         """更新UI以反映管理员状态"""
+        self._refresh_save_policy_button_text()
+
         if self.logic.is_admin:
             self.admin_btn.config(text="🔓 管理员: ON")
             self.root.title("Awesome 论文提交系统 [管理员模式]")
+            if hasattr(self, 'save_policy_btn') and self.save_policy_btn.winfo_manager() != 'pack':
+                self.save_policy_btn.pack(side=tk.LEFT, padx=5, pady=5)
         else:
             self.admin_btn.config(text="🔒 管理员: OFF")
             self.root.title("Awesome 论文提交系统")
+            if hasattr(self, 'save_policy_btn') and self.save_policy_btn.winfo_manager() == 'pack':
+                self.save_policy_btn.pack_forget()
+
+    def _get_save_validation_strategy(self) -> str:
+        strategy = str((self.settings.get('ui', {}) or {}).get('save_validation_strategy', 'strict')).strip().lower()
+        if strategy not in ('strict', 'lenient'):
+            strategy = 'strict'
+        return strategy
+
+    def _refresh_save_policy_button_text(self):
+        if not hasattr(self, 'save_policy_btn'):
+            return
+        strategy = self._get_save_validation_strategy()
+        self.save_policy_btn.config(text=f"🧭 保存策略: {strategy}")
+
+    def _persist_ui_setting(self, key: str, value: str):
+        cfg = configparser.ConfigParser(inline_comment_prefixes=('#', ';', '//'))
+        cfg_path = os.path.join(str(self.config.config_path), 'config.ini')
+        if os.path.exists(cfg_path):
+            cfg.read(cfg_path, encoding='utf-8')
+        if 'ui' not in cfg:
+            cfg['ui'] = {}
+        cfg['ui'][key] = str(value)
+        with open(cfg_path, 'w', encoding='utf-8') as f:
+            cfg.write(f)
+
+        self.config.settings = self.config._load_settings()
+        self.logic.settings = self.config.settings
+        self.settings = self.logic.settings
+
+    def _change_save_validation_strategy(self):
+        if not self.logic.is_admin:
+            messagebox.showwarning("权限", "仅管理员可修改保存策略")
+            return
+
+        cur = self._get_save_validation_strategy()
+        switch_now = messagebox.askyesno(
+            "保存策略",
+            f"当前保存策略: {cur}\n\n"
+            f"严格 (strict): 保存时任何验证失败都会阻止保存，适合正式使用以保证数据质量。\n"
+            f"宽松 (lenient): 保存时验证失败仍可以保存。\n\n"
+            f"是否切换到另一种策略？\n\n【是】切换\n【否】不切换"
+        )
+        if not switch_now:
+            self.update_status(f"保存策略保持不变: {cur}")
+            return
+
+        new_strategy = 'lenient' if cur == 'strict' else 'strict'
+        try:
+            self._persist_ui_setting('save_validation_strategy', new_strategy)
+            self._refresh_save_policy_button_text()
+            self.update_status(f"保存策略已更新为: {new_strategy}")
+        except Exception as ex:
+            messagebox.showerror("错误", f"保存策略写入失败: {ex}")
 
     def _refresh_ui_fields(self):
         """完全重建表单字段 (根据管理员模式显示/隐藏字段)"""
@@ -1381,6 +1441,87 @@ class PaperSubmissionGUI:
         cat = self.cat_filter_combo.get()
         self.refresh_list_view(kw, cat)
 
+    def _resolve_tree_target_indices(self, item_id: str) -> Tuple[int, int]:
+        if not item_id:
+            return -1, -1
+
+        try:
+            real_index = int(item_id)
+        except (TypeError, ValueError):
+            self.update_status("列表选择异常：无效条目标识，已忽略")
+            return -1, -1
+
+        if real_index in self.filtered_indices:
+            return self.filtered_indices.index(real_index), real_index
+        self.update_status("列表选择异常：条目不在当前筛选结果中，已忽略")
+        return -1, -1
+
+    def _restore_previous_tree_selection(self, prev_display_index: int):
+        self._suppress_select_event = True
+        try:
+            if prev_display_index is not None and 0 <= prev_display_index < len(self.filtered_indices):
+                old_real = self.filtered_indices[prev_display_index]
+                if self._select_tree_item_by_real_index(old_real, focus_item=True, see_item=True):
+                    return
+
+            cur_sel = self.paper_tree.selection()
+            if cur_sel:
+                self.paper_tree.selection_remove(*cur_sel)
+        finally:
+            self.paper_tree.after_idle(lambda: setattr(self, '_suppress_select_event', False))
+
+    def _select_tree_item_by_real_index(self, real_index: int, focus_item: bool = True, see_item: bool = True) -> bool:
+        item_id = str(real_index)
+        if not self.paper_tree.exists(item_id):
+            return False
+        self.paper_tree.selection_set(item_id)
+        if focus_item:
+            self.paper_tree.focus(item_id)
+        if see_item:
+            self.paper_tree.see(item_id)
+        return True
+
+    def _select_tree_item_by_display_index(self, display_index: int, focus_item: bool = True, see_item: bool = True) -> bool:
+        children = self.paper_tree.get_children()
+        if display_index < 0 or display_index >= len(children):
+            return False
+        item_id = children[display_index]
+        self.paper_tree.selection_set(item_id)
+        if focus_item:
+            self.paper_tree.focus(item_id)
+        if see_item:
+            self.paper_tree.see(item_id)
+        return True
+
+    def _confirm_before_switch_or_restore(self, prev_display_index: int, show_popup: bool = True) -> bool:
+        self._confirm_all_pending_file_fields_for_current_paper(show_popup=show_popup, block_on_error=False)
+        return True
+
+    def _load_selected_paper(self, display_index: int, real_index: int) -> bool:
+        if display_index < 0 or real_index < 0:
+            self.update_status("加载论文失败：索引异常")
+            return False
+        if real_index >= len(self.logic.papers):
+            self.update_status("加载论文失败：索引越界")
+            return False
+
+        self.current_paper_index = display_index
+        paper = self.logic.papers[real_index]
+        self.show_form()
+        self.load_paper_to_form(paper)
+        self._validate_all_fields_visuals(real_index)
+        self.update_status(f"正在编辑: {paper.title[:30]}...")
+        return True
+
+    def _activate_paper_by_real_index(self, real_index: int) -> bool:
+        if real_index not in self.filtered_indices:
+            return False
+        display_index = self.filtered_indices.index(real_index)
+        if not self._select_tree_item_by_real_index(real_index, focus_item=True, see_item=True):
+            self.update_status("激活论文失败：列表项不存在")
+            return False
+        return self._load_selected_paper(display_index, real_index)
+
 
     def on_paper_selected(self, event):
         if self._suppress_select_event or self._handling_paper_selection:
@@ -1394,42 +1535,51 @@ class PaperSubmissionGUI:
                 self.show_placeholder()
                 return
 
-            # 切换论文前，先执行 file 字段确认逻辑
-            if not self._confirm_all_pending_file_fields_for_current_paper(show_popup=True):
-                self.paper_tree.unbind('<<TreeviewSelect>>')
-                self._suppress_select_event = True
-                try:
-                    if prev_display_index is not None and 0 <= prev_display_index < len(self.filtered_indices):
-                        old_real = self.filtered_indices[prev_display_index]
-                        if self.paper_tree.exists(str(old_real)):
-                            self.paper_tree.selection_set(str(old_real))
-                            self.paper_tree.focus(str(old_real))
-                    else:
-                        cur_sel = self.paper_tree.selection()
-                        if cur_sel:
-                            self.paper_tree.selection_remove(*cur_sel)
-                finally:
-                    self._suppress_select_event = False
-                    self.paper_tree.after(120, lambda: self.paper_tree.bind('<<TreeviewSelect>>', self.on_paper_selected))
+            target_display_index, target_real_index = self._resolve_tree_target_indices(selection[0])
+            if target_display_index < 0 or target_real_index < 0:
                 return
-            
-            item = selection[0]
-            values = self.paper_tree.item(item, 'values')
-            
-            # values[0] 是显示序号 (1-based)，转换为 0-based index
-            display_index = int(values[0]) - 1
-            
-            if 0 <= display_index < len(self.filtered_indices):
-                # 获取在 logic.papers 中的真实索引
-                self.current_paper_index = display_index # 记录当前显示列表的选中索引
-                real_index = self.filtered_indices[display_index]
-                
-                self.show_form()
-                self.load_paper_to_form(self.logic.papers[real_index])
-                self._validate_all_fields_visuals(real_index)
-                self.update_status(f"正在编辑: {self.logic.papers[real_index].title[:30]}...")
+
+            if prev_display_index == target_display_index:
+                self._load_selected_paper(target_display_index, target_real_index)
+                return
+
+            # 键盘切换时兜底：切换论文前先执行 file 字段确认逻辑
+            if self._skip_next_selection_confirm:
+                self._skip_next_selection_confirm = False
+            else:
+                if not self._confirm_before_switch_or_restore(prev_display_index, show_popup=True):
+                    return
+
+            self._load_selected_paper(target_display_index, target_real_index)
         finally:
             self._handling_paper_selection = False
+
+    def _on_tree_left_button(self, event):
+        if self._suppress_select_event or self._handling_paper_selection:
+            return None
+
+        clicked_item = self.paper_tree.identify_row(event.y)
+        if not clicked_item:
+            return None
+
+        _, target_real_idx = self._resolve_tree_target_indices(clicked_item)
+        if target_real_idx < 0:
+            return None
+
+        current_real_idx = self._get_current_real_index()
+
+        if current_real_idx >= 0 and target_real_idx != current_real_idx:
+            self._skip_next_selection_confirm = True
+            if not self._confirm_before_switch_or_restore(self.current_paper_index, show_popup=True):
+                return "break"
+
+        # 非筛选模式下允许拖拽排序；筛选模式仅作普通选择
+        if self._get_search_keyword() or self.cat_filter_combo.get() != "All Categories":
+            self.drag_item = None
+            return None
+
+        self._on_drag_start(event)
+        return None
 
     def load_paper_to_form(self, paper):
         self._disable_callbacks = True
@@ -1484,10 +1634,11 @@ class PaperSubmissionGUI:
 
     def _on_field_change(self, variable, widget_or_var):
         if getattr(self, '_disable_callbacks', False): return
-        if self.current_paper_index < 0: return
-        
+        real_idx = self._get_current_real_index()
+        if real_idx < 0:
+            return
+
         # 获取真实论文对象
-        real_idx = self.filtered_indices[self.current_paper_index]
         current_paper = self.logic.papers[real_idx]
         old_value = getattr(current_paper, variable, "")
         
@@ -1495,6 +1646,7 @@ class PaperSubmissionGUI:
         if variable == 'category': pass
         elif isinstance(widget_or_var, tk.StringVar): new_value = widget_or_var.get()
         elif isinstance(widget_or_var, tk.BooleanVar): new_value = widget_or_var.get()
+        elif isinstance(widget_or_var, tk.Variable): new_value = widget_or_var.get()
         elif isinstance(widget_or_var, scrolledtext.ScrolledText): new_value = widget_or_var.get(1.0, tk.END).strip()
         elif isinstance(widget_or_var, ttk.Combobox): new_value = widget_or_var.get()
         elif isinstance(widget_or_var, tk.Entry): new_value = widget_or_var.get()
@@ -1530,9 +1682,9 @@ class PaperSubmissionGUI:
         
         setattr(current_paper, variable, new_value)
         self._validate_single_field_visuals(variable, real_idx)
-        
-        if variable in ['title', 'authors', 'conflict_marker']:
-            self._refresh_list_item(self.current_paper_index, current_paper)
+
+        # 任意字段变化都可能影响 Invalid/Conflict/New/OK 状态显示
+        self._refresh_list_item(self.current_paper_index, current_paper)
 
     def _on_conflict_marker_click(self, event, bool_var):
         """在复选框切换前拦截：存在基论文时禁止直接取消冲突标记。"""
@@ -1572,16 +1724,25 @@ class PaperSubmissionGUI:
         current_paper.category = cat_str
         
         self._validate_single_field_visuals('category', real_idx)
-        # Category change doesn't update treeview column in this version, but good to have logic ready
+        self._refresh_list_item(self.current_paper_index, current_paper)
+
+    def _get_list_status_and_tags(self, paper):
+        is_valid, _, _ = paper.validate_paper_fields(self.config, True, True, no_normalize=True)
+        if not is_valid:
+            return "Invalid", ('invalid',)
+        if paper.conflict_marker:
+            return "Conflict", ('conflict',)
+        if not paper.doi:
+            return "New", ()
+        return "OK", ()
 
     def _refresh_list_item(self, display_index, paper):
         """更新列表中的单项显示"""
         children = self.paper_tree.get_children()
         if display_index < len(children):
-            title = paper.title[:50] + "..." if len(paper.title) > 50 else paper.title
-            
-            status_str = "Conflict" if paper.conflict_marker else ("New" if not paper.doi else "OK")
-            tags = ('conflict',) if paper.conflict_marker else ()
+            title = paper.title[:150] + "..." if len(paper.title) > 150 else paper.title
+
+            status_str, tags = self._get_list_status_and_tags(paper)
             
             self.paper_tree.item(children[display_index], values=(display_index+1, title, status_str), tags=tags)
 
@@ -1698,19 +1859,16 @@ class PaperSubmissionGUI:
         # 选中最后一个
         new_display_idx = len(self.filtered_indices) - 1
         if new_display_idx >= 0:
-            self.current_paper_index = new_display_idx
             self._suppress_select_event = True
-            child_id = self.paper_tree.get_children()[new_display_idx]
-            self.paper_tree.selection_set(child_id)
-            self.paper_tree.see(child_id)
-            self._suppress_select_event = False
-            
-            self.show_form()
+            try:
+                selected_ok = self._select_tree_item_by_display_index(new_display_idx, focus_item=True, see_item=True)
+            finally:
+                self._suppress_select_event = False
+
             real_idx = self.filtered_indices[new_display_idx]
-            self.load_paper_to_form(self.logic.papers[real_idx])
-            self._validate_all_fields_visuals(real_idx)
-            self.update_status("已创建新论文")
-            self.root.after(50, self._focus_first_editable_field)
+            if selected_ok and self._load_selected_paper(new_display_idx, real_idx):
+                self.update_status("已创建新论文")
+                self.root.after(50, self._focus_first_editable_field)
 
     def _focus_first_editable_field(self):
         for key in ['doi', 'title', 'authors', 'abstract']:
@@ -1743,8 +1901,10 @@ class PaperSubmissionGUI:
                 self.show_placeholder()
                 self.update_status("所有论文已清空")
 
-    def save_all_papers(self):
-        if not self.logic.papers: return messagebox.showwarning("警告", "没有论文可以保存")
+    def save_all_papers(self) -> bool:
+        if not self.logic.papers:
+            messagebox.showwarning("警告", "没有论文可以保存")
+            return False
 
         if not self._confirm_all_pending_file_fields_for_current_paper(show_popup=True):
             return False
@@ -1753,8 +1913,12 @@ class PaperSubmissionGUI:
         invalid_papers = self.logic.validate_papers_for_save()
         if invalid_papers:
             msg = "以下论文未通过验证，建议修正:\n\n" + "\n".join([f"#{i} {t[:20]}..." for i, t, e in invalid_papers[:5]])
-            if not messagebox.askyesno("验证警告", msg + "\n\n是否仍要强制保存？"):
-                return
+            if self._get_save_validation_strategy() == 'lenient':
+                if not messagebox.askyesno("验证警告", msg + "\n\n是否仍要继续保存？"):
+                    return False
+            else:
+                messagebox.showwarning("验证失败", msg + "\n\n当前为 strict 模式，已阻止保存。")
+                return False
 
         # 2. 选择路径
         initial_file = os.path.basename(self.logic.current_file_path) if self.logic.current_file_path else "submit_template.json"
@@ -1765,32 +1929,36 @@ class PaperSubmissionGUI:
             initialfile=initial_file,
             initialdir=BASE_DIR
         )
-        if not target_path: return
+        if not target_path:
+            return False
 
         # 3. 判断是否为数据库
         is_db = self.logic._is_database_file(target_path)
         
         if is_db:
             if not self.logic.is_admin:
-                return messagebox.showerror("权限错误", "写入数据库需要管理员权限。")
+                messagebox.showerror("权限错误", "写入数据库需要管理员权限。")
+                return False
             if messagebox.askyesno("警告", "正在写入核心数据库！\n\n数据库模式仅支持【全量重写】。\n这将用当前列表完全覆盖数据库内容。\n\n是否继续？"):
                 self.logic.save_to_file_rewrite(target_path)
                 self._set_current_loaded_file(target_path)
                 messagebox.showinfo("成功", "数据库已更新")
-            return
+                return True
+            return False
 
         # 4. 普通文件：使用简单的 Yes/No/Cancel 对话框
         # Yes = 增量, No = 重写, Cancel = 取消
         choice = messagebox.askyesnocancel("选择保存模式", 
             "请选择保存模式：\n\n"
-            "【是 (Yes)】：增量模式 (智能合并)\n"
-            "   - 适合多人协作或追加更新。\n"
+            "【是 (Yes)】：增量模式 (增量合并)\n"
+            "   - 追加更新，保证原有内容不会丢失。\n"
             "   - 若遇重复项，将逐一询问覆盖或跳过。\n\n"
             "【否 (No)】：重写模式 (完全覆盖)\n"
-            "   - 适合完全替换目标文件内容。\n"
+            "   - 完全替换目标文件内容。\n"
             "   - 当前工作区将完全覆盖目标文件。")
         
-        if choice is None: return # Cancel
+        if choice is None:
+            return False # Cancel
 
         try:
             if choice is False: # No -> Rewrite
@@ -1810,7 +1978,7 @@ class PaperSubmissionGUI:
                         
                         if res is None: 
                             self.update_status("保存已取消")
-                            return
+                            return False
                         
                         key = p.get_key()
                         decisions[key] = 'overwrite' if res else 'skip'
@@ -1818,16 +1986,19 @@ class PaperSubmissionGUI:
                 self.logic.save_to_file_incremental(target_path, decisions)
                 self._set_current_loaded_file(target_path)
                 messagebox.showinfo("成功", "增量保存完成")
+            return True
                 
         except Exception as e:
             messagebox.showerror("保存失败", str(e))
+            return False
 
     def submit_pr(self):
         if not messagebox.askyesno("须知", f"将自动通过 PR 提交论文...\n\n1. 创建新分支\n2. 提交更新文件和 Assets 资源\n3. 推送并创建 PR"): return
         
         if not self.logic.has_update_files():
              if messagebox.askyesno("确认", "未检测到有效更新文件，是否先保存当前内容？"): 
-                self.save_all_papers()
+                if not self.save_all_papers():
+                    return
                 if not self.logic.has_update_files(): return # 用户取消保存
         
         def on_status(msg): self.root.after(0, lambda: self.update_status(msg))
@@ -2613,7 +2784,6 @@ class PaperSubmissionGUI:
     def _bind_widget_scroll_events(self, widget):
         widget.bind("<Enter>", lambda e: self._unbind_global_scroll())
         widget.bind("<Leave>", lambda e: self._bind_global_scroll(self.form_canvas.yview_scroll))
-        pass
 
     def ai_suggest_category(self):
         self.run_ai_task(self._ai_suggest_category_task)
@@ -2786,29 +2956,22 @@ class PaperSubmissionGUI:
         for display_i, real_idx in enumerate(self.filtered_indices):
             paper = self.logic.papers[real_idx]
             
-            title = paper.title[:50] + "..." if len(paper.title) > 50 else paper.title
-            
-            # 状态显示
-            status_str = ""
-            if paper.conflict_marker:
-                status_str = "Conflict"
-            elif not paper.doi:
-                status_str = "New"
-            else:
-                status_str = "OK"
-            
-            tags = ('conflict',) if paper.conflict_marker else ()
+            title = paper.title[:150] + "..." if len(paper.title) > 150 else paper.title
+
+            status_str, tags = self._get_list_status_and_tags(paper)
             
             # 修复：values 必须与 columns=("ID", "Title", "Status") 对应
             self.paper_tree.insert("", "end", iid=str(real_idx), values=(display_i + 1, title, status_str), tags=tags)
         
         # 恢复选中状态
         if self.current_paper_index >= 0 and self.current_paper_index < len(self.filtered_indices):
-             # 这里逻辑有点复杂，简化为如果不匹配则重置
-             pass
+            real_idx = self.filtered_indices[self.current_paper_index]
+            if not self._select_tree_item_by_real_index(real_idx, focus_item=False, see_item=False):
+                self.current_paper_index = -1
+                self.show_placeholder()
         else:
-             self.current_paper_index = -1
-             self.show_placeholder()
+            self.current_paper_index = -1
+            self.show_placeholder()
 
 
     # ================= 右键菜单功能 =================
@@ -2849,20 +3012,7 @@ class PaperSubmissionGUI:
     def _highlight_paper(self, real_idx):
         """在列表中高亮显示指定真实索引的论文"""
         # 检查该 real_idx 是否在当前筛选视图中
-        if real_idx in self.filtered_indices:
-            # 找到对应的 display index
-            display_idx = self.filtered_indices.index(real_idx)
-            self.current_paper_index = display_idx
-            
-            # Treeview操作
-            if self.paper_tree.exists(str(real_idx)):
-                self.paper_tree.selection_set(str(real_idx))
-                self.paper_tree.see(str(real_idx))
-                
-            # 加载表单
-            self.show_form()
-            self.load_paper_to_form(self.logic.papers[real_idx])
-        else:
+        if not self._activate_paper_by_real_index(real_idx):
             messagebox.showinfo("提示", "目标论文不在当前筛选视图中，请清除搜索条件。")
 
     # ================= 冲突处理窗口 (新功能) =================
@@ -3113,13 +3263,12 @@ class PaperSubmissionGUI:
 
 
     def on_closing(self):
-        if not self._confirm_all_pending_file_fields_for_current_paper(show_popup=False):
-            messagebox.showwarning("提示", "存在未完成的文件字段确认，请先处理后再关闭。")
-            return
+        self._confirm_all_pending_file_fields_for_current_paper(show_popup=True, block_on_error=False)
         if self.logic.papers:
             choice = messagebox.askyesnocancel("确认", "注意！是否保存当前所有论文？如果否，当前所有内容会丢失")
             if choice is None: return
-            if choice and self.save_all_papers() == False: return
+            if choice and (not self.save_all_papers()):
+                return
         self.logic.clear_all_temp_assets()
         self.root.destroy()
 
@@ -3130,13 +3279,13 @@ class PaperSubmissionGUI:
         if not new_p: return messagebox.showwarning("提示", "未解析到有效的Zotero数据")
         self.logic.add_zotero_papers(new_p)
         self.update_paper_list()
-        idx = len(self.logic.papers)-1
-        self.current_paper_index = idx
-        self._suppress_select_event = True
-        self.paper_tree.selection_set(self.paper_tree.get_children()[idx])
-        self._suppress_select_event = False
-        self.load_paper_to_form(self.logic.papers[idx])
-        self.show_form()
+        idx = len(self.logic.papers) - 1
+        if idx in self.filtered_indices:
+            self._suppress_select_event = True
+            try:
+                self._activate_paper_by_real_index(idx)
+            finally:
+                self._suppress_select_event = False
         messagebox.showinfo("成功", f"已添加 {len(new_p)} 篇论文")
 
 
