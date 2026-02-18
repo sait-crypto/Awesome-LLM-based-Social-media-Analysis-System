@@ -1,16 +1,16 @@
 """
-验证提交脚本
+验证提交脚本（CSV/JSON）
 功能：
-1. 验证 submit_template.xlsx 和 submit_template.json 中的论文格式 (validate_paper_fields)
-2. 验证论文是否为实质性新增 (对比 origin/main 分支的模版内容，排除完全未修改的占位符)
-3. 验证 figures/ 目录下所有文件的格式
+1. 验证 submit_template.csv 和 submit_template.json 中的论文格式 (validate_paper_fields)
+2. 验证论文是否为实质性新增（对比 origin/main 分支的模版内容，排除完全未修改的占位符）
+3. 验证 figures/assets 目录下所有文件的格式
 """
 import os
 import sys
-import shutil
 import subprocess
 import tempfile
-from typing import List, Tuple
+from pathlib import Path
+from typing import List
 
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -19,22 +19,26 @@ from src.core.config_loader import get_config_instance
 from src.core.update_file_utils import get_update_file_utils
 from src.core.database_model import Paper, is_duplicate_paper
 
-def get_original_content(repo_path: str, temp_path: str) -> bool:
+def get_original_content(abs_path: str, temp_path: str, project_root: str) -> bool:
     """
     获取 origin/main 分支的文件内容并保存到临时路径
     """
     try:
+        rel_path = Path(abs_path).resolve().relative_to(Path(project_root).resolve()).as_posix()
         # 使用 git show 获取 main 分支的文件内容
         # 注意：在 GitHub Actions checkout 时 fetch-depth: 0 才能获取 origin/main
-        cmd = ["git", "show", f"origin/main:{repo_path}"]
+        cmd = ["git", "show", f"origin/main:{rel_path}"]
         with open(temp_path, "wb") as f:
             subprocess.check_call(cmd, stdout=f, stderr=subprocess.DEVNULL)
         return True
+    except ValueError:
+        print(f"Warning: Path is outside project root: {abs_path}")
+        return False
     except subprocess.CalledProcessError:
-        print(f"Info: Original file {repo_path} not found in main branch (New file?).")
+        print(f"Info: Original file {abs_path} not found in main branch (New file?).")
         return False
     except Exception as e:
-        print(f"Warning: Failed to fetch original file {repo_path}: {e}")
+        print(f"Warning: Failed to fetch original file {abs_path}: {e}")
         return False
 
 def validate_papers(papers: List[Paper], original_papers: List[Paper], source_name: str) -> int:
@@ -108,47 +112,46 @@ def main():
     config_loader = get_config_instance()
     utils = get_update_file_utils()
     settings = config_loader.settings
+    project_root = str(config_loader.project_root)
 
     # 获取路径配置
-    update_excel_path = settings['paths']['update_excel']
+    update_csv_path = settings['paths'].get('update_csv')
     update_json_path = settings['paths']['update_json']
     figure_dir = settings['paths']['figure_dir']
+    assets_dir = settings['paths'].get('assets_dir')
 
     total_valid_submissions = 0
 
-    # 如果 update_excel_path 不存在，创建空文件
-    if not os.path.exists(update_excel_path):
-        open(update_excel_path, 'w').close()
-
-    # 如果 update_json_path 不存在，创建空文件
-    if not os.path.exists(update_json_path):
-        open(update_json_path, 'w').close()
-
     # 创建临时目录用于存放原始模版
     with tempfile.TemporaryDirectory() as temp_dir:
-        # ==================== 1. 验证 Excel ====================
-        if os.path.exists(update_excel_path):
-            # 加载当前提交的 Excel
+        # ==================== 1. 验证 CSV ====================
+        if update_csv_path and os.path.exists(update_csv_path):
+            # 加载当前提交的 CSV
             try:
-                current_excel_papers = utils.load_papers_from_excel(update_excel_path, skip_invalid=False)
+                success, current_csv_papers = utils.load_papers_from_csv(update_csv_path)
+                if not success:
+                    print("Error loading current CSV: parser returned failed status")
+                    sys.exit(1)
             except Exception as e:
-                print(f"Error loading current Excel: {e}")
+                print(f"Error loading current CSV: {e}")
                 sys.exit(1)
 
-            # 获取原始 Excel
-            temp_excel_path = os.path.join(temp_dir, "original.xlsx")
-            original_excel_papers = []
-            if get_original_content(update_excel_path, temp_excel_path):
+            # 获取原始 CSV
+            temp_csv_path = os.path.join(temp_dir, "original.csv")
+            original_csv_papers = []
+            if get_original_content(update_csv_path, temp_csv_path, project_root):
                 try:
-                    original_excel_papers = utils.load_papers_from_excel(temp_excel_path, skip_invalid=False)
+                    success, original_csv_papers = utils.load_papers_from_csv(temp_csv_path)
+                    if not success:
+                        original_csv_papers = []
                 except Exception:
                     pass # 原始文件可能损坏或为空，视为无基准
 
             # 执行验证
             total_valid_submissions += validate_papers(
-                current_excel_papers, 
-                original_excel_papers, 
-                "Excel Template"
+                current_csv_papers,
+                original_csv_papers,
+                "CSV Template"
             )
             
 
@@ -156,7 +159,10 @@ def main():
         if os.path.exists(update_json_path):
             # 加载当前提交的 JSON
             try:
-                current_json_papers = utils.load_papers_from_json(update_json_path, skip_invalid=False)
+                success, current_json_papers = utils.load_papers_from_json(update_json_path)
+                if not success:
+                    print("Error loading current JSON: parser returned failed status")
+                    sys.exit(1)
             except Exception as e:
                 print(f"Error loading current JSON: {e}")
                 sys.exit(1)
@@ -164,9 +170,11 @@ def main():
             # 获取原始 JSON
             temp_json_path = os.path.join(temp_dir, "original.json")
             original_json_papers = []
-            if get_original_content(update_json_path, temp_json_path):
+            if get_original_content(update_json_path, temp_json_path, project_root):
                 try:
-                    original_json_papers = utils.load_papers_from_json(temp_json_path, skip_invalid=False)
+                    success, original_json_papers = utils.load_papers_from_json(temp_json_path)
+                    if not success:
+                        original_json_papers = []
                 except Exception:
                     pass
 
@@ -177,9 +185,10 @@ def main():
                 "JSON Template"
             )
 
-    # ==================== 3. 验证图片 ====================
-    # 注意：figure_dir 可能包含路径分隔符，这里简单处理
+    # ==================== 3. 验证图片/资源 ====================
     validate_figures(figure_dir)
+    if assets_dir and assets_dir != figure_dir:
+        validate_figures(assets_dir)
 
     # ==================== 4. 最终判定 ====================
     print("-" * 50)

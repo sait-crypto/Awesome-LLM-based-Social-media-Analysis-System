@@ -1,9 +1,6 @@
 import os
 import sys
 import hashlib
-import configparser
-import pandas as pd
-import json
 import shutil
 import re
 from pathlib import Path
@@ -11,23 +8,31 @@ from pathlib import Path
 # 添加 src 到路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.core.config_loader import get_config_instance
+from src.core.update_file_utils import get_update_file_utils
 
 config_instance = get_config_instance()
 settings = config_instance.settings
+update_utils = get_update_file_utils()
 
 # 路径配置
 PROJECT_ROOT = config_instance.project_root
-UPDATE_EXCEL = str(Path(settings['paths']['update_excel']).resolve())
-UPDATE_JSON = str(Path(settings['paths']['update_json']).resolve())
+UPDATE_CSV = settings['paths'].get('update_csv')
+UPDATE_JSON = settings['paths'].get('update_json')
 
-# 目标目录 (Main Branch Figures)
-FIGURE_DIR_REL = settings['paths']['figure_dir']
-FIGURE_DIR = str(Path(PROJECT_ROOT) / FIGURE_DIR_REL)
+# 目标目录（Main Branch）
+FIGURE_DIR = str(Path(settings['paths']['figure_dir']).resolve())
+ASSETS_DIR = str(Path(settings['paths'].get('assets_dir', os.path.join(PROJECT_ROOT, 'assets'))).resolve())
 
-# 源目录 (PR Branch Figures - 通过环境变量传入)
-# 如果没有设置环境变量，默认认为就在 figures (本地运行情况)
+# 源目录（PR Branch 暂存，工作流通过环境变量传入）
+PR_ASSETS_DIR_ENV = os.environ.get('PR_ASSETS_DIR')
+PR_ASSETS_DIR = str(Path(PR_ASSETS_DIR_ENV).resolve()) if PR_ASSETS_DIR_ENV else ''
 PR_FIGURE_DIR_ENV = os.environ.get('PR_FIGURES_DIR')
 PR_FIGURE_DIR = str(Path(PR_FIGURE_DIR_ENV).resolve()) if PR_FIGURE_DIR_ENV else FIGURE_DIR
+
+SOURCE_ROOTS = []
+for d in [PR_ASSETS_DIR, PR_FIGURE_DIR, ASSETS_DIR, FIGURE_DIR]:
+    if d and os.path.isdir(d) and d not in SOURCE_ROOTS:
+        SOURCE_ROOTS.append(d)
 
 def calculate_file_hash(filepath):
     """计算文件的 MD5 哈希值"""
@@ -45,12 +50,12 @@ def calculate_file_hash(filepath):
         return None
 
 def get_clean_title_hash(title):
-    if not title or pd.isna(title):
+    if not title:
         return "untitled"
     clean_prefix = re.sub(r'[^a-zA-Z0-9]', '', str(title)[:8])
-    return clean_prefix
+    return clean_prefix or "untitled"
 
-def get_smart_unique_path(source_path, original_basename, title):
+def get_smart_unique_path(source_path, target_dir, original_basename, title):
     """
     决定图片的最终目标路径：
     1. 目标不存在 -> 使用原名
@@ -61,7 +66,7 @@ def get_smart_unique_path(source_path, original_basename, title):
     source_hash = calculate_file_hash(source_path)
     
     # 尝试 1: 原名
-    target_path = os.path.join(FIGURE_DIR, original_basename)
+    target_path = os.path.join(target_dir, original_basename)
     
     if not os.path.exists(target_path):
         return target_path, False # False 表示没有冲突
@@ -77,7 +82,7 @@ def get_smart_unique_path(source_path, original_basename, title):
     
     while True:
         new_basename = f"{filename}-{title_part}-{counter}{ext}"
-        new_full_path = os.path.join(FIGURE_DIR, new_basename)
+        new_full_path = os.path.join(target_dir, new_basename)
         
         if not os.path.exists(new_full_path):
             return new_full_path, True # True 表示发生了重命名
@@ -88,146 +93,151 @@ def get_smart_unique_path(source_path, original_basename, title):
             
         counter += 1
 
-def resolve_pr_image(p):
+
+def is_subpath(path: str, parent: str) -> bool:
+    try:
+        Path(path).resolve().relative_to(Path(parent).resolve())
+        return True
+    except Exception:
+        return False
+
+
+def split_image_paths(value: str):
+    s = str(value or '').strip()
+    if not s:
+        return []
+    return [p.strip() for p in re.split(r'[|;；]', s) if p.strip()]
+
+
+def normalize_rel_path(path_str: str) -> str:
+    return str(path_str).replace('\\', '/')
+
+
+def resolve_source_file(raw_path: str, uid: str = ''):
     """
-    在 PR 目录或 Main 目录中查找图片
-    返回: (找到的绝对路径, 是否在PR目录中)
+    在 PR/main 的 assets/figures 目录中查找资源。
+    返回: (找到的绝对路径, 是否来自PR暂存目录)
     """
-    # 1. 优先去 PR 暂存区找
-    pr_path = os.path.join(PR_FIGURE_DIR, os.path.basename(p))
-    if os.path.exists(pr_path):
-        return pr_path, True
-    
-    # 2. 如果 PR 目录和 Main 目录是同一个（本地运行），或者 PR 里没这个图
-    # 去 Main 目录找 (可能是以前提交过的图)
-    main_path = os.path.join(FIGURE_DIR, os.path.basename(p))
-    if os.path.exists(main_path):
-        return main_path, False
-        
+    clean = str(raw_path or '').strip()
+    if not clean:
+        return None, False
+
+    # 1) 绝对路径
+    if os.path.isabs(clean) and os.path.exists(clean):
+        from_pr = (PR_ASSETS_DIR and is_subpath(clean, PR_ASSETS_DIR)) or (PR_FIGURE_DIR and is_subpath(clean, PR_FIGURE_DIR))
+        return clean, bool(from_pr)
+
+    # 2) 项目相对路径
+    rel_candidate = os.path.join(PROJECT_ROOT, clean)
+    if os.path.exists(rel_candidate):
+        from_pr = (PR_ASSETS_DIR and is_subpath(rel_candidate, PR_ASSETS_DIR)) or (PR_FIGURE_DIR and is_subpath(rel_candidate, PR_FIGURE_DIR))
+        return rel_candidate, bool(from_pr)
+
+    base = os.path.basename(clean)
+
+    # 3) 有 UID 时优先找 assets/{uid}/{base}
+    if uid:
+        for root in SOURCE_ROOTS:
+            cand = os.path.join(root, uid, base)
+            if os.path.exists(cand):
+                from_pr = (PR_ASSETS_DIR and is_subpath(cand, PR_ASSETS_DIR)) or (PR_FIGURE_DIR and is_subpath(cand, PR_FIGURE_DIR))
+                return cand, bool(from_pr)
+
+    # 4) 按 basename 在已知目录查找
+    for root in SOURCE_ROOTS:
+        cand = os.path.join(root, base)
+        if os.path.exists(cand):
+            from_pr = (PR_ASSETS_DIR and is_subpath(cand, PR_ASSETS_DIR)) or (PR_FIGURE_DIR and is_subpath(cand, PR_FIGURE_DIR))
+            return cand, bool(from_pr)
+
     return None, False
+
+def process_pipeline_images_for_file(file_path: str) -> bool:
+    success, papers = update_utils.read_data(file_path)
+    if not success:
+        print(f"Failed to load update file: {file_path}")
+        return False
+
+    changed = False
+    for paper in papers:
+        raw_value = str(getattr(paper, 'pipeline_image', '') or '').strip()
+        if not raw_value:
+            continue
+
+        title = getattr(paper, 'title', 'untitled')
+        uid = str(getattr(paper, 'uid', '') or '').strip()
+        raw_paths = split_image_paths(raw_value)
+        new_relative_paths = []
+        row_dirty = False
+
+        for p in raw_paths:
+            src_path, is_from_pr = resolve_source_file(p, uid)
+            if not src_path:
+                print(f"Warning: Image not found in PR/Main assets or figures: {p}")
+                new_relative_paths.append(normalize_rel_path(p))
+                continue
+
+            # 优先落到 assets/{uid}/，无 uid 时兼容落到 figures/
+            target_dir = os.path.join(ASSETS_DIR, uid) if uid else FIGURE_DIR
+            os.makedirs(target_dir, exist_ok=True)
+
+            dst_path, _ = get_smart_unique_path(src_path, target_dir, os.path.basename(src_path), title)
+
+            if os.path.abspath(src_path) != os.path.abspath(dst_path):
+                if not os.path.exists(dst_path):
+                    if is_from_pr:
+                        shutil.move(src_path, dst_path)
+                    else:
+                        shutil.copy2(src_path, dst_path)
+                else:
+                    if is_from_pr and os.path.exists(src_path):
+                        os.remove(src_path)
+
+            rel_path = normalize_rel_path(os.path.relpath(dst_path, PROJECT_ROOT))
+            new_relative_paths.append(rel_path)
+            if rel_path != normalize_rel_path(p):
+                row_dirty = True
+
+        normalized_old = '|'.join(split_image_paths(raw_value))
+        normalized_new = '|'.join(new_relative_paths)
+        if row_dirty or normalized_old != normalized_new:
+            paper.pipeline_image = normalized_new
+            changed = True
+
+    if changed:
+        if not update_utils.write_data(file_path, papers):
+            print(f"Failed to write update file: {file_path}")
+            return False
+        print(f"Updated: {file_path}")
+    else:
+        print(f"No changes: {file_path}")
+
+    return True
+
 
 def process_figures():
     print(f"Processing figures.")
+    if PR_ASSETS_DIR:
+        print(f"  - Source (PR assets): {PR_ASSETS_DIR}")
     print(f"  - Source (PR): {PR_FIGURE_DIR}")
-    print(f"  - Target (Main): {FIGURE_DIR}")
-    
-    if not os.path.exists(FIGURE_DIR):
-        os.makedirs(FIGURE_DIR)
+    print(f"  - Target (Main assets): {ASSETS_DIR}")
+    print(f"  - Target (Main figures): {FIGURE_DIR}")
 
-    # --- 处理 Excel ---
-    if os.path.exists(UPDATE_EXCEL):
-        try:
-            print(f"Checking Excel template: {UPDATE_EXCEL}")
-            df = pd.read_excel(UPDATE_EXCEL, engine='openpyxl')
-            updated = False
-            
-            target_col = "pipeline figure" 
-            if target_col not in df.columns and "pipeline_image" in df.columns:
-                target_col = "pipeline_image"
-            title_col = "title"
+    os.makedirs(ASSETS_DIR, exist_ok=True)
+    os.makedirs(FIGURE_DIR, exist_ok=True)
 
-            if target_col in df.columns:
-                for idx, row in df.iterrows():
-                    img_path_raw = row[target_col]
-                    title = row.get(title_col, "untitled")
-                    
-                    if pd.isna(img_path_raw) or str(img_path_raw).strip() == "":
-                        continue
+    targets = []
+    if UPDATE_CSV and os.path.exists(UPDATE_CSV):
+        targets.append(UPDATE_CSV)
+    if UPDATE_JSON and os.path.exists(UPDATE_JSON):
+        targets.append(UPDATE_JSON)
 
-                    raw_paths = [p.strip() for p in re.split(r'[;；]', str(img_path_raw).strip()) if p.strip()]
-                    new_relative_paths = []
-                    row_dirty = False
-                        
-                    for p in raw_paths:
-                        # 查找图片
-                        src_path, is_from_pr = resolve_pr_image(p)
-                        
-                        if src_path:
-                            # 计算目标路径
-                            dst_path, renamed = get_smart_unique_path(src_path, os.path.basename(p), title)
-                            
-                            # 只有当图片来自 PR 目录，且目标路径文件不存在时，才执行移动/复制
-                            # 或者目标已存在但我们确定要覆盖（这里逻辑是哈希相同不覆盖，不同才重命名后写入）
-                            
-                            # 如果 src 和 dst 是同一个文件（比如本地运行），跳过
-                            if os.path.abspath(src_path) != os.path.abspath(dst_path):
-                                if not os.path.exists(dst_path):
-                                    print(f"Moving new image: {os.path.basename(src_path)} -> {os.path.basename(dst_path)}")
-                                    shutil.move(src_path, dst_path)
-                                else:
-                                    print(f"Image exists (Hash match), linking: {os.path.basename(dst_path)}")
-                                    # 如果来自 PR 且目标已存在（哈希相同），删除 PR 里的冗余副本
-                                    if is_from_pr:
-                                        os.remove(src_path)
+    if not targets:
+        print("No update CSV/JSON files found, skipping.")
+        return
 
-                            # 计算相对路径写入 Excel
-                            rel_path = os.path.relpath(dst_path, PROJECT_ROOT).replace('\\', '/')
-                            if rel_path != p.replace('\\', '/'):
-                                row_dirty = True
-                            
-                            new_relative_paths.append(rel_path)
-                        else:
-                            print(f"Warning: Image not found in PR or Main: {p}")
-                            new_relative_paths.append(p)
-                    
-                    if row_dirty:
-                        df.at[idx, target_col] = ";".join(new_relative_paths)
-                        updated = True
-            
-            if updated:
-                from src.core.update_file_utils import get_update_file_utils
-                get_update_file_utils().write_excel_file(UPDATE_EXCEL, df)
-                print("Excel template updated.")
-
-        except Exception as e:
-            print(f"Error processing Excel figures: {e}")
-            import traceback
-            traceback.print_exc()
-
-    # --- 处理 JSON (逻辑同上，略微简化) ---
-    if os.path.exists(UPDATE_JSON):
-        try:
-            print(f"Checking JSON template: {UPDATE_JSON}")
-            with open(UPDATE_JSON, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            json_updated = False
-            
-            papers = data if isinstance(data, list) else data.get('papers', [])
-            for paper in papers:
-                if 'pipeline_image' in paper and paper['pipeline_image']:
-                    img_path_str = str(paper['pipeline_image']).strip()
-                    if not img_path_str: continue
-                    title = paper.get('title', 'untitled')
-                    raw_paths = [p.strip() for p in re.split(r'[;；]', img_path_str) if p.strip()]
-                    new_relative_paths = []
-                    row_dirty = False
-
-                    for p in raw_paths:
-                        src_path, is_from_pr = resolve_pr_image(p)
-                        if src_path:
-                            dst_path, renamed = get_smart_unique_path(src_path, os.path.basename(p), title)
-                            if os.path.abspath(src_path) != os.path.abspath(dst_path):
-                                if not os.path.exists(dst_path):
-                                    shutil.move(src_path, dst_path)
-                                else:
-                                    if is_from_pr: os.remove(src_path)
-                            
-                            rel_path = os.path.relpath(dst_path, PROJECT_ROOT).replace('\\', '/')
-                            new_relative_paths.append(rel_path)
-                            row_dirty = True
-                        else:
-                            new_relative_paths.append(p)
-                    
-                    if row_dirty:
-                        paper['pipeline_image'] = ";".join(new_relative_paths)
-                        json_updated = True
-
-            if json_updated:
-                from src.core.update_file_utils import get_update_file_utils
-                get_update_file_utils().write_json_file(UPDATE_JSON, data)
-
-        except Exception as e:
-            print(f"Error processing JSON figures: {e}")
+    for target in targets:
+        process_pipeline_images_for_file(target)
 
 if __name__ == "__main__":
     process_figures()

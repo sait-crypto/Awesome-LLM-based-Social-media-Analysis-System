@@ -109,8 +109,8 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          # 使用新的验证脚本入口
-          uv run scripts/validate.py 2>&1 | tee validation_log.txt
+          # 使用 scripts 验证入口
+          uv run scripts/validate_submission.py 2>&1 | tee validation_log.txt
 
       - name: Comment on Validation Failure
         if: failure() && steps.validate.outcome == 'failure'
