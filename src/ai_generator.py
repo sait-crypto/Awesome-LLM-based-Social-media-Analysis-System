@@ -122,9 +122,9 @@ class AIGenerator:
                 reader = pypdf.PdfReader(f)
                 # 只读前几页和最后几页以节省token，涵盖摘要、引言和结论
                 num_pages = len(reader.pages)
-                pages_to_read = list(range(min(5, num_pages))) # 前5页
-                if num_pages > 5:
-                    pages_to_read.extend(list(range(max(5, num_pages-5), num_pages))) # 后5页
+                pages_to_read = list(range(min(15, num_pages))) # 前15页
+                if num_pages > 10:
+                    pages_to_read.extend(list(range(max(10, num_pages-10), num_pages))) # 后10页
                 
                 for i in sorted(list(set(pages_to_read))):
                     text += reader.pages[i].extract_text() + "\n"

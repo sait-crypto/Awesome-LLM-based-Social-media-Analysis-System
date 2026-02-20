@@ -13,6 +13,7 @@ from tkinter import ttk, messagebox, filedialog, scrolledtext, simpledialog
 from typing import Dict, List, Any, Optional, Tuple
 import threading 
 import subprocess
+import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -31,7 +32,7 @@ class PaperSubmissionGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("Awesome 论文提交系统")
+        self.root.title("Awesome 论文规范化处理提交程序")
         self.root.geometry("1300x850")
         
         # 初始化业务逻辑控制器
@@ -68,6 +69,11 @@ class PaperSubmissionGUI:
         self._suppress_select_event = False
         self._handling_paper_selection = False
         self._skip_next_selection_confirm = False
+        self.drag_item = None
+        self.drag_ghost = None
+        self._drag_press_item = None
+        self._drag_press_xy = None
+        self._drag_min_distance = 6
         
         # 跟踪已导入的临时文件，避免重复复制
         self._imported_files: Dict[str, Optional[Tuple[str, str]]] = {
@@ -109,41 +115,43 @@ class PaperSubmissionGUI:
     def setup_ui(self):
         main_frame = ttk.Frame(self.root, padding="5")
         main_frame.grid(row=0, column=0, sticky="nsew")
-        
+
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(0, weight=1) 
-        main_frame.columnconfigure(1, weight=1) 
+        main_frame.columnconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
         main_frame.rowconfigure(1, weight=1)
-        
+
         # === 顶部 Header 区域 ===
         header_frame = ttk.Frame(main_frame)
         header_frame.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 5))
-        
-        title_label = ttk.Label(header_frame, text="🎓 Awesome 论文规范化提交处理界面", font=("Arial", 14, "bold"))
+
+        title_label = ttk.Label(header_frame, text="🎓 Awesome 论文规范化处理提交程序", font=("Arial", 14, "bold"))
         title_label.pack(side=tk.LEFT)
-        
+
         # 显示当前活跃的更新文件提示
         active_files = []
         paths = self.logic.config.settings['paths']
         for k in ['update_json', 'update_csv', 'my_update_json', 'my_update_csv']:
             p = paths.get(k)
-            if p: active_files.append(os.path.basename(p))
-                
+            if p:
+                active_files.append(os.path.basename(p))
+
         # 额外更新文件
         extra = paths.get('extra_update_files_list', [])
         active_files.extend([os.path.basename(f) for f in extra])
-        
+
         files_str = ", ".join(active_files[:6])
-        if len(active_files) > 6: files_str += "..."
-        
+        if len(active_files) > 6:
+            files_str += "..."
+
         info_label = ttk.Label(header_frame, text=f"  [Active: {files_str}]", foreground="gray")
         info_label.pack(side=tk.LEFT, padx=10)
 
         # 管理员切换按钮
         self.admin_btn = ttk.Button(header_frame, text="🔒 管理员模式", command=self._toggle_admin_mode, width=15)
         self.admin_btn.pack(side=tk.RIGHT)
-        
+
         # === 主分割窗口 ===
         self.paned_window = tk.PanedWindow(
             main_frame,
@@ -326,7 +334,7 @@ class PaperSubmissionGUI:
         # sticky="ew" 让按钮横向填满，实现“右边也对齐”
         # padx=(5, 5) 这里的左边距需要手动调整以对齐下方的输入框起始位置
         # 下方输入框起始位置 = Label Width + Label Padding
-        fill_zotero_btn.grid(row=0, column=1, sticky="ew", padx=(15, 5)) 
+        fill_zotero_btn.grid(row=0, column=1, sticky="ew", padx=(63, 0)) 
         
         # --- 可滚动区域 ---
         self.form_canvas = tk.Canvas(self.form_container)
@@ -372,16 +380,16 @@ class PaperSubmissionGUI:
         for tag in active_tags:
             # 逻辑：如果是系统字段且不是管理员模式，隐藏
             # 管理员模式下，显示所有字段（包括 id, conflict_marker 等）
-            is_system = tag.get('system_var', False)
+            is_system = tag.get('system', False)
             if is_system and not self.logic.is_admin:
                 continue
-            
-            # 逻辑：tag['variable'] 是唯一标识
+
             variable = tag.get('variable')
+            display_name = tag.get('display_name', variable)
+            description = tag.get('description', '')
             if not variable:
                 continue
-            display_name = tag['display_name']
-            description = tag.get('description', '')
+
             required = tag.get('required', False)
             field_type = tag.get('type', 'string')
             
@@ -484,7 +492,6 @@ class PaperSubmissionGUI:
                 sv = tk.StringVar()
                 sv.trace_add("write", lambda *args, v=variable, w=entry: self._on_field_change(v, w))
                 entry.config(textvariable=sv)
-                entry.textvariable = sv
                 self._field_vars[variable] = sv
                 entry.bind("<KeyRelease>", lambda e, v=variable, w=entry: self._on_field_change(v, w))
                 entry.bind("<FocusOut>", lambda e, v=variable, w=entry: self._on_field_change(v, w))
@@ -511,6 +518,15 @@ class PaperSubmissionGUI:
         if ridx >= len(self.logic.papers):
             return None
         return self.logic.papers[ridx]
+
+    def _reset_list_after_data_change(self, keyword: Optional[str] = None, category: Optional[str] = None):
+        """数据变化后统一重置选择并刷新列表/占位视图。"""
+        self.current_paper_index = -1
+        if keyword is None and category is None:
+            self.refresh_list_view()
+        else:
+            self.refresh_list_view(keyword or "", category or "All Categories")
+        self.show_placeholder()
 
     def _is_dnd_available(self) -> bool:
         if not hasattr(self.root, '_dnd_available'):
@@ -700,11 +716,9 @@ class PaperSubmissionGUI:
         
         # 拖放功能支持 (tkinterdnd2)
         def on_drop_pdf_file(file_path: str):
-            if not file_path.lower().endswith('.pdf'):
-                messagebox.showerror("错误", "仅支持 PDF 文件")
-                return
-            if not os.path.exists(file_path):
-                messagebox.showerror("错误", "文件不存在")
+            ok, err = self.logic.validate_single_asset_reference('paper_file', file_path)
+            if not ok:
+                messagebox.showerror("错误", err or "PDF 文件校验失败")
                 return
             rel_path = self._import_file_asset_once(file_path, 'paper', variable)
             if rel_path:
@@ -725,9 +739,8 @@ class PaperSubmissionGUI:
             candidate = candidate.strip('{}').strip('"').strip("'")
             if not candidate:
                 return False
-            if not candidate.lower().endswith('.pdf'):
-                return False
-            if not os.path.exists(candidate):
+            ok, _ = self.logic.validate_single_asset_reference('paper_file', candidate)
+            if not ok:
                 return False
             try:
                 rel_path = self._import_file_asset_once(candidate, 'paper', variable)
@@ -821,7 +834,7 @@ class PaperSubmissionGUI:
 
         btn_reveal = ttk.Button(btn_frame, text="📍", width=3, command=reveal_file)
         btn_reveal.pack(side=tk.LEFT, padx=1)
-        self.create_tooltip(btn_reveal, "打开当前引用文件所在文件夹")
+        self.create_tooltip(btn_reveal, "在资源管理器中打开当前引用文件位置")
 
         self._file_field_states[variable] = {
             'var': sv,
@@ -928,12 +941,9 @@ class PaperSubmissionGUI:
         entry.config(textvariable=row_sv)
 
         def on_drop_image_file(file_path: str):
-            valid_exts = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg')
-            if not file_path.lower().endswith(valid_exts):
-                messagebox.showerror("错误", "仅支持图片文件")
-                return
-            if not os.path.exists(file_path):
-                messagebox.showerror("错误", "文件不存在")
+            ok, err = self.logic.validate_single_asset_reference('pipeline_image', file_path)
+            if not ok:
+                messagebox.showerror("错误", err or "图片文件校验失败")
                 return
             rel_path = self._import_file_asset_once(file_path, 'figure', variable)
             if rel_path:
@@ -986,7 +996,7 @@ class PaperSubmissionGUI:
 
         btn_reveal = ttk.Button(btn_frame, text="📍", width=3, command=reveal_file)
         btn_reveal.pack(side=tk.LEFT, padx=1)
-        self.create_tooltip(btn_reveal, "打开当前引用文件所在文件夹")
+        self.create_tooltip(btn_reveal, "在资源管理器中打开当前引用文件位置")
 
         def toggle_preview():
             if row_data.get('preview_visible'):
@@ -1039,10 +1049,8 @@ class PaperSubmissionGUI:
                         return False
                     candidate = candidate.splitlines()[0].strip() if candidate else ''
                     candidate = candidate.strip('{}').strip('"').strip("'")
-                    valid_exts = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg')
-                    if not candidate.lower().endswith(valid_exts):
-                        return False
-                    if not os.path.exists(candidate):
+                    ok, _ = self.logic.validate_single_asset_reference('pipeline_image', candidate)
+                    if not ok:
                         return False
                     try:
                         rel_path = self._import_file_asset_once(candidate, 'figure', variable)
@@ -1236,6 +1244,7 @@ class PaperSubmissionGUI:
             
         btn_tree = ttk.Button(row_frame, text="🌳", width=3, command=tree_cb)
         btn_tree.pack(side='left', padx=(4, 0))
+        self.create_tooltip(btn_tree, "打开分类树：可查看/复制分类树结构，也可双击分类直接填入当前字段")
 
         def make_button_callback(frame_ref, is_first_row):
             def on_btn_click():
@@ -1349,12 +1358,12 @@ class PaperSubmissionGUI:
 
         if self.logic.is_admin:
             self.admin_btn.config(text="🔓 管理员: ON")
-            self.root.title("Awesome 论文提交系统 [管理员模式]")
+            self.root.title("Awesome 论文规范化处理提交程序 [管理员模式]")
             if hasattr(self, 'save_policy_btn') and self.save_policy_btn.winfo_manager() != 'pack':
                 self.save_policy_btn.pack(side=tk.LEFT, padx=5, pady=5)
         else:
             self.admin_btn.config(text="🔒 管理员: OFF")
-            self.root.title("Awesome 论文提交系统")
+            self.root.title("Awesome 论文规范化处理提交程序")
             if hasattr(self, 'save_policy_btn') and self.save_policy_btn.winfo_manager() == 'pack':
                 self.save_policy_btn.pack_forget()
 
@@ -1420,11 +1429,9 @@ class PaperSubmissionGUI:
         self.create_form_fields()
         
         # 重新加载当前论文（如果已选）
-        if self.current_paper_index >= 0 and self.current_paper_index < len(self.filtered_indices):
-            # 需要映射回真实 index
-            real_idx = self.filtered_indices[self.current_paper_index]
-            if 0 <= real_idx < len(self.logic.papers):
-                self.load_paper_to_form(self.logic.papers[real_idx])
+        current_paper = self._get_current_paper()
+        if current_paper is not None:
+            self.load_paper_to_form(current_paper)
 
     # ================= 筛选与列表逻辑 =================
 
@@ -1555,6 +1562,11 @@ class PaperSubmissionGUI:
             self._handling_paper_selection = False
 
     def _on_tree_left_button(self, event):
+        self.drag_item = None
+        self._drag_press_item = None
+        self._drag_press_xy = None
+        self._destroy_drag_ghost()
+
         if self._suppress_select_event or self._handling_paper_selection:
             return None
 
@@ -1575,10 +1587,12 @@ class PaperSubmissionGUI:
 
         # 非筛选模式下允许拖拽排序；筛选模式仅作普通选择
         if self._get_search_keyword() or self.cat_filter_combo.get() != "All Categories":
-            self.drag_item = None
             return None
 
-        self._on_drag_start(event)
+        # 仅在按下当前已选中项时进入“待拖拽”状态，移动超过阈值后才真正开始拖拽
+        if current_real_idx >= 0 and target_real_idx == current_real_idx:
+            self._drag_press_item = clicked_item
+            self._drag_press_xy = (event.x, event.y)
         return None
 
     def load_paper_to_form(self, paper):
@@ -1661,7 +1675,7 @@ class PaperSubmissionGUI:
                 if base_idx != -1:
                     messagebox.showwarning(
                         "冲突处理提示",
-                        "检测到该冲突条目存在基论文，不能直接取消冲突标记。\n请在左侧列表右键该条目，使用“⚔️ 处理冲突...”完成合并后自动取消。"
+                        "检测到该冲突条目存在基论文，不能直接取消冲突标记。\n请在左侧列表右键该条目，使用“⚔️ 处理冲突...”完成合并。"
                     )
                     return
 
@@ -1690,7 +1704,7 @@ class PaperSubmissionGUI:
         """在复选框切换前拦截：存在基论文时禁止直接取消冲突标记。"""
         if getattr(self, '_disable_callbacks', False):
             return None
-        if self.current_paper_index < 0:
+        if self._get_current_real_index() < 0:
             return "break"
 
         # 当前值为 True 时，点击后将变为 False（取消勾选）
@@ -1714,9 +1728,9 @@ class PaperSubmissionGUI:
 
     def _on_category_change(self, variable=None, widget_or_var=None):
         if getattr(self, '_disable_callbacks', False): return
-        if self.current_paper_index < 0: return
-        
-        real_idx = self.filtered_indices[self.current_paper_index]
+        real_idx = self._get_current_real_index()
+        if real_idx < 0:
+            return
         current_paper = self.logic.papers[real_idx]
         
         unique_names = self._gui_get_category_values()
@@ -1766,8 +1780,9 @@ class PaperSubmissionGUI:
 
     def _validate_all_fields_visuals(self, paper_idx=None):
         if paper_idx is None:
-            if self.current_paper_index < 0: return
-            paper_idx = self.filtered_indices[self.current_paper_index]
+            paper_idx = self._get_current_real_index()
+            if paper_idx < 0:
+                return
             
         paper = self.logic.papers[paper_idx]
         _, _, invalid_vars = paper.validate_paper_fields(self.config, True, True, no_normalize=True)
@@ -1814,13 +1829,6 @@ class PaperSubmissionGUI:
         if not rows:
             return
 
-        valid_exts = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg')
-        try:
-            from src.core.update_file_utils import get_update_file_utils
-            ufu = get_update_file_utils()
-        except Exception:
-            ufu = None
-
         for idx, row_data in enumerate(rows):
             entry = row_data.get('entry')
             sv = row_data.get('sv')
@@ -1834,15 +1842,8 @@ class PaperSubmissionGUI:
                 row_bg = self.color_required_empty
 
             if raw_val:
-                ext_ok = raw_val.lower().endswith(valid_exts)
-                exists_ok = False
-                if ext_ok:
-                    try:
-                        resolved = ufu.resolve_asset_path(raw_val, 'pipeline_image') if ufu else None
-                        exists_ok = bool(resolved and os.path.exists(resolved))
-                    except Exception:
-                        exists_ok = False
-                if (not ext_ok) or (not exists_ok):
+                ok, _ = self.logic.validate_single_asset_reference('pipeline_image', raw_val)
+                if not ok:
                     row_bg = self.color_invalid
 
             try:
@@ -1882,13 +1883,14 @@ class PaperSubmissionGUI:
                     pass
 
     def delete_paper(self):
-        if self.current_paper_index < 0: return messagebox.showwarning("警告", "请先选择一篇论文")
+        if not self._require_selected_paper("警告", "请先选择一篇论文"):
+            return
         if messagebox.askyesno("确认", "确定要删除这篇论文吗？"):
-            real_idx = self.filtered_indices[self.current_paper_index]
+            real_idx = self._get_current_real_index()
+            if real_idx < 0:
+                return
             if self.logic.delete_paper(real_idx):
-                self.current_paper_index = -1
-                self.refresh_list_view(self._get_search_keyword(), self.cat_filter_combo.get())
-                self.show_placeholder()
+                self._reset_list_after_data_change(self._get_search_keyword(), self.cat_filter_combo.get())
                 self.update_status("论文已删除")
 
     def clear_papers(self):
@@ -1896,9 +1898,7 @@ class PaperSubmissionGUI:
         if messagebox.askyesno("警告", "警告！确定要清空所有论文吗？"):
             if messagebox.askyesno("警告", "二次警告！确定要清空？"):
                 self.logic.clear_papers()
-                self.current_paper_index = -1
-                self.refresh_list_view()
-                self.show_placeholder()
+                self._reset_list_after_data_change()
                 self.update_status("所有论文已清空")
 
     def save_all_papers(self) -> bool:
@@ -1994,12 +1994,15 @@ class PaperSubmissionGUI:
 
     def submit_pr(self):
         if not messagebox.askyesno("须知", f"将自动通过 PR 提交论文...\n\n1. 创建新分支\n2. 提交更新文件和 Assets 资源\n3. 推送并创建 PR"): return
+        def _has_primary_update_file() -> bool:
+            p = self.logic.primary_update_file
+            return bool(p and os.path.exists(p))
         
-        if not self.logic.has_update_files():
+        if not _has_primary_update_file():
              if messagebox.askyesno("确认", "未检测到有效更新文件，是否先保存当前内容？"): 
                 if not self.save_all_papers():
                     return
-                if not self.logic.has_update_files(): return # 用户取消保存
+                if not _has_primary_update_file(): return # 用户取消保存
         
         def on_status(msg): self.root.after(0, lambda: self.update_status(msg))
         def on_result(url, branch, manual):
@@ -2023,34 +2026,52 @@ class PaperSubmissionGUI:
         entry.config(state='readonly')
         ttk.Button(w, text="复制链接", command=lambda: [self.root.clipboard_clear(), self.root.clipboard_append(url)]).pack(pady=10)
 
+    def _confirm_replace_workspace_before_load(self) -> bool:
+        """在已有工作区内容时，确认是否允许加载新文件覆盖。"""
+        if not self.logic.papers:
+            return True
+        return bool(messagebox.askyesno("确认", "加载新文件将覆盖当前工作区。\n\n是否继续？(建议先保存)"))
+
+    def _ensure_admin_for_db_load(self, title: str, prompt: str) -> bool:
+        """确保具备数据库加载权限；若无权限则引导切换管理员模式。"""
+        if self.logic.is_admin:
+            return True
+        if messagebox.askyesno(title, prompt):
+            self._toggle_admin_mode()
+        return bool(self.logic.is_admin)
+
+    def _apply_loaded_workspace_state(self, path: str, count: int, status_text: str, show_success: bool = True):
+        """统一处理加载成功后的 UI 状态刷新。"""
+        self.refresh_list_view()
+        self.current_paper_index = -1
+        self.show_placeholder()
+        self._set_current_loaded_file(path)
+        self.update_status(status_text)
+        if show_success:
+            fname = os.path.basename(path)
+            messagebox.showinfo("成功", f"已从 {fname} 加载 {count} 篇论文")
+
     def load_template(self):
         if not self._confirm_all_pending_file_fields_for_current_paper(show_popup=True):
             return
-        # 新增：确认提示
-        if self.logic.papers:
-            if not messagebox.askyesno("确认", "加载新文件将覆盖当前工作区。\n\n是否继续？(建议先保存)"):
-                return
+        if not self._confirm_replace_workspace_before_load():
+            return
             
         path = filedialog.askopenfilename(title="选择文件", filetypes=[("Data", "*.json *.csv")])
         if not path: return
         
-        # 权限检查：如果用户试图加载数据库文件且不是管理员
         try:
             cnt = self.logic.load_papers_from_file(path)
-            self.refresh_list_view() # 刷新列表
-            self.current_paper_index = -1
-            self.show_placeholder()
-            
-            fname = os.path.basename(path)
-            messagebox.showinfo("成功", f"已从 {fname} 加载 {cnt} 篇论文")
-            self._set_current_loaded_file(path)
-            self.update_status(f"当前文件: {fname}")
+            self._apply_loaded_workspace_state(
+                path,
+                cnt,
+                status_text=f"当前文件: {os.path.basename(path)}",
+                show_success=True,
+            )
             
         except PermissionError:
-            if messagebox.askyesno("需要管理员权限", "加载核心数据库文件需要管理员权限。\n\n是否立即切换模式？"):
-                self._toggle_admin_mode()
-                if self.logic.is_admin:
-                    self.load_template() # 重试
+            if self._ensure_admin_for_db_load("需要管理员权限", "加载核心数据库文件需要管理员权限。\n\n是否立即切换模式？"):
+                self.load_template()
         except Exception as e:
             messagebox.showerror("Error", f"加载失败: {e}")
 
@@ -2058,23 +2079,21 @@ class PaperSubmissionGUI:
         """打开数据库文件的快捷操作"""
         if not self._confirm_all_pending_file_fields_for_current_paper(show_popup=True):
             return
-        if self.logic.papers:
-            if not messagebox.askyesno("确认", "加载新文件将覆盖当前工作区。\n\n是否继续？(建议先保存)"):
-                return
+        if not self._confirm_replace_workspace_before_load():
+            return
             
-        if not self.logic.is_admin:
-            if messagebox.askyesno("权限限制", "加载核心数据库需要管理员权限。\n是否立即切换模式？"):
-                self._toggle_admin_mode()
-                if not self.logic.is_admin: return
+        if not self._ensure_admin_for_db_load("权限限制", "加载核心数据库需要管理员权限。\n是否立即切换模式？"):
+            return
         
         db_path = os.path.join(BASE_DIR, self.config.settings['paths']['database'])
         try:
             cnt = self.logic.load_papers_from_file(db_path)
-            self.refresh_list_view()
-            self.current_paper_index = -1
-            self.show_placeholder()
-            self._set_current_loaded_file(db_path)
-            self.update_status(f"已加载数据库: {os.path.basename(db_path)}")
+            self._apply_loaded_workspace_state(
+                db_path,
+                cnt,
+                status_text=f"已加载数据库: {os.path.basename(db_path)}",
+                show_success=False,
+            )
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
@@ -2102,51 +2121,84 @@ class PaperSubmissionGUI:
                 return candidate
         return value
 
-    def _open_file_direct(self, file_path: str, choose_app: bool = False):
-        if not file_path:
-            return messagebox.showwarning("提示", "路径为空")
-        abs_path = file_path if os.path.isabs(file_path) else os.path.join(BASE_DIR, file_path)
+    def _resolve_existing_path(self, raw_path: str, empty_msg: str = "路径为空") -> Optional[str]:
+        """统一路径解析与存在性检查，失败时直接弹窗并返回 None。"""
+        if not raw_path:
+            messagebox.showwarning("提示", empty_msg)
+            return None
+        abs_path = raw_path if os.path.isabs(raw_path) else os.path.join(BASE_DIR, raw_path)
         abs_path = os.path.normpath(os.path.abspath(abs_path))
         if not os.path.exists(abs_path):
-            return messagebox.showerror("错误", f"文件不存在: {abs_path}")
+            messagebox.showerror("错误", f"文件不存在: {abs_path}")
+            return None
+        return abs_path
+
+    def _open_file_direct(self, file_path: str, choose_app: bool = False):
+        abs_path = self._resolve_existing_path(file_path)
+        if not abs_path:
+            return
         try:
             if sys.platform == 'win32':
+                if os.path.isdir(abs_path):
+                    os.startfile(abs_path)
+                    return
                 if choose_app:
                     launched = False
+                    errors: List[str] = []
                     try:
-                        result = subprocess.run(
-                            [
-                                'powershell',
-                                '-NoProfile',
-                                '-Command',
-                                f"Start-Process -FilePath '{abs_path.replace("'", "''")}' -Verb OpenAs"
-                            ],
-                            check=False,
-                            capture_output=True,
-                            text=True,
-                        )
-                        launched = (result.returncode == 0)
-                    except Exception:
-                        launched = False
+                        proc = subprocess.Popen(['rundll32.exe', 'shell32.dll,OpenAs_RunDLL', abs_path])
+                        time.sleep(0.35)
+                        rc = proc.poll()
+                        if rc is not None:
+                            errors.append(f"OpenAs_RunDLL exited quickly rc={rc}")
+                    except Exception as ex:
+                        errors.append(f"OpenAs_RunDLL: {ex}")
 
                     if not launched:
                         try:
                             import ctypes
                             rc = ctypes.windll.shell32.ShellExecuteW(None, 'openas', abs_path, None, None, 1)
-                            launched = rc > 32
-                        except Exception:
-                            launched = False
+                            if rc <= 32:
+                                errors.append(f"ShellExecute openas rc={rc}")
+                            else:
+                                errors.append("ShellExecute openas invoked")
+                        except Exception as ex:
+                            errors.append(f"ShellExecute openas: {ex}")
 
                     if not launched:
                         try:
-                            os.startfile(abs_path)
-                            messagebox.showwarning("提示", "无法打开“打开方式”对话框，已改为默认程序打开。")
-                            launched = True
-                        except Exception:
-                            launched = False
+                            escaped_path = abs_path.replace("'", "''")
+                            result = subprocess.run(
+                                [
+                                    'powershell',
+                                    '-NoProfile',
+                                    '-Command',
+                                    f"Start-Process -LiteralPath '{escaped_path}' -Verb OpenAs"
+                                ],
+                                check=False,
+                                capture_output=True,
+                                text=True,
+                            )
+                            if result.returncode != 0:
+                                stderr_msg = (result.stderr or '').strip()
+                                stdout_msg = (result.stdout or '').strip()
+                                detail = stderr_msg or stdout_msg or f"returncode={result.returncode}"
+                                errors.append(f"PowerShell OpenAs: {detail}")
+                            else:
+                                errors.append("PowerShell OpenAs invoked")
+                        except Exception as ex:
+                            errors.append(f"PowerShell OpenAs: {ex}")
+
+                    try:
+                        os.startfile(abs_path)
+                        messagebox.showwarning("提示", "若“打开方式”未弹出，已自动改为默认程序打开。")
+                        launched = True
+                    except Exception as ex:
+                        errors.append(f"默认程序打开失败: {ex}")
 
                     if not launched:
-                        raise RuntimeError("打开方式对话框启动失败")
+                        detail = '\n'.join(errors[-4:]) if errors else 'unknown error'
+                        raise RuntimeError(f"打开方式与默认打开均失败\n{detail}")
                 else:
                     os.startfile(abs_path)
             elif sys.platform == 'darwin':
@@ -2157,12 +2209,9 @@ class PaperSubmissionGUI:
             messagebox.showerror("错误", f"无法打开: {e}")
 
     def _reveal_in_file_manager(self, path: str, select_file: bool = True):
-        if not path:
-            return messagebox.showwarning("提示", "路径为空")
-        abs_path = path if os.path.isabs(path) else os.path.join(BASE_DIR, path)
-        abs_path = os.path.normpath(os.path.abspath(abs_path))
-        if not os.path.exists(abs_path):
-            return messagebox.showerror("错误", f"文件不存在: {abs_path}")
+        abs_path = self._resolve_existing_path(path)
+        if not abs_path:
+            return
         try:
             if sys.platform == 'win32':
                 if select_file and os.path.isfile(abs_path):
@@ -2189,74 +2238,393 @@ class PaperSubmissionGUI:
         self._open_file_direct(target)
 
     def cleanup_redundant_assets(self):
-        if not messagebox.askyesno("确认", "将清理未被数据库/更新文件引用的 assets 资源，是否继续？"):
+        if not messagebox.askyesno("确认", "将按【数据库文件】引用关系清理冗余 assets 资源，是否继续？"):
             return
+
         try:
-            report = self.logic.cleanup_redundant_assets()
+            confirmed, include_update_files = self._show_cleanup_preview_dialog()
+            if not confirmed:
+                self.update_status("已取消清理（仅完成预览）")
+                return
+
+            if not include_update_files:
+                continue_without_updates = messagebox.askyesno(
+                    "二次确认",
+                    "你选择了不包含更新文件。\n"
+                    "这可能误删尚未更新到数据库、但仍被更新文件引用的资源。\n\n"
+                    "是否仍继续？"
+                )
+                if not continue_without_updates:
+                    self.update_status("已取消清理")
+                    return
+
+            report = self.logic.cleanup_redundant_assets(
+                include_update_files=include_update_files,
+                execute_delete=True
+            )
+
             deleted_uid = report.get('deleted_uid_dirs', [])
             deleted_files = report.get('deleted_files', [])
             unref = report.get('papers_with_unreferenced_assets', [])
             missing = report.get('missing_references', [])
+            invalid_suffix = report.get('invalid_suffix_references', [])
+            nonstandard = report.get('nonstandard_references', [])
 
             lines = [
+                f"对比基准: {'数据库 + 当前GUI工作区 + 更新文件' if include_update_files else '数据库 + 当前GUI工作区'}",
                 f"已删除未引用 UID 文件夹: {len(deleted_uid)}",
                 f"已删除未引用资源文件: {len(deleted_files)}",
                 f"存在未被字段引用资源的论文UID: {len(unref)}",
                 f"存在引用丢失文件的条目: {len(missing)}",
+                f"存在后缀不匹配引用的条目: {len(invalid_suffix)}",
+                f"存在路径非规范(非 assets/<uid>)的条目: {len(nonstandard)}",
                 "",
             ]
 
             if unref:
                 lines.append("[未被字段引用的论文资源]")
-                for item in unref[:20]:
-                    title = (item.get('title', '') or '')[:24]
+                for item in unref[:50]:
+                    title = (item.get('title', '') or '')[:30]
                     lines.append(f"- {title} | uid={item.get('uid')} files={len(item.get('files', []))}")
                 lines.append("")
 
             if missing:
                 lines.append("[引用丢失资源]")
-                for item in missing[:30]:
-                    lines.append(f"- {item.get('title', '')[:24]} | {item.get('field')} -> {item.get('reference')}")
+                for item in missing[:50]:
+                    lines.append(f"- {item.get('title', '')[:30]} | {item.get('field')} -> {item.get('reference')}")
 
-            messagebox.showinfo("清理完成", "\n".join(lines[:120]))
+            if invalid_suffix:
+                lines.append("\n[后缀不匹配引用]")
+                for item in invalid_suffix[:50]:
+                    lines.append(f"- {item.get('title', '')[:30]} | {item.get('field')} -> {item.get('reference')}")
+
+            if nonstandard:
+                lines.append("\n[路径非规范引用]")
+                for item in nonstandard[:50]:
+                    lines.append(f"- {item.get('title', '')[:30]} | {item.get('field')} -> {item.get('reference')}")
+
+            _, report_status_var, report_append, _ = self._open_timestamped_output_session(
+                title_base="清理完成报告",
+                status_text="清理完成",
+                include_header_separator=False,
+            )
+            report_append("\n".join(lines[:300]))
+            report_status_var.set("清理完成（详见报告窗口）")
             self.update_status("冗余资源清理完成")
         except Exception as e:
             messagebox.showerror("清理失败", str(e))
 
+    def _show_cleanup_preview_dialog(self) -> Tuple[bool, bool]:
+        """清理预览弹窗（分类折叠展示，可选择是否包含更新文件）"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("清理预览")
+        dialog.transient(self.root)
+        dialog.geometry("1180x860")
+        dialog.minsize(980, 680)
+
+        result = {'confirmed': False}
+        include_var = tk.BooleanVar(value=True)
+        nonempty_update_files = self.logic.get_nonempty_update_files()
+        report_holder: Dict[str, Any] = {'report': {}}
+
+        main = ttk.Frame(dialog, padding=10)
+        main.pack(fill=tk.BOTH, expand=True)
+
+        summary_var = tk.StringVar(value="正在加载预览...")
+        ttk.Label(main, textvariable=summary_var, justify=tk.LEFT).pack(anchor='w', pady=(0, 8))
+
+        opt_row = ttk.Frame(main)
+        opt_row.pack(fill=tk.X, pady=(0, 8))
+        include_cb = ttk.Checkbutton(
+            opt_row,
+            text="包含配置中的更新文件（默认包含）",
+            variable=include_var,
+        )
+        include_cb.pack(side=tk.LEFT)
+
+        update_hint = f"检测到有内容的更新文件: {len(nonempty_update_files)}"
+        ttk.Label(opt_row, text=update_hint, foreground="gray").pack(side=tk.LEFT, padx=(12, 0))
+
+        canvas_wrap = ttk.Frame(main)
+        canvas_wrap.pack(fill=tk.BOTH, expand=True)
+        canvas = tk.Canvas(canvas_wrap)
+        vbar = ttk.Scrollbar(canvas_wrap, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=vbar.set)
+        vbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        content = ttk.Frame(canvas)
+        win = canvas.create_window((0, 0), window=content, anchor='nw')
+
+        def _on_content_configure(_event=None):
+            canvas.configure(scrollregion=canvas.bbox('all'))
+
+        def _on_canvas_configure(event):
+            canvas.itemconfigure(win, width=event.width)
+
+        content.bind('<Configure>', _on_content_configure)
+        canvas.bind('<Configure>', _on_canvas_configure)
+
+        def _format_issue(item: Dict[str, Any]) -> str:
+            title = (item.get('title', '') or '')[:24]
+            return f"{title} | {item.get('field')} -> {item.get('reference')}"
+
+        def _render_sections(report: Dict[str, Any]):
+            for child in content.winfo_children():
+                child.destroy()
+
+            would_delete_uid = report.get('would_delete_uid_dirs', [])
+            would_delete_files = report.get('would_delete_files', [])
+            missing_preview = report.get('missing_references', [])
+            invalid_suffix_preview = report.get('invalid_suffix_references', [])
+            nonstandard_preview = report.get('nonstandard_references', [])
+
+            sections = [
+                ("将删除 UID 文件夹", [str(x) for x in would_delete_uid], True),
+                ("将删除资源文件", [str(x) for x in would_delete_files], True),
+                ("引用丢失", [_format_issue(x) for x in missing_preview], False),
+                ("后缀不匹配", [_format_issue(x) for x in invalid_suffix_preview], False),
+                ("路径非规范(非 assets/<uid>)", [_format_issue(x) for x in nonstandard_preview], False),
+            ]
+
+            for sec_title, lines, default_expand in sections:
+                sec_frame = ttk.Frame(content)
+                sec_frame.pack(fill=tk.X, pady=(0, 6))
+
+                state = {'expanded': default_expand}
+                btn = ttk.Button(sec_frame, text="")
+                btn.pack(anchor='w')
+
+                body = ttk.Frame(sec_frame)
+                body.pack(fill=tk.X, pady=(2, 0))
+
+                max_preview = 120
+                shown = lines[:max_preview]
+                extra = len(lines) - len(shown)
+                body_text = "\n".join([f"- {x}" for x in shown]) if shown else "(无)"
+                if extra > 0:
+                    body_text += f"\n... 其余 {extra} 项省略"
+
+                if sec_title == "将删除资源文件":
+                    text_height = 15
+                elif sec_title in ("将删除 UID 文件夹", "路径非规范(非 assets/<uid>)"):
+                    text_height = 15
+                else:
+                    text_height = 15
+
+                text = tk.Text(body, height=text_height, wrap='word')
+                text.insert('1.0', body_text)
+                text.configure(state='disabled')
+                text.pack(fill=tk.X, expand=True)
+
+                def _toggle(_body=body, _state=state, _btn=btn, _title=sec_title, _count=len(lines)):
+                    _state['expanded'] = not _state['expanded']
+                    if _state['expanded']:
+                        _body.pack(fill=tk.X, pady=(2, 0))
+                        _btn.config(text=f"▼ {_title} ({_count})")
+                    else:
+                        _body.pack_forget()
+                        _btn.config(text=f"▶ {_title} ({_count})")
+
+                btn.config(command=_toggle)
+                if state['expanded']:
+                    btn.config(text=f"▼ {sec_title} ({len(lines)})")
+                else:
+                    body.pack_forget()
+                    btn.config(text=f"▶ {sec_title} ({len(lines)})")
+
+            _on_content_configure()
+
+        def _reload_preview():
+            include_updates = bool(include_var.get())
+            report = self.logic.cleanup_redundant_assets(
+                include_update_files=include_updates,
+                execute_delete=False,
+            )
+            report_holder['report'] = report
+
+            summary = (
+                f"对比基准: {'数据库 + 当前GUI工作区 + 更新文件' if include_updates else '数据库 + 当前GUI工作区'}\n"
+                f"将删除未引用 UID 文件夹: {len(report.get('would_delete_uid_dirs', []))} | "
+                f"将删除未引用资源文件: {len(report.get('would_delete_files', []))} | "
+                f"引用丢失: {len(report.get('missing_references', []))} | "
+                f"后缀不匹配: {len(report.get('invalid_suffix_references', []))} | "
+                f"路径非规范: {len(report.get('nonstandard_references', []))}"
+            )
+            summary_var.set(summary)
+            _render_sections(report)
+
+        include_cb.configure(command=_reload_preview)
+        _reload_preview()
+
+        btn_row = ttk.Frame(main)
+        btn_row.pack(fill=tk.X, pady=(10, 0))
+
+        def _confirm():
+            result['confirmed'] = True
+            dialog.destroy()
+
+        def _cancel():
+            result['confirmed'] = False
+            dialog.destroy()
+
+        ttk.Button(btn_row, text="取消", command=_cancel).pack(side=tk.RIGHT, padx=(6, 0))
+        ttk.Button(btn_row, text="确认执行删除", command=_confirm).pack(side=tk.RIGHT)
+
+        dialog.protocol("WM_DELETE_WINDOW", _cancel)
+        dialog.grab_set()
+        dialog.focus_set()
+        self.root.wait_window(dialog)
+        return bool(result['confirmed']), bool(include_var.get())
+
     def run_update_script(self):
-        if messagebox.askyesno("Run Update", "将合并更新文件到数据库并生成 README。\n此操作会修改核心数据库。\n\n是否继续？"):
-            cmd = [sys.executable, os.path.join(BASE_DIR, "src/update.py")]
-            # 使用 Popen 不阻塞 GUI，但无法实时获取输出到 status bar (为了简单)
-            # 或者使用 invoke 方式
-            try:
-                subprocess.Popen(cmd, cwd=BASE_DIR)
-                self.update_status("正在后台运行更新脚本...")
-            except Exception as e:
-                messagebox.showerror("Error", str(e))
+        if not messagebox.askyesno(
+            "运行更新",
+            "该按钮会执行更新流程：将更新文件合并到数据库，并尝试生成 README。\n"
+            "这会修改核心数据库文件。\n\n"
+            "运行后会在文本日志窗口中显示详细结果与错误信息。\n\n"
+            "是否继续？"
+        ):
+            return
+
+        cmd = [sys.executable, os.path.join(BASE_DIR, "src/update.py")]
+        self._run_command_with_output_window(
+            title_base="更新脚本输出",
+            cmd=cmd,
+            status_running="正在运行更新脚本...",
+            status_done="更新脚本执行完成",
+        )
 
     def run_validate_script(self):
+        if not messagebox.askyesno(
+            "运行验证",
+            "该按钮会执行统一验证流程：检查数据库和更新文件的完整性、冲突及资源引用。\n\n"
+            "运行后会在文本日志窗口中显示详细结果与错误信息。\n\n"
+            "是否继续？"
+        ):
+            return
+
         cmd = [sys.executable, os.path.join(BASE_DIR, "src/validate.py")]
+        self._run_command_with_output_window(
+            title_base="验证脚本输出",
+            cmd=cmd,
+            status_running="正在运行验证脚本...",
+            status_done="验证脚本执行完成",
+        )
+
+    def _open_timestamped_output_session(
+        self,
+        title_base: str,
+        status_text: str = "",
+        include_header_separator: bool = True,
+    ) -> Tuple[tk.Toplevel, tk.StringVar, Any, str]:
+        """统一创建带时间戳的输出窗口会话。"""
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        title = f"{title_base} [{ts}]"
+        log_win, status_var, append_log = self._open_text_output_window(title=title, status_text=status_text)
+        append_log(f"[{ts}] {title_base}")
+        if include_header_separator:
+            append_log("=" * 70)
+        return log_win, status_var, append_log, ts
+
+    def _run_command_with_output_window(self, title_base: str, cmd: List[str], status_running: str, status_done: str):
+        """运行命令并将输出实时显示到文本窗口"""
+        log_win, status_var, append_log, _ = self._open_timestamped_output_session(
+            title_base=title_base,
+            status_text="启动中...",
+            include_header_separator=False,
+        )
+
+        append_log(f"$ {' '.join(cmd)}")
+        append_log(f"cwd: {BASE_DIR}")
+        append_log("=" * 70)
+
+        def worker():
+            try:
+                self.root.after(0, lambda: status_var.set(status_running))
+                self.root.after(0, lambda: self.update_status(status_running))
+
+                env = os.environ.copy()
+                env['PYTHONIOENCODING'] = 'utf-8'
+                env['PYTHONUTF8'] = '1'
+
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=BASE_DIR,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace',
+                    bufsize=1,
+                    env=env,
+                )
+
+                if proc.stdout is not None:
+                    for line in proc.stdout:
+                        self.root.after(0, lambda l=line: append_log(l))
+
+                return_code = proc.wait()
+                self.root.after(0, lambda: append_log("=" * 70))
+                self.root.after(0, lambda: append_log(f"进程结束，退出码: {return_code}"))
+                self.root.after(0, lambda: status_var.set(f"已结束（退出码: {return_code}）"))
+                self.root.after(0, lambda: self.update_status(status_done if return_code == 0 else f"{status_done}（退出码: {return_code}）"))
+            except Exception as e:
+                self.root.after(0, lambda: append_log(f"运行失败: {e}"))
+                self.root.after(0, lambda: status_var.set("运行失败"))
+                self.root.after(0, lambda: self.update_status("脚本运行失败"))
+
+        threading.Thread(target=worker, daemon=True).start()
+
         try:
-            # 开启新窗口运行以便查看输出
-            if sys.platform == 'win32':
-                subprocess.Popen(cmd, cwd=BASE_DIR, creationflags=subprocess.CREATE_NEW_CONSOLE)
-            else:
-                subprocess.Popen(cmd, cwd=BASE_DIR)
-            self.update_status("已启动验证脚本...")
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
+            log_win.lift()
+            log_win.focus_force()
+        except Exception:
+            pass
+
+    def _open_text_output_window(self, title: str, status_text: str = "") -> Tuple[tk.Toplevel, tk.StringVar, Any]:
+        """创建统一文本输出窗口（仅展示日志，不提供清空/关闭按钮）"""
+        log_win = tk.Toplevel(self.root)
+        log_win.title(title)
+        log_win.geometry("980x680")
+        log_win.minsize(760, 480)
+
+        main = ttk.Frame(log_win, padding=10)
+        main.pack(fill=tk.BOTH, expand=True)
+
+        status_var = tk.StringVar(value=status_text or "")
+        ttk.Label(main, textvariable=status_var).pack(anchor='w', pady=(0, 8))
+
+        text = scrolledtext.ScrolledText(main, wrap=tk.WORD)
+        text.pack(fill=tk.BOTH, expand=True)
+        text.configure(state='disabled')
+
+        def append_log(line: str):
+            if not (text and text.winfo_exists()):
+                return
+            text.configure(state='normal')
+            text.insert(tk.END, line)
+            if not line.endswith('\n'):
+                text.insert(tk.END, '\n')
+            text.see(tk.END)
+            text.configure(state='disabled')
+
+        return log_win, status_var, append_log
 
 
 
 
     def fill_from_zotero_meta(self):
-        if self.current_paper_index < 0: return messagebox.showwarning("提示", "请先选择论文")
+        if not self._require_selected_paper("提示", "请先选择论文"):
+            return
         s = self._show_zotero_input_dialog("填充表单")
         if not s: return
         new_p = self.logic.process_zotero_json(s)
         if not new_p: return messagebox.showwarning("提示", "无有效数据")
-        
-        real_idx = self.filtered_indices[self.current_paper_index]
+
+        real_idx = self._get_current_real_index()
+        if real_idx < 0:
+            return
         conflicts, updates = self.logic.get_zotero_fill_updates(new_p[0], real_idx)
         
         if not updates: return messagebox.showinfo("提示", "Zotero数据中没有有效内容可填充")
@@ -2292,9 +2660,16 @@ class PaperSubmissionGUI:
     def ai_toolbox_window(self):
         self.ai_toolbox_window_impl()
 
+    def _require_selected_paper(self, warning_title: Optional[str] = None, warning_message: str = "") -> bool:
+        """检查是否已选择论文；可选弹出原有警告文案。"""
+        if self.current_paper_index >= 0:
+            return True
+        if warning_title is not None:
+            messagebox.showwarning(warning_title, warning_message)
+        return False
+
     def ai_toolbox_window_impl(self):
-        if self.current_paper_index < 0:
-            messagebox.showwarning("Warning", "请先选择一篇论文")
+        if not self._require_selected_paper("Warning", "请先选择一篇论文"):
             return
 
         if hasattr(self, '_ai_toolbox') and self._ai_toolbox.winfo_exists():
@@ -2332,8 +2707,7 @@ class PaperSubmissionGUI:
             
     def run_ai_task(self, target_func, *args):
         """通用AI异步执行器"""
-        if self.current_paper_index < 0:
-            messagebox.showwarning("Warning", "请先选择一篇论文")
+        if not self._require_selected_paper("Warning", "请先选择一篇论文"):
             return
             
         self.update_status("🤖 AI 正在处理中，请稍候...")
@@ -2352,8 +2726,10 @@ class PaperSubmissionGUI:
 
     def save_current_ui_to_paper(self):
         """强制将当前UI值写回Paper对象 (供AI任务前调用)"""
-        if self.current_paper_index < 0: return
-        paper = self.logic.papers[self.current_paper_index]
+        ridx = self._get_current_real_index()
+        if ridx < 0:
+            return
+        paper = self.logic.papers[ridx]
         
         for var, widget in self.form_fields.items():
             if var in ['category', 'pipeline_image', 'paper_file']: continue 
@@ -2821,8 +3197,8 @@ class PaperSubmissionGUI:
             y = widget.winfo_rooty() + widget.winfo_height() + 5
             tip = tk.Toplevel(widget)
             tip.wm_overrideredirect(True)
-            tip.wm_geometry(f"+{x}+{y}")
             ttk.Label(tip, text=text, background="#ffffe0", relief="solid", borderwidth=1, padding=5).pack()
+            self._place_tooltip_within_root(tip, x, y)
             self._inline_tooltip = tip
             try:
                 if hasattr(self, '_inline_tooltip_after_id') and self._inline_tooltip_after_id:
@@ -2877,13 +3253,56 @@ class PaperSubmissionGUI:
         self.root.unbind_all("<Button-4>")
         self.root.unbind_all("<Button-5>")
 
+    def _place_tooltip_within_root(self, tip_window, preferred_x: int, preferred_y: int, margin: int = 8):
+        try:
+            self.root.update_idletasks()
+            tip_window.update_idletasks()
+
+            root_x = self.root.winfo_rootx()
+            root_y = self.root.winfo_rooty()
+            root_w = self.root.winfo_width()
+            root_h = self.root.winfo_height()
+
+            if root_w <= 1 or root_h <= 1:
+                tip_window.wm_geometry(f"+{preferred_x}+{preferred_y}")
+                return
+
+            tip_w = tip_window.winfo_reqwidth()
+            tip_h = tip_window.winfo_reqheight()
+
+            min_x = root_x + margin
+            min_y = root_y + margin
+            max_x = root_x + root_w - tip_w - margin
+            max_y = root_y + root_h - tip_h - margin
+
+            if max_x < min_x:
+                max_x = min_x
+            if max_y < min_y:
+                max_y = min_y
+
+            x = max(min_x, min(preferred_x, max_x))
+            y = max(min_y, min(preferred_y, max_y))
+            tip_window.wm_geometry(f"+{x}+{y}")
+        except Exception:
+            try:
+                tip_window.wm_geometry(f"+{preferred_x}+{preferred_y}")
+            except Exception:
+                pass
+
     def create_tooltip(self, widget, text):
         def enter(event):
+            try:
+                if getattr(self, 'tooltip', None):
+                    self.tooltip.destroy()
+                    self.tooltip = None
+            except Exception:
+                self.tooltip = None
+
             x, y = widget.winfo_rootx() + 20, widget.winfo_rooty() + 20
             self.tooltip = tk.Toplevel(widget)
             self.tooltip.wm_overrideredirect(True)
-            self.tooltip.wm_geometry(f"+{x}+{y}")
             ttk.Label(self.tooltip, text=text, background="#ffffe0", relief="solid", borderwidth=1, padding=5).pack()
+            self._place_tooltip_within_root(self.tooltip, x, y)
         def leave(event):
             if getattr(self, 'tooltip', None):
                 self.tooltip.destroy()
@@ -3047,10 +3466,10 @@ class PaperSubmissionGUI:
         
         ttk.Label(header_frame, text="字段名", width=15, font=h_font).grid(row=0, column=0, sticky="w")
         ttk.Label(header_frame, text="  ", width=4).grid(row=0, column=1) 
-        ttk.Label(header_frame, text="基论文 (保留)", foreground="blue", font=h_font).grid(row=0, column=2, sticky="w")
+        ttk.Label(header_frame, text="基论文", foreground="blue", font=h_font).grid(row=0, column=2, sticky="w")
         ttk.Label(header_frame, text="", width=2).grid(row=0, column=3) 
         ttk.Label(header_frame, text="  ", width=4).grid(row=0, column=4) # Checkbox Col
-        ttk.Label(header_frame, text="冲突/新论文 (删除)", foreground="red", font=h_font).grid(row=0, column=5, sticky="w")
+        ttk.Label(header_frame, text="冲突/新论文", foreground="red", font=h_font).grid(row=0, column=5, sticky="w")
 
         # 2. 滚动区域
         canvas_frame = ttk.Frame(win)
@@ -3215,7 +3634,20 @@ class PaperSubmissionGUI:
 
     def _on_drag_motion(self, event):
         """拖拽中预览 (仅移动 Ghost，不改变 Listbox 选中)"""
-        if not hasattr(self, 'drag_item') or not self.drag_item: return
+        if self._drag_press_item and not self.drag_item and self._drag_press_xy:
+            dx = abs(event.x - self._drag_press_xy[0])
+            dy = abs(event.y - self._drag_press_xy[1])
+            if max(dx, dy) >= self._drag_min_distance:
+                self.drag_item = self._drag_press_item
+                try:
+                    item_text = self.paper_tree.item(self.drag_item, "values")[1]
+                except Exception:
+                    item_text = ""
+                self._create_drag_ghost(item_text)
+
+        if not self.drag_item:
+            return
+
         self._update_drag_ghost(event)
         
         # 可选：绘制一条插入线 (TreeView 比较难实现插入线，这里保持简单，不乱动 Selection)
@@ -3223,7 +3655,10 @@ class PaperSubmissionGUI:
 
     def _on_drag_release(self, event):
         self._destroy_drag_ghost()
-        if not hasattr(self, 'drag_item') or not self.drag_item: return
+        if not self.drag_item:
+            self._drag_press_item = None
+            self._drag_press_xy = None
+            return
         
         # 检测释放位置是否在 Treeview 内
         tv_width = self.paper_tree.winfo_width()
@@ -3232,6 +3667,8 @@ class PaperSubmissionGUI:
         if event.x < 0 or event.x > tv_width or event.y < 0 or event.y > tv_height:
             # 在框外释放，取消移动
             self.drag_item = None
+            self._drag_press_item = None
+            self._drag_press_xy = None
             return
 
         target_item = self.paper_tree.identify_row(event.y)
@@ -3252,6 +3689,8 @@ class PaperSubmissionGUI:
                 pass 
             
         self.drag_item = None
+        self._drag_press_item = None
+        self._drag_press_xy = None
 
 
     def _on_text_undo(self, event):

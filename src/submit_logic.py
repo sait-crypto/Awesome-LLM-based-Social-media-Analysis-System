@@ -86,26 +86,17 @@ class SubmitLogic:
         if self._is_database_file(filepath) and not self.is_admin:
             raise PermissionError("需要管理员权限才能打开数据库文件")
 
-        success,self.papers = self.update_utils.read_data(filepath)
-        if not success:
-            print(f"加载文件失败: {filepath}")
-        self.current_file_path = filepath
-        return len(self.papers)
+        return self._load_papers_into_workspace(filepath, set_current_file=True)
 
 
     def load_existing_updates(self) -> int:
         """加载默认更新文件中的论文"""
-        count = 0
         if self.primary_update_file and os.path.exists(self.primary_update_file):
             try:
-                # 使用通用的 read_data 接口
-                success,self.papers = self.update_utils.read_data(self.primary_update_file)
-                if not success:                    
-                    print(f"加载更新文件失败: {self.primary_update_file}")
-                count = len(self.papers)
+                return self._load_papers_into_workspace(self.primary_update_file, set_current_file=False)
             except Exception as e:
                 raise Exception(f"加载更新文件失败: {e}")
-        return count
+        return 0
 
     def _is_database_file(self, filepath: str) -> bool:
         """检查路径是否为核心数据库"""
@@ -118,6 +109,42 @@ class SubmitLogic:
             return os.path.samefile(filepath, db_path)
         except:
             return os.path.abspath(filepath) == os.path.abspath(db_path)
+
+    def _read_existing_papers(self, filepath: str) -> List[Paper]:
+        """读取已有文件中的论文；失败时返回空列表并输出日志。"""
+        if not filepath or not os.path.exists(filepath):
+            return []
+        success, papers = self.update_utils.read_data(filepath)
+        if not success:
+            print(f"加载文件失败: {filepath}")
+            return []
+        return papers
+
+    def _load_papers_into_workspace(self, filepath: str, set_current_file: bool = True) -> int:
+        """统一加载逻辑：读取文件并写入当前工作集。"""
+        self.papers = self._read_existing_papers(filepath)
+        if set_current_file:
+            self.current_file_path = filepath
+        return len(self.papers)
+
+    def _prepare_paper_for_save(
+        self,
+        paper: Paper,
+        *,
+        normalize_assets: bool = False,
+        ensure_uid: bool = False,
+    ) -> Paper:
+        """统一保存前预处理：资源规范化、关键字段清洗、UID 补全。"""
+        if normalize_assets:
+            paper = self.update_utils.normalize_assets(paper)
+
+        paper.doi = clean_doi(paper.doi, self.conflict_marker) if paper.doi else ""
+        paper.category = self.update_utils.normalize_category_value(paper.category, self.config)
+
+        if ensure_uid:
+            self.ensure_paper_uid(paper)
+
+        return paper
 
     # ================= 筛选与搜索 =================
 
@@ -220,10 +247,10 @@ class SubmitLogic:
                 self.update_utils.normalize_assets(p)
             self.update_utils.write_data(target_path, self.papers)
 
-    def save_to_file_incremental(self, target_path: str, conflict_decisions: Dict[str, str]):
+    def save_to_file_incremental(self, target_path: str, conflict_decisions: Dict[Tuple[str, str], str]):
         """
         增量模式：读取目标文件，根据 decisions 决定如何合并当前的新增项
-        conflict_decisions: { paper_key: 'overwrite' | 'skip' }
+        conflict_decisions: { (doi, title): 'overwrite' | 'skip' }
         """
         success, existing_papers = self.update_utils.read_data(target_path)
         if not success: existing_papers = []
@@ -234,9 +261,11 @@ class SubmitLogic:
         papers_to_append = []
         
         for p in self.papers:
-            # 规范化
-            self.update_utils.normalize_assets(p)
-            p.doi = clean_doi(p.doi, self.conflict_marker)
+            p = self._prepare_paper_for_save(
+                p,
+                normalize_assets=True,
+                ensure_uid=False,
+            )
             
             key = p.get_key()
             
@@ -312,34 +341,17 @@ class SubmitLogic:
 
     def check_save_conflicts(self, target_path: str) -> Tuple[List[Paper], bool]:
         """检查保存时的冲突，返回(合并后的列表, 是否有冲突)"""
-        existing_papers = []
-        if os.path.exists(target_path):
-            success,existing_papers = self.update_utils.read_data(target_path)
-            if not success:
-                print(f"加载文件失败: {target_path}")
+        existing_papers = self._read_existing_papers(target_path)
         
         merged_papers = list(existing_papers)
-        existing_map = {}
-        for p in existing_papers:
-            key = p.get_key()
-            existing_map[key] = p
+        existing_keys = {p.get_key() for p in existing_papers}
 
         has_conflict = False
         
         for paper in self.papers:
-            # 预处理
-            paper.doi = clean_doi(paper.doi, self.conflict_marker) if paper.doi else ""
-            paper.category = self.update_utils.normalize_category_value(paper.category, self.config)
-            
-            # 确保 UID (如果不保存只是检查，可以先不生成，但为了统一逻辑，这里确保一下)
-            if not paper.uid:
-                paper.uid = generate_paper_uid(getattr(paper, 'title', ''), getattr(paper, 'doi', ''))
-
-            key = paper.get_key()
-            if key in existing_map:
+            self._prepare_paper_for_save(paper, normalize_assets=False, ensure_uid=True)
+            if paper.get_key() in existing_keys:
                 has_conflict = True
-            else:
-                pass 
                 
         return merged_papers, has_conflict
 
@@ -357,11 +369,7 @@ class SubmitLogic:
             return self.papers
 
 
-        existing_papers = []
-        if os.path.exists(target_path):
-            success,existing_papers = self.update_utils.read_data(target_path)
-            if not success:
-                print(f"加载文件失败: {target_path}")
+        existing_papers = self._read_existing_papers(target_path)
         
         merged_papers = list(existing_papers)
         # 建立映射: Key -> List index
@@ -370,22 +378,23 @@ class SubmitLogic:
             key = p.get_key()
             existing_map[key] = idx
 
-        for paper in self.papers:
-            # 1. 规范化 Assets (移动文件到 assets/{uid})
-            # 这是一个副作用操作，会将 temp 文件归档
-            paper = self.update_utils.normalize_assets(paper)
+        overwrite_modes = {'overwrite_duplicates', 'overwrite_all'}
+        skip_modes = {'skip_duplicates', 'skip_all'}
 
-            # 2. 规范化其他字段
-            paper.doi = clean_doi(paper.doi, self.conflict_marker) if paper.doi else ""
-            paper.category = self.update_utils.normalize_category_value(paper.category, self.config)
+        for paper in self.papers:
+            paper = self._prepare_paper_for_save(
+                paper,
+                normalize_assets=True,
+                ensure_uid=False,
+            )
             
             key = paper.get_key()
             
             if key in existing_map:
-                if conflict_mode == 'overwrite_duplicates' or conflict_mode == 'overwrite_all':
+                if conflict_mode in overwrite_modes:
                     idx = existing_map[key]
                     merged_papers[idx] = paper
-                elif conflict_mode == 'skip_duplicates' or conflict_mode == 'skip_all':
+                elif conflict_mode in skip_modes:
                     continue
                 # 如果是逐个询问模式，上层逻辑应该已经处理好了 papers 列表的去留，
                 # 这里默认按照 overwrite 处理剩余的
@@ -400,12 +409,7 @@ class SubmitLogic:
 
     def load_from_template(self, filepath: str) -> int:
         """从文件加载论文"""
-        success, new_papers = self.update_utils.read_data(filepath)
-        if not success:
-            print(f"加载文件失败: {filepath}")
-            return 0
-        self.papers = new_papers
-        return len(self.papers)
+        return self._load_papers_into_workspace(filepath, set_current_file=False)
     
     # ================= 管理员权限 =================
 
@@ -438,8 +442,7 @@ class SubmitLogic:
         """批量添加Zotero论文"""
         # 为新论文分配 UID
         for p in papers:
-            if not p.uid:
-                p.uid = generate_paper_uid(getattr(p, 'title', ''), getattr(p, 'doi', ''))
+            self.ensure_paper_uid(p)
         self.papers.extend(papers)
         return len(papers)
 
@@ -517,6 +520,22 @@ class SubmitLogic:
         except Exception as e:
             return False, "", f"复制失败: {e}"
 
+    def validate_single_asset_reference(self, field_name: str, raw_path: str) -> Tuple[bool, str]:
+        """使用统一验证函数校验单个引用路径（存在性 + 后缀）"""
+        if field_name not in ('pipeline_image', 'paper_file'):
+            return False, f"不支持的字段: {field_name}"
+        paper = Paper()
+        setattr(paper, field_name, (raw_path or '').strip())
+        valid, errors = self.update_utils.validate_and_normalize_asset_fields(
+            paper,
+            [field_name],
+            normalize=False,
+            strict=True,
+        )
+        if valid:
+            return True, ""
+        return False, (errors[0] if errors else "资源验证失败")
+
     def confirm_file_field_for_paper(self, paper: Paper, field_name: str, raw_value: Optional[str] = None) -> Tuple[bool, str, str]:
         """对单个 file 字段执行规范化（复制到 assets/{uid}/ 并回填标准相对路径）"""
         if field_name not in ('pipeline_image', 'paper_file'):
@@ -530,16 +549,16 @@ class SubmitLogic:
         if not raw_val:
             return True, "", ""
 
-        # 预检查：字段中的每个路径都必须可解析并存在
-        items = [x.strip() for x in str(raw_val).split('|') if x.strip()]
-        for item in items:
-            resolved = self.update_utils.resolve_asset_path(item, field_name)
-            if not resolved or not os.path.exists(resolved):
-                return False, "", f"文件不存在或无法解析: {item}"
-
         try:
             setattr(paper, field_name, str(raw_val).strip())
-            self.update_utils.normalize_asset_fields(paper, [field_name], strict=True)
+            valid, errors = self.update_utils.validate_and_normalize_asset_fields(
+                paper,
+                [field_name],
+                normalize=True,
+                strict=True,
+            )
+            if not valid:
+                return False, "", (errors[0] if errors else "资源验证失败")
             return True, getattr(paper, field_name, "") or "", ""
         except Exception as e:
             # 事务性回滚，保证失败时无修改
@@ -564,35 +583,61 @@ class SubmitLogic:
     def _iter_existing_update_files(self) -> List[str]:
         paths = self.settings['paths']
         out: List[str] = []
+
+        def _resolve_abs(path_val: Optional[str]) -> Optional[str]:
+            if not path_val:
+                return None
+            p = path_val if os.path.isabs(path_val) else os.path.join(BASE_DIR, path_val)
+            return os.path.normpath(os.path.abspath(p))
+
         for k in ['update_json', 'update_csv', 'my_update_json', 'my_update_csv']:
             p = paths.get(k)
-            if p and os.path.exists(p):
-                out.append(p)
+            p_abs = _resolve_abs(p)
+            if p_abs and os.path.exists(p_abs):
+                out.append(p_abs)
         for p in paths.get('extra_update_files_list', []):
-            if p and os.path.exists(p):
-                out.append(p)
+            p_abs = _resolve_abs(p)
+            if p_abs and os.path.exists(p_abs):
+                out.append(p_abs)
         return list(dict.fromkeys(out))
 
-    def _collect_asset_reference_papers(self) -> List[Paper]:
+    def get_nonempty_update_files(self) -> List[Dict[str, Any]]:
+        """返回配置中存在且有内容的更新文件清单"""
+        files: List[Dict[str, Any]] = []
+        for fpath in self._iter_existing_update_files():
+            success, papers = self.update_utils.read_data(fpath)
+            if success and papers:
+                files.append({'path': fpath, 'count': len(papers)})
+        return files
+
+    def _collect_asset_reference_papers(self, include_update_files: bool = False) -> List[Paper]:
         collected: List[Paper] = []
 
         db_path = self.settings['paths'].get('database')
-        if db_path and os.path.exists(db_path):
-            success, papers = self.update_utils.read_data(db_path)
+        if db_path:
+            db_abs = db_path if os.path.isabs(db_path) else os.path.join(BASE_DIR, db_path)
+            db_abs = os.path.normpath(os.path.abspath(db_abs))
+        else:
+            db_abs = ""
+
+        if db_abs and os.path.exists(db_abs):
+            success, papers = self.update_utils.read_data(db_abs)
             if success:
                 collected.extend(papers)
 
-        for fpath in self._iter_existing_update_files():
-            success, papers = self.update_utils.read_data(fpath)
-            if success:
-                collected.extend(papers)
+        if include_update_files:
+            for fpath in self._iter_existing_update_files():
+                success, papers = self.update_utils.read_data(fpath)
+                if success:
+                    collected.extend(papers)
 
+        # 当前 GUI 工作区中正在编辑的论文也视作有效引用来源
         if self.papers:
             collected.extend(self.papers)
 
         return collected
 
-    def cleanup_redundant_assets(self) -> Dict[str, Any]:
+    def cleanup_redundant_assets(self, include_update_files: bool = False, execute_delete: bool = False) -> Dict[str, Any]:
         """
         清除冗余资源并返回审计报告：
         - 未被任何论文条目引用的 uid 文件夹
@@ -600,41 +645,77 @@ class SubmitLogic:
         - 论文字段引用缺失的文件
         """
         assets_root = os.path.join(BASE_DIR, self.assets_dir)
+        assets_root_norm = os.path.normpath(os.path.abspath(assets_root))
+
+        def _is_within_assets(path_val: str) -> bool:
+            try:
+                common = os.path.commonpath([assets_root_norm, os.path.normpath(os.path.abspath(path_val))])
+                return common == assets_root_norm
+            except Exception:
+                return False
+
         report: Dict[str, Any] = {
+            'mode': 'execute' if execute_delete else 'preview',
             'deleted_uid_dirs': [],
             'deleted_files': [],
+            'would_delete_uid_dirs': [],
+            'would_delete_files': [],
             'papers_with_unreferenced_assets': [],
             'missing_references': [],
+            'invalid_suffix_references': [],
+            'nonstandard_references': [],
         }
         if not os.path.isdir(assets_root):
             return report
 
-        papers = self._collect_asset_reference_papers()
+        papers = self._collect_asset_reference_papers(include_update_files=include_update_files)
 
         uid_to_refs: Dict[str, set] = {}
+        uid_to_referenced_assets_abs: Dict[str, set] = {}
         uid_to_title: Dict[str, str] = {}
+
+        def _append_issue_entries(uid: str, title: str, analyses: List[Dict[str, Any]]):
+            for item in analyses:
+                issue_entry_base = {
+                    'uid': uid,
+                    'title': title,
+                    'field': item.get('field', ''),
+                    'reference': item.get('reference', ''),
+                    'resolved': item.get('resolved'),
+                }
+                for issue in item.get('issues', []):
+                    kind = issue.get('kind')
+                    if kind == 'missing':
+                        report['missing_references'].append(dict(issue_entry_base))
+                    elif kind == 'invalid_suffix':
+                        report['invalid_suffix_references'].append(dict(issue_entry_base))
+                    elif kind == 'nonstandard_path':
+                        report['nonstandard_references'].append(dict(issue_entry_base))
+
         for p in papers:
             uid = (getattr(p, 'uid', '') or '').strip()
             if not uid:
                 continue
+            title = getattr(p, 'title', '') or ''
             if uid not in uid_to_title:
-                uid_to_title[uid] = getattr(p, 'title', '') or ''
+                uid_to_title[uid] = title
+
             ref_set = uid_to_refs.setdefault(uid, set())
-            for field_name in ('pipeline_image', 'paper_file'):
-                raw_val = getattr(p, field_name, '') or ''
-                if not raw_val:
-                    continue
-                parts = [x.strip() for x in str(raw_val).split('|') if x.strip()]
-                for item in parts:
-                    ref_set.add(item.replace('\\', '/'))
-                    resolved = self.update_utils.resolve_asset_path(item, field_name)
-                    if not resolved or not os.path.exists(resolved):
-                        report['missing_references'].append({
-                            'uid': uid,
-                            'title': getattr(p, 'title', ''),
-                            'field': field_name,
-                            'reference': item,
-                        })
+            resolved_assets = uid_to_referenced_assets_abs.setdefault(uid, set())
+
+            analyses = self.update_utils.analyze_asset_fields(p, ['pipeline_image', 'paper_file'])
+            for item in analyses:
+                ref = str(item.get('reference') or '').replace('\\', '/')
+                if ref:
+                    ref_set.add(ref)
+
+                resolved = item.get('resolved')
+                if resolved and item.get('exists'):
+                    resolved_norm = os.path.normpath(resolved)
+                    if _is_within_assets(resolved_norm):
+                        resolved_assets.add(resolved_norm)
+
+            _append_issue_entries(uid, title, analyses)
 
         for entry in os.listdir(assets_root):
             if entry == 'temp':
@@ -645,15 +726,13 @@ class SubmitLogic:
             uid = entry
             ref_set = uid_to_refs.get(uid, set())
             if not ref_set:
-                shutil.rmtree(uid_dir, ignore_errors=True)
-                report['deleted_uid_dirs'].append(uid)
+                report['would_delete_uid_dirs'].append(uid)
+                if execute_delete and _is_within_assets(uid_dir):
+                    shutil.rmtree(uid_dir, ignore_errors=True)
+                    report['deleted_uid_dirs'].append(uid)
                 continue
 
-            referenced_files_abs = set()
-            for rel_ref in ref_set:
-                ref_abs = os.path.join(BASE_DIR, rel_ref)
-                if os.path.exists(ref_abs):
-                    referenced_files_abs.add(os.path.normpath(ref_abs))
+            referenced_files_abs = uid_to_referenced_assets_abs.get(uid, set())
 
             unreferenced_here = []
             for root, _, files in os.walk(uid_dir):
@@ -662,11 +741,13 @@ class SubmitLogic:
                     if abs_file not in referenced_files_abs:
                         rel_file = os.path.relpath(abs_file, BASE_DIR).replace('\\', '/')
                         unreferenced_here.append(rel_file)
-                        try:
-                            os.remove(abs_file)
-                            report['deleted_files'].append(rel_file)
-                        except Exception:
-                            pass
+                        report['would_delete_files'].append(rel_file)
+                        if execute_delete and _is_within_assets(abs_file):
+                            try:
+                                os.remove(abs_file)
+                                report['deleted_files'].append(rel_file)
+                            except Exception:
+                                pass
 
             if unreferenced_here:
                 report['papers_with_unreferenced_assets'].append({
@@ -675,16 +756,34 @@ class SubmitLogic:
                     'files': unreferenced_here,
                 })
 
+        # 去重，避免重复报告
+        def _dedup_dict_list(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            seen = set()
+            out = []
+            for item in items:
+                key = (
+                    item.get('uid'), item.get('field'),
+                    item.get('reference'), item.get('resolved')
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(item)
+            return out
+
+        report['missing_references'] = _dedup_dict_list(report['missing_references'])
+        report['invalid_suffix_references'] = _dedup_dict_list(report['invalid_suffix_references'])
+        report['nonstandard_references'] = _dedup_dict_list(report['nonstandard_references'])
+        report['would_delete_uid_dirs'] = list(dict.fromkeys(report['would_delete_uid_dirs']))
+        report['would_delete_files'] = list(dict.fromkeys(report['would_delete_files']))
+        report['deleted_uid_dirs'] = list(dict.fromkeys(report['deleted_uid_dirs']))
+        report['deleted_files'] = list(dict.fromkeys(report['deleted_files']))
+
         return report
 
 
 
     # ================= PR 提交逻辑 =================
-
-    def has_update_files(self) -> bool:
-        """检查是否存在更新文件"""
-        # 只要主更新文件存在即可
-        return self.primary_update_file and os.path.exists(self.primary_update_file)
 
     def execute_pr_submission(self, status_callback, result_callback, error_callback):
         """执行PR提交的线程函数"""

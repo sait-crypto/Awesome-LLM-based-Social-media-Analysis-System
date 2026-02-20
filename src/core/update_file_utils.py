@@ -18,6 +18,8 @@ from src.utils import ensure_directory, backup_file, get_current_timestamp, gene
 
 class UpdateFileUtils:
     """更新文件工具类 (CSV/JSON/Assets)"""
+
+    ASSET_FIELDS = ('pipeline_image', 'paper_file')
     
     def __init__(self):
         self.config = get_config_instance()
@@ -339,11 +341,178 @@ class UpdateFileUtils:
         3. 确保 assets/{uid} 目录存在
         4. 将文件移动/复制到 assets/{uid}/ 并更新字段为相对路径
         """
-        return self.normalize_asset_fields(paper, ['pipeline_image', 'paper_file'])
+        return self.normalize_asset_fields(paper, list(self.ASSET_FIELDS))
+
+    def _filter_asset_fields(self, fields: List[str]) -> List[str]:
+        return [f for f in fields if f in self.ASSET_FIELDS]
+
+    def _expected_suffixes_for_field(self, asset_field: str) -> set:
+        if asset_field == 'pipeline_image':
+            return {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'}
+        if asset_field == 'paper_file':
+            return {'.pdf'}
+        return set()
+
+    def analyze_asset_fields(self, paper: Paper, fields: List[str]) -> List[Dict[str, Any]]:
+        """统一分析资源字段：解析存在性、后缀合法性、路径规范性"""
+        target_fields = self._filter_asset_fields(fields)
+        analyses: List[Dict[str, Any]] = []
+
+        assets_dir_abs = self.assets_dir
+        if not os.path.isabs(assets_dir_abs):
+            assets_dir_abs = os.path.join(self.project_root, assets_dir_abs)
+        assets_dir_abs = os.path.normpath(os.path.abspath(assets_dir_abs))
+
+        try:
+            assets_rel_root = os.path.relpath(assets_dir_abs, self.project_root).replace('\\', '/')
+            if assets_rel_root.startswith('..'):
+                assets_rel_root = os.path.basename(assets_dir_abs).replace('\\', '/')
+        except Exception:
+            assets_rel_root = os.path.basename(assets_dir_abs).replace('\\', '/')
+
+        assets_rel_root = assets_rel_root.strip('/\\') or 'assets'
+        uid = (getattr(paper, 'uid', '') or '').strip()
+
+        for asset_field in target_fields:
+            raw_val = getattr(paper, asset_field, "")
+            if not raw_val:
+                continue
+
+            refs = [p.strip() for p in str(raw_val).split('|') if p.strip()]
+            expected_suffixes = self._expected_suffixes_for_field(asset_field)
+
+            for ref in refs:
+                resolved = self.resolve_asset_path(ref, asset_field)
+                exists = bool(resolved and os.path.exists(resolved))
+                check_path = resolved or ref
+                ext = os.path.splitext(str(check_path))[1].lower()
+                suffix_ok = bool((not expected_suffixes) or (ext in expected_suffixes))
+
+                nonstandard_path = False
+                expected_prefix = None
+                if uid:
+                    expected_prefix = f"{assets_rel_root}/{uid}/"
+                    expected_abs_prefix = os.path.normpath(os.path.abspath(os.path.join(assets_dir_abs, uid)))
+
+                    if resolved:
+                        resolved_abs = os.path.normpath(os.path.abspath(resolved))
+                        try:
+                            nonstandard_path = os.path.commonpath([expected_abs_prefix, resolved_abs]) != expected_abs_prefix
+                        except ValueError:
+                            nonstandard_path = True
+                    else:
+                        compare_ref = str(ref).replace('\\', '/').strip()
+                        compare_ref = os.path.normpath(compare_ref).replace('\\', '/')
+                        if compare_ref.startswith('./'):
+                            compare_ref = compare_ref[2:]
+                        compare_ref = compare_ref.lstrip('/')
+
+                        compare_prefix = os.path.normpath(expected_prefix).replace('\\', '/')
+                        if not compare_prefix.endswith('/'):
+                            compare_prefix += '/'
+
+                        if os.name == 'nt':
+                            compare_ref_chk = compare_ref.lower()
+                            compare_prefix_chk = compare_prefix.lower()
+                        else:
+                            compare_ref_chk = compare_ref
+                            compare_prefix_chk = compare_prefix
+
+                        nonstandard_path = not compare_ref_chk.startswith(compare_prefix_chk)
+
+                issues: List[Dict[str, str]] = []
+                if not exists:
+                    issues.append({'kind': 'missing', 'message': f"{asset_field} 文件不存在: {ref}"})
+                elif not suffix_ok:
+                    if asset_field == 'pipeline_image':
+                        msg = f"{asset_field} 文件格式无效: {ref}（应为图片后缀）"
+                    else:
+                        msg = f"{asset_field} 文件格式无效: {ref}（应为 .pdf）"
+                    issues.append({'kind': 'invalid_suffix', 'message': msg})
+
+                if nonstandard_path:
+                    issues.append({
+                        'kind': 'nonstandard_path',
+                        'message': f"{asset_field} 路径非规范: {ref}（应位于 {expected_prefix}）"
+                    })
+
+                analyses.append({
+                    'field': asset_field,
+                    'reference': ref,
+                    'resolved': resolved,
+                    'exists': exists,
+                    'suffix_ok': suffix_ok,
+                    'nonstandard_path': nonstandard_path,
+                    'issues': issues,
+                })
+
+        return analyses
+
+    def validate_and_normalize_asset_fields(
+        self,
+        paper: Paper,
+        fields: List[str],
+        normalize: bool = False,
+        strict: bool = True,
+    ) -> Tuple[bool, List[str]]:
+        """统一入口：先验证资源字段（存在性+后缀），可选执行规范化"""
+        analyses = self.analyze_asset_fields(paper, fields)
+        errors: List[str] = []
+        for item in analyses:
+            for issue in item.get('issues', []):
+                if issue.get('kind') in ('missing', 'invalid_suffix'):
+                    msg = str(issue.get('message') or '').strip()
+                    if msg:
+                        errors.append(msg)
+
+        if errors:
+            return False, errors
+
+        if normalize:
+            try:
+                self.normalize_asset_fields(paper, fields, strict=strict)
+            except Exception as e:
+                return False, [f"资源规范化失败: {e}"]
+
+        return True, []
+
+    def _to_project_relative_path(self, abs_path: str, uid: str, filename: str) -> str:
+        try:
+            return os.path.relpath(abs_path, self.project_root).replace('\\', '/')
+        except Exception:
+            return os.path.join(self.assets_dir, uid, filename).replace('\\', '/')
+
+    def _normalize_single_asset_reference(
+        self,
+        clean_path: str,
+        *,
+        legacy_dir_rel: str,
+        paper_asset_dir: str,
+        uid: str,
+        strict: bool,
+        missing_label: str,
+    ) -> str:
+        src_path = self._resolve_source_path(clean_path, legacy_dir_rel)
+        if src_path and os.path.exists(src_path):
+            filename = os.path.basename(src_path)
+            dest_path = os.path.join(paper_asset_dir, filename)
+            try:
+                if not os.path.exists(dest_path) or not os.path.samefile(src_path, dest_path):
+                    shutil.copy2(src_path, dest_path)
+            except Exception as e:
+                if strict:
+                    raise RuntimeError(f"复制资源失败 {src_path} -> {dest_path}: {e}")
+                print(f"复制资源失败 {src_path} -> {dest_path}: {e}")
+            return self._to_project_relative_path(dest_path, uid, filename)
+
+        if strict:
+            raise FileNotFoundError(f"找不到{missing_label}: {clean_path}")
+        print(f"警告: 找不到{missing_label} {clean_path}")
+        return clean_path.replace('\\', '/')
 
     def normalize_asset_fields(self, paper: Paper, fields: List[str], strict: bool = False) -> Paper:
         """按字段规范化资源路径（复制到 assets/{uid}/ 并回填相对路径）"""
-        target_fields = [f for f in fields if f in ('pipeline_image', 'paper_file')]
+        target_fields = self._filter_asset_fields(fields)
         has_assets = any(bool(getattr(paper, f, "")) for f in target_fields)
         if not has_assets and not paper.uid:
             return paper
@@ -360,52 +529,28 @@ class UpdateFileUtils:
                 clean_path = raw_path.strip()
                 if not clean_path:
                     continue
-                src_path = self._resolve_source_path(clean_path, self.legacy_figure_dir)
-                if src_path and os.path.exists(src_path):
-                    filename = os.path.basename(src_path)
-                    dest_path = os.path.join(paper_asset_dir, filename)
-                    try:
-                        if not os.path.exists(dest_path) or not os.path.samefile(src_path, dest_path):
-                            shutil.copy2(src_path, dest_path)
-                    except Exception as e:
-                        if strict:
-                            raise RuntimeError(f"复制资源失败 {src_path} -> {dest_path}: {e}")
-                        print(f"复制资源失败 {src_path} -> {dest_path}: {e}")
-                    try:
-                        rel_path = os.path.relpath(dest_path, self.project_root).replace('\\', '/')
-                    except Exception:
-                        rel_path = os.path.join(self.assets_dir, paper.uid, filename).replace('\\', '/')
-                    new_paths.append(rel_path)
-                else:
-                    if strict:
-                        raise FileNotFoundError(f"找不到资源文件: {clean_path}")
-                    print(f"警告: 找不到资源文件 {clean_path}")
-                    new_paths.append(clean_path.replace('\\', '/'))
+                normalized_path = self._normalize_single_asset_reference(
+                    clean_path,
+                    legacy_dir_rel=self.legacy_figure_dir,
+                    paper_asset_dir=paper_asset_dir,
+                    uid=paper.uid,
+                    strict=strict,
+                    missing_label='资源文件',
+                )
+                new_paths.append(normalized_path)
             paper.pipeline_image = '|'.join(new_paths)
 
         if 'paper_file' in target_fields and paper.paper_file:
             clean_path = str(paper.paper_file).strip()
             if clean_path:
-                src_path = self._resolve_source_path(clean_path, self.legacy_paper_dir)
-                if src_path and os.path.exists(src_path):
-                    filename = os.path.basename(src_path)
-                    dest_path = os.path.join(paper_asset_dir, filename)
-                    try:
-                        if not os.path.exists(dest_path) or not os.path.samefile(src_path, dest_path):
-                            shutil.copy2(src_path, dest_path)
-                    except Exception as e:
-                        if strict:
-                            raise RuntimeError(f"复制资源失败 {src_path} -> {dest_path}: {e}")
-                        print(f"复制资源失败 {src_path} -> {dest_path}: {e}")
-                    try:
-                        paper.paper_file = os.path.relpath(dest_path, self.project_root).replace('\\', '/')
-                    except Exception:
-                        paper.paper_file = os.path.join(self.assets_dir, paper.uid, filename).replace('\\', '/')
-                else:
-                    if strict:
-                        raise FileNotFoundError(f"找不到论文文件: {clean_path}")
-                    print(f"警告: 找不到论文文件 {clean_path}")
-                    paper.paper_file = clean_path.replace('\\', '/')
+                paper.paper_file = self._normalize_single_asset_reference(
+                    clean_path,
+                    legacy_dir_rel=self.legacy_paper_dir,
+                    paper_asset_dir=paper_asset_dir,
+                    uid=paper.uid,
+                    strict=strict,
+                    missing_label='论文文件',
+                )
 
         return paper
 

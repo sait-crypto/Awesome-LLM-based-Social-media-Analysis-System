@@ -163,23 +163,27 @@ class Paper:
                     temp_category = normalized_cat
             except Exception: pass
 
-        # === 资源路径验证 (Assets) ===
-        # 仅检查字段值所指向的文件是否存在，不强制其位于规范目录
-        for asset_field in ['pipeline_image', 'paper_file']:
-            if not should_check(asset_field):
-                continue
+        # === 资源字段统一验证 + 规范化 (Assets) ===
+        target_asset_fields = [
+            f for f in ['pipeline_image', 'paper_file']
+            if should_check(f)
+        ]
+        if target_asset_fields:
             from src.core.update_file_utils import get_update_file_utils
             ufu = get_update_file_utils()
-            val = getattr(self, asset_field, "")
-            if not val:
-                continue
 
-            paths = [p.strip() for p in str(val).split('|') if p.strip()]
-            for p in paths:
-                resolved = ufu.resolve_asset_path(p, asset_field)
-                if not resolved or not os.path.exists(resolved):
-                    errors.append(f"{asset_field} 文件不存在: {p}")
-                    invalid_vars.add(asset_field)
+            asset_valid, asset_errors = ufu.validate_and_normalize_asset_fields(
+                self,
+                target_asset_fields,
+                normalize=(not no_normalize),
+                strict=True,
+            )
+            if not asset_valid:
+                errors.extend(asset_errors)
+                for msg in asset_errors:
+                    for asset_field in target_asset_fields:
+                        if msg.startswith(f"{asset_field} "):
+                            invalid_vars.add(asset_field)
 
         # 1. 特殊字段验证
         
