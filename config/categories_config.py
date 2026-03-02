@@ -376,7 +376,7 @@ CATEGORIES_CONFIG = {
             "name": "Game Simulation",
             "primary_category": "Simulation and Deduction",
             "enabled": True,
-            "description": "[二级分类]（Simulation and Deduction） —  游戏仿真",
+            "description": "[二级分类]（Simulation and Deduction） —  游戏社交/角色仿真",
         },
         {
             "unique_name": "Family Simulation",
@@ -392,7 +392,7 @@ CATEGORIES_CONFIG = {
             "name": "Macrosocial Phenomena Analysis",
             "primary_category": "Simulation and Deduction",
             "enabled": True,
-            "description": "[二级分类]（Simulation and Deduction） —  宏观社会现象分析",
+            "description": "[二级分类]（Simulation and Deduction） —  宏观社会现象分析，例如极化现象",
         },
         {
             "unique_name": "Frontier Applications",
