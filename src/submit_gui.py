@@ -68,7 +68,7 @@ class PaperSubmissionGUI:
             pipeline_cfg_max = int(self.settings['database'].get('max_pipeline_images_per_paper', 4))
         except Exception:
             pipeline_cfg_max = 4
-        self._gui_pipeline_max = max(1, min(pipeline_cfg_max, 6))
+        self._gui_pipeline_max = max(1, min(pipeline_cfg_max, 6)) # 硬限制最大不超过6，避免界面过于复杂
 
         self._suppress_select_event = False
         self._handling_paper_selection = False
@@ -830,7 +830,7 @@ class PaperSubmissionGUI:
                     cfg_max = int(self.settings['database'].get('max_categories_per_paper', 4))
                 except Exception:
                     cfg_max = 4
-                self._gui_category_max = min(cfg_max, 6)
+                self._gui_category_max = min(cfg_max, 10) # 硬限制最大不超过10，避免界面过于复杂
 
                 self._gui_add_category_row('')
                 self.form_fields[variable] = container
@@ -2242,9 +2242,6 @@ class PaperSubmissionGUI:
             self._skip_next_selection_confirm = True
             if not self._confirm_before_switch_or_restore(self.current_paper_index, show_popup=True):
                 return "break"
-
-        if not self._is_drag_reorder_allowed():
-            return None
 
         # 仅在按下当前已选中项时进入“待拖拽”状态，移动超过阈值后才真正开始拖拽
         if current_real_idx >= 0 and target_real_idx == current_real_idx:
@@ -4345,6 +4342,65 @@ class PaperSubmissionGUI:
         # 可选：绘制一条插入线 (TreeView 比较难实现插入线，这里保持简单，不乱动 Selection)
         # 移除原有的 selection_set 代码，避免鼠标划过时疯狂切换选中项
 
+    def _handle_category_drop_for_dragged_paper(self) -> bool:
+        """若当前拖拽释放在分类树节点上，则为论文追加分类并返回 True。"""
+        if not self.drag_item:
+            return False
+
+        tree = getattr(self, 'category_filter_tree', None)
+        if tree is None:
+            return False
+
+        if not bool(getattr(self, '_category_sidebar_visible', False)):
+            return False
+
+        try:
+            pointer_x = self.root.winfo_pointerx()
+            pointer_y = self.root.winfo_pointery()
+        except Exception:
+            return False
+
+        tree_left = tree.winfo_rootx()
+        tree_top = tree.winfo_rooty()
+        tree_right = tree_left + tree.winfo_width()
+        tree_bottom = tree_top + tree.winfo_height()
+        if not (tree_left <= pointer_x <= tree_right and tree_top <= pointer_y <= tree_bottom):
+            return False
+
+        local_y = pointer_y - tree_top
+        target_item = tree.identify_row(local_y)
+        if not target_item or target_item == '__ALL__':
+            return False
+
+        try:
+            real_index = int(self.drag_item)
+        except Exception:
+            return False
+
+        changed, reason, count = self.logic.add_category_to_paper(real_index, target_item)
+
+        if reason == 'limit':
+            max_count = self.logic.get_max_categories_per_paper()
+            messagebox.showwarning('限制', f'该论文分类数已达上限（{max_count}），无法继续添加。')
+            return True
+
+        if reason in ('invalid-index', 'invalid-category'):
+            return True
+
+        if changed:
+            category_meta = self.logic.config.get_category_by_unique_name(target_item) or {}
+            category_name = category_meta.get('name', target_item)
+            self.refresh_list_view(self._get_search_keyword(), self._get_category_filter_value(), self._get_status_filter_value())
+            self._activate_paper_by_real_index(real_index)
+            self.update_status(f"已添加分类：{category_name}（当前 {count} 个）")
+        else:
+            category_meta = self.logic.config.get_category_by_unique_name(target_item) or {}
+            category_name = category_meta.get('name', target_item)
+            if reason == 'exists':
+                self.update_status(f"该论文已包含分类：{category_name}")
+
+        return True
+
     def _on_drag_release(self, event):
         self._destroy_drag_ghost()
         if not self.drag_item:
@@ -4352,12 +4408,13 @@ class PaperSubmissionGUI:
             self._drag_press_xy = None
             return
 
-        if not self._is_drag_reorder_allowed():
+        # 优先处理“拖到 hierarchy 分类树节点上”这一操作
+        if self._handle_category_drop_for_dragged_paper():
             self.drag_item = None
             self._drag_press_item = None
             self._drag_press_xy = None
             return
-        
+
         # 检测释放位置是否在 Treeview 内
         tv_width = self.paper_tree.winfo_width()
         tv_height = self.paper_tree.winfo_height()
@@ -4380,7 +4437,9 @@ class PaperSubmissionGUI:
                 if last_bbox and event.y > (last_bbox[1] + last_bbox[3]):
                     target_mode = 'append-end'
 
-        if (target_item and target_item != self.drag_item) or target_mode == 'append-end':
+        can_reorder = self._is_drag_reorder_allowed()
+
+        if can_reorder and ((target_item and target_item != self.drag_item) or target_mode == 'append-end'):
             try:
                 real_from = int(self.drag_item)
                 if target_mode == 'append-end':

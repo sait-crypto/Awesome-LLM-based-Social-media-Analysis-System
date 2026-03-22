@@ -152,6 +152,65 @@ class SubmitLogic:
         raw_cat = getattr(paper, 'category', '') or ''
         return {c.strip() for c in str(raw_cat).split('|') if c.strip()}
 
+    def _paper_category_list(self, paper: Paper) -> List[str]:
+        """返回保持原有顺序且去重后的分类列表。"""
+        raw_cat = getattr(paper, 'category', '') or ''
+        result: List[str] = []
+        seen: Set[str] = set()
+        for item in str(raw_cat).split('|'):
+            category = item.strip()
+            if not category or category in seen:
+                continue
+            seen.add(category)
+            result.append(category)
+        return result
+
+    def get_max_categories_per_paper(self) -> int:
+        """获取单篇论文允许的最大分类数。"""
+        try:
+            cfg_max = int((self.settings.get('database', {}) or {}).get('max_categories_per_paper', 4))
+        except Exception:
+            cfg_max = 4
+        return max(1, min(cfg_max, 10))
+
+    def add_category_to_paper(
+        self,
+        paper_index: int,
+        category_unique_name: str,
+        max_categories: Optional[int] = None,
+    ) -> Tuple[bool, str, int]:
+        """
+        给论文追加分类（若不存在）。
+
+        返回: (changed, reason, current_count)
+        reason: added | exists | limit | invalid-index | invalid-category
+        """
+        if not (0 <= paper_index < len(self.papers)):
+            return False, 'invalid-index', 0
+
+        target_category = (category_unique_name or '').strip()
+        if not target_category:
+            return False, 'invalid-category', 0
+
+        _, _, by_unique = self.build_category_hierarchy()
+        if target_category not in by_unique:
+            return False, 'invalid-category', 0
+
+        paper = self.papers[paper_index]
+        categories = self._paper_category_list(paper)
+
+        if target_category in categories:
+            return False, 'exists', len(categories)
+
+        category_limit = self.get_max_categories_per_paper() if max_categories is None else max(1, int(max_categories))
+        if len(categories) >= category_limit:
+            return False, 'limit', len(categories)
+
+        categories.append(target_category)
+        paper.category = '|'.join(categories)
+        paper.category = self.update_utils.normalize_category_value(paper.category, self.config)
+        return True, 'added', len(categories)
+
     def build_category_hierarchy(self) -> Tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]], Dict[str, Dict[str, Any]]]:
         """构建分类树结构并返回 (roots, children_map, by_unique_name)。"""
         categories = self.config.get_active_categories() or []
