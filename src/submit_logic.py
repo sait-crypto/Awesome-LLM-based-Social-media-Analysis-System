@@ -10,6 +10,7 @@ import subprocess
 import time
 import shutil
 import uuid
+import configparser
 from typing import Dict, List, Any, Optional, Tuple, Set
 import re
 import copy # 新增
@@ -28,6 +29,9 @@ BASE_DIR = str(get_config_instance().project_root)
 
 class SubmitLogic:
     """提交系统的业务逻辑控制器"""
+
+    VALID_SAVE_VALIDATION_STRATEGIES = {'strict', 'lenient'}
+    VALID_SAVE_MODES = {'incremental', 'rewrite'}
 
     def __init__(self):
         # 加载配置
@@ -75,6 +79,57 @@ class SubmitLogic:
              self.admin_password_path = os.path.join(BASE_DIR, 'admin_key.txt')
 
         self.update_json_path = self.settings['paths'].get('update_json', 'submit_template.json')
+
+    # ================= UI 配置逻辑 =================
+
+    def _normalize_save_validation_strategy(self, strategy: Any) -> str:
+        value = str(strategy or '').strip().lower()
+        if value not in self.VALID_SAVE_VALIDATION_STRATEGIES:
+            return 'strict'
+        return value
+
+    def _normalize_save_mode(self, mode: Any) -> str:
+        value = str(mode or '').strip().lower()
+        if value not in self.VALID_SAVE_MODES:
+            return 'incremental'
+        return value
+
+    def get_save_validation_strategy(self) -> str:
+        ui_cfg = self.settings.get('ui', {}) or {}
+        return self._normalize_save_validation_strategy(ui_cfg.get('save_validation_strategy', 'strict'))
+
+    def get_save_mode(self) -> str:
+        ui_cfg = self.settings.get('ui', {}) or {}
+        return self._normalize_save_mode(ui_cfg.get('save_mode', 'incremental'))
+
+    def _persist_ui_setting(self, key: str, value: str):
+        cfg = configparser.ConfigParser(inline_comment_prefixes=('#', ';', '//'))
+        cfg_path = os.path.join(str(self.config.config_path), 'config.ini')
+        if os.path.exists(cfg_path):
+            cfg.read(cfg_path, encoding='utf-8')
+        if 'ui' not in cfg:
+            cfg['ui'] = {}
+        cfg['ui'][key] = str(value)
+        with open(cfg_path, 'w', encoding='utf-8') as f:
+            cfg.write(f)
+
+        # 刷新配置快照，确保后续读取立即生效
+        self.config.settings = self.config._load_settings()
+        self.settings = self.config.settings
+
+    def set_save_validation_strategy(self, strategy: str, require_admin: bool = True) -> str:
+        if require_admin and not self.is_admin:
+            raise PermissionError("仅管理员可修改保存策略")
+        normalized = self._normalize_save_validation_strategy(strategy)
+        self._persist_ui_setting('save_validation_strategy', normalized)
+        return normalized
+
+    def set_save_mode(self, mode: str, require_admin: bool = True) -> str:
+        if require_admin and not self.is_admin:
+            raise PermissionError("仅管理员可修改保存模式")
+        normalized = self._normalize_save_mode(mode)
+        self._persist_ui_setting('save_mode', normalized)
+        return normalized
     # ================= 文件加载与管理 =================
 
     def load_papers_from_file(self, filepath: str) -> int:
@@ -483,6 +538,24 @@ class SubmitLogic:
         final_list = existing_papers + papers_to_append
         self.update_utils.write_data(target_path, final_list)
         return final_list
+
+    def save_to_file_by_mode(
+        self,
+        target_path: str,
+        save_mode: Optional[str] = None,
+        conflict_decisions: Optional[Dict[Tuple[str, str], str]] = None,
+    ) -> List[Paper]:
+        """按保存模式执行保存：数据库文件强制 rewrite，其余按配置/参数选择。"""
+        if self._is_database_file(target_path):
+            self.save_to_file_rewrite(target_path)
+            return self.papers
+
+        mode = self._normalize_save_mode(save_mode if save_mode is not None else self.get_save_mode())
+        if mode == 'rewrite':
+            self.save_to_file_rewrite(target_path)
+            return self.papers
+
+        return self.save_to_file_incremental(target_path, conflict_decisions or {})
 
     def get_conflicts_for_save(self, target_path: str) -> List[Paper]:
         """预检查：返回当前列表中与目标文件冲突的论文"""

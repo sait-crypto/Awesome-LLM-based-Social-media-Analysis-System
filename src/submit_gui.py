@@ -7,7 +7,6 @@ import os
 import sys
 import re
 import copy
-import configparser
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, scrolledtext, simpledialog
 from typing import Dict, List, Any, Optional, Tuple
@@ -105,6 +104,7 @@ class PaperSubmissionGUI:
         self._list_sort_desc: bool = False
 
         self.setup_ui()
+        self._bind_shortcuts()
         
         # 检查管理员状态并更新UI
         self._update_admin_ui_state()
@@ -467,6 +467,10 @@ class PaperSubmissionGUI:
 
         info_label = ttk.Label(header_frame, text=f"  [Active: {files_str}]", foreground="gray")
         info_label.pack(side=tk.LEFT, padx=10)
+
+        # 快捷键提示按钮（放在管理员按钮左侧）
+        self.shortcut_btn = ttk.Button(header_frame, text="⌨ 快捷键", command=self._show_shortcut_help, width=12)
+        self.shortcut_btn.pack(side=tk.RIGHT, padx=(0, 6))
 
         # 管理员切换按钮
         self.admin_btn = ttk.Button(header_frame, text="🔒 管理员模式", command=self._toggle_admin_mode, width=15)
@@ -1698,10 +1702,21 @@ class PaperSubmissionGUI:
         file_frame.grid(row=0, column=1, padx=5, sticky="ns")
         
         ttk.Button(file_frame, text="💾 加载数据库", command=self._open_database_action, width=12).pack(side=tk.LEFT, padx=5, pady=5)
-        ttk.Button(file_frame, text="📤 保存文件", command=self.save_all_papers, width=12).pack(side=tk.LEFT, padx=5, pady=5)
+
+        self.save_btn_var = tk.StringVar(value="📤 保存文件 ▾")
+        self.save_btn = ttk.Button(file_frame, textvariable=self.save_btn_var, width=14)
+        self.save_btn.pack(side=tk.LEFT, padx=5, pady=5)
+        self.save_menu = tk.Menu(self.root, tearoff=0)
+        self.save_menu.add_command(label="💾 保存文件 (Ctrl+S)", command=self.save_current_file)
+        self.save_menu.add_command(label="📝 另存为 (Ctrl+Shift+S)", command=self.save_all_papers)
+        self.save_btn.bind("<ButtonPress-1>", self._on_save_menu_button_press)
+
         self.save_policy_btn = ttk.Button(file_frame, text="", command=self._change_save_validation_strategy, width=18)
         self.save_policy_btn.pack(side=tk.LEFT, padx=5, pady=5)
+        self.save_mode_btn = ttk.Button(file_frame, text="", command=self._change_save_mode, width=18)
+        self.save_mode_btn.pack(side=tk.LEFT, padx=5, pady=5)
         self._refresh_save_policy_button_text()
+        self._refresh_save_mode_button_text()
         ttk.Button(file_frame, text="📂 加载文件", command=self.load_template, width=12).pack(side=tk.LEFT, padx=5, pady=5)
         ttk.Button(file_frame, text="📄 打开当前文件", command=self.open_current_file, width=14).pack(side=tk.LEFT, padx=5, pady=5)
 
@@ -1713,8 +1728,8 @@ class PaperSubmissionGUI:
         ai_frame.grid(row=0, column=2, padx=5, sticky="ns")
         
         self.ai_btn_var = tk.StringVar(value="🤖 AI 助手 ▾")
-        ai_btn = ttk.Button(ai_frame, textvariable=self.ai_btn_var, width=15)
-        ai_btn.pack(padx=5, pady=5)
+        self.ai_btn = ttk.Button(ai_frame, textvariable=self.ai_btn_var, width=15)
+        self.ai_btn.pack(padx=5, pady=5)
         
         self.ai_menu = tk.Menu(self.root, tearoff=0)
         self.ai_menu.add_command(label="🧰 AI 工具箱", command=self.ai_toolbox_window)
@@ -1723,9 +1738,29 @@ class PaperSubmissionGUI:
         self.ai_menu.add_command(label="✨ 生成所有空字段", command=lambda: self.run_ai_task(self.ai_generate_field, None))
         self.ai_menu.add_command(label="🏷️分类建议", command=self.ai_suggest_category)
         
-        def show_ai_menu(event):
-            self.ai_menu.post(event.x_root, event.y_root)
-        ai_btn.bind("<Button-1>", show_ai_menu)
+        self.ai_btn.bind("<ButtonPress-1>", self._on_ai_menu_button_press)
+
+    def _post_menu_above_button(self, menu: tk.Menu, anchor_btn: tk.Widget):
+        """将菜单展开在按钮上方，避免按钮点按态卡住。"""
+        self.root.update_idletasks()
+        menu.update_idletasks()
+
+        x = anchor_btn.winfo_rootx()
+        y = anchor_btn.winfo_rooty() - menu.winfo_reqheight()
+        try:
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
+
+    def _on_save_menu_button_press(self, event):
+        self._post_menu_above_button(self.save_menu, self.save_btn)
+        self.root.focus_force()
+        return "break"
+
+    def _on_ai_menu_button_press(self, event):
+        self._post_menu_above_button(self.ai_menu, self.ai_btn)
+        self.root.focus_force()
+        return "break"
 
     # ================= 管理员逻辑 =================
 
@@ -1761,23 +1796,28 @@ class PaperSubmissionGUI:
     def _update_admin_ui_state(self):
         """更新UI以反映管理员状态"""
         self._refresh_save_policy_button_text()
+        self._refresh_save_mode_button_text()
 
         if self.logic.is_admin:
             self.admin_btn.config(text="🔓 管理员: ON")
             self.root.title("Awesome 论文规范化处理提交程序 [管理员模式]")
             if hasattr(self, 'save_policy_btn') and self.save_policy_btn.winfo_manager() != 'pack':
                 self.save_policy_btn.pack(side=tk.LEFT, padx=5, pady=5)
+            if hasattr(self, 'save_mode_btn') and self.save_mode_btn.winfo_manager() != 'pack':
+                self.save_mode_btn.pack(side=tk.LEFT, padx=5, pady=5)
         else:
             self.admin_btn.config(text="🔒 管理员: OFF")
             self.root.title("Awesome 论文规范化处理提交程序")
             if hasattr(self, 'save_policy_btn') and self.save_policy_btn.winfo_manager() == 'pack':
                 self.save_policy_btn.pack_forget()
+            if hasattr(self, 'save_mode_btn') and self.save_mode_btn.winfo_manager() == 'pack':
+                self.save_mode_btn.pack_forget()
 
     def _get_save_validation_strategy(self) -> str:
-        strategy = str((self.settings.get('ui', {}) or {}).get('save_validation_strategy', 'strict')).strip().lower()
-        if strategy not in ('strict', 'lenient'):
-            strategy = 'strict'
-        return strategy
+        return self.logic.get_save_validation_strategy()
+
+    def _get_save_mode(self) -> str:
+        return self.logic.get_save_mode()
 
     def _refresh_save_policy_button_text(self):
         if not hasattr(self, 'save_policy_btn'):
@@ -1785,26 +1825,13 @@ class PaperSubmissionGUI:
         strategy = self._get_save_validation_strategy()
         self.save_policy_btn.config(text=f"🧭 保存策略: {strategy}")
 
-    def _persist_ui_setting(self, key: str, value: str):
-        cfg = configparser.ConfigParser(inline_comment_prefixes=('#', ';', '//'))
-        cfg_path = os.path.join(str(self.config.config_path), 'config.ini')
-        if os.path.exists(cfg_path):
-            cfg.read(cfg_path, encoding='utf-8')
-        if 'ui' not in cfg:
-            cfg['ui'] = {}
-        cfg['ui'][key] = str(value)
-        with open(cfg_path, 'w', encoding='utf-8') as f:
-            cfg.write(f)
-
-        self.config.settings = self.config._load_settings()
-        self.logic.settings = self.config.settings
-        self.settings = self.logic.settings
+    def _refresh_save_mode_button_text(self):
+        if not hasattr(self, 'save_mode_btn'):
+            return
+        mode = self._get_save_mode()
+        self.save_mode_btn.config(text=f"💾 保存模式: {mode}")
 
     def _change_save_validation_strategy(self):
-        if not self.logic.is_admin:
-            messagebox.showwarning("权限", "仅管理员可修改保存策略")
-            return
-
         cur = self._get_save_validation_strategy()
         switch_now = messagebox.askyesno(
             "保存策略",
@@ -1819,11 +1846,38 @@ class PaperSubmissionGUI:
 
         new_strategy = 'lenient' if cur == 'strict' else 'strict'
         try:
-            self._persist_ui_setting('save_validation_strategy', new_strategy)
+            self.logic.set_save_validation_strategy(new_strategy, require_admin=True)
+            self.settings = self.logic.settings
             self._refresh_save_policy_button_text()
             self.update_status(f"保存策略已更新为: {new_strategy}")
+        except PermissionError as ex:
+            messagebox.showwarning("权限", str(ex))
         except Exception as ex:
             messagebox.showerror("错误", f"保存策略写入失败: {ex}")
+
+    def _change_save_mode(self):
+        cur = self._get_save_mode()
+        switch_now = messagebox.askyesno(
+            "保存模式",
+            f"当前保存模式: {cur}\n\n"
+            f"incremental: 增量合并，保留目标文件已有内容，仅覆盖重复项。\n"
+            f"rewrite: 完全重写，使用当前工作区覆盖目标文件。\n\n"
+            f"是否切换到另一种模式？\n\n【是】切换\n【否】不切换"
+        )
+        if not switch_now:
+            self.update_status(f"保存模式保持不变: {cur}")
+            return
+
+        new_mode = 'rewrite' if cur == 'incremental' else 'incremental'
+        try:
+            self.logic.set_save_mode(new_mode, require_admin=True)
+            self.settings = self.logic.settings
+            self._refresh_save_mode_button_text()
+            self.update_status(f"保存模式已更新为: {new_mode}")
+        except PermissionError as ex:
+            messagebox.showwarning("权限", str(ex))
+        except Exception as ex:
+            messagebox.showerror("错误", f"保存模式写入失败: {ex}")
 
     def _refresh_ui_fields(self):
         """完全重建表单字段 (根据管理员模式显示/隐藏字段)"""
@@ -2567,7 +2621,18 @@ class PaperSubmissionGUI:
                 self._reset_list_after_data_change()
                 self.update_status("所有论文已清空")
 
-    def save_all_papers(self) -> bool:
+    def _choose_save_target_path(self) -> str:
+        current_loaded = self._get_current_loaded_file()
+        initial_base = os.path.basename(current_loaded) if current_loaded else "submit_template.json"
+        return filedialog.asksaveasfilename(
+            title="选择保存位置",
+            defaultextension='.json',
+            filetypes=[("JSON", "*.json"), ("CSV", "*.csv")],
+            initialfile=initial_base,
+            initialdir=BASE_DIR
+        )
+
+    def _save_to_target_path(self, target_path: str) -> bool:
         if not self.logic.papers:
             messagebox.showwarning("警告", "没有论文可以保存")
             return False
@@ -2586,19 +2651,7 @@ class PaperSubmissionGUI:
                 messagebox.showwarning("验证失败", msg + "\n\n当前为 strict 模式，已阻止保存。")
                 return False
 
-        # 2. 选择路径
-        initial_file = os.path.basename(self.logic.current_file_path) if self.logic.current_file_path else "submit_template.json"
-        target_path = filedialog.asksaveasfilename(
-            title="选择保存位置", 
-            defaultextension='.json', 
-            filetypes=[("JSON", "*.json"), ("CSV", "*.csv")],
-            initialfile=initial_file,
-            initialdir=BASE_DIR
-        )
-        if not target_path:
-            return False
-
-        # 3. 判断是否为数据库
+        # 2. 判断是否为数据库
         is_db = self.logic._is_database_file(target_path)
         
         if is_db:
@@ -2606,38 +2659,19 @@ class PaperSubmissionGUI:
                 messagebox.showerror("权限错误", "写入数据库需要管理员权限。")
                 return False
             if messagebox.askyesno("警告", "正在写入核心数据库！\n\n数据库模式仅支持【全量重写】。\n这将用当前列表完全覆盖数据库内容。\n\n是否继续？"):
-                self.logic.save_to_file_rewrite(target_path)
+                self.logic.save_to_file_by_mode(target_path, save_mode='rewrite')
                 self._set_current_loaded_file(target_path)
-                messagebox.showinfo("成功", "数据库已更新")
+                self.update_status(f"保存成功: {os.path.basename(target_path)} (rewrite)")
                 return True
             return False
 
-        # 4. 普通文件：使用简单的 Yes/No/Cancel 对话框
-        # Yes = 增量, No = 重写, Cancel = 取消
-        choice = messagebox.askyesnocancel("选择保存模式", 
-            "请选择保存模式：\n\n"
-            "【是 (Yes)】：增量模式 (增量合并)\n"
-            "   - 追加更新，保证原有内容不会丢失。\n"
-            "   - 若遇重复项，将逐一询问覆盖或跳过。\n\n"
-            "【否 (No)】：重写模式 (完全覆盖)\n"
-            "   - 完全替换目标文件内容。\n"
-            "   - 当前工作区将完全覆盖目标文件。")
-        
-        if choice is None:
-            return False # Cancel
-
+        save_mode = self._get_save_mode()
         try:
-            if choice is False: # No -> Rewrite
-                self.logic.save_to_file_rewrite(target_path)
-                self._set_current_loaded_file(target_path)
-                messagebox.showinfo("成功", "文件已重写保存")
-            else: # Yes -> Incremental
-                # 增量模式：检查冲突
+            if save_mode == 'incremental':
                 conflicts = self.logic.get_conflicts_for_save(target_path)
                 decisions = {}
                 
                 if conflicts:
-                    # 循环询问
                     for i, p in enumerate(conflicts):
                         msg = f"发现重复论文 ({i+1}/{len(conflicts)}):\n\n标题: {p.title}\nDOI: {p.doi}\n\n目标文件中已存在该论文。"
                         res = messagebox.askyesnocancel("处理重复", msg + "\n\n是(Yes) = 覆盖旧条目\n否(No) = 跳过 (保留旧条目)")
@@ -2648,15 +2682,41 @@ class PaperSubmissionGUI:
                         
                         key = p.get_key()
                         decisions[key] = 'overwrite' if res else 'skip'
-                
-                self.logic.save_to_file_incremental(target_path, decisions)
-                self._set_current_loaded_file(target_path)
-                messagebox.showinfo("成功", "增量保存完成")
+
+                self.logic.save_to_file_by_mode(target_path, save_mode='incremental', conflict_decisions=decisions)
+            else:
+                self.logic.save_to_file_by_mode(target_path, save_mode='rewrite')
+
+            self._set_current_loaded_file(target_path)
+            self.update_status(f"保存成功: {os.path.basename(target_path)} ({save_mode})")
             return True
                 
         except Exception as e:
             messagebox.showerror("保存失败", str(e))
             return False
+
+    def save_current_file(self, event=None) -> bool:
+        current_loaded = self._get_current_loaded_file().strip()
+        target_path = current_loaded if current_loaded else (self.logic.current_file_path or '')
+        if not target_path:
+            target_path = self._choose_save_target_path()
+            if not target_path:
+                return False
+        ok = self._save_to_target_path(target_path)
+        if event is not None:
+            return "break"
+        return ok
+
+    def save_all_papers(self, event=None) -> bool:
+        target_path = self._choose_save_target_path()
+        if not target_path:
+            if event is not None:
+                return "break"
+            return False
+        ok = self._save_to_target_path(target_path)
+        if event is not None:
+            return "break"
+        return ok
 
     def submit_pr(self):
         if not messagebox.askyesno("须知", f"将自动通过 PR 提交论文...\n\n1. 创建新分支\n2. 提交更新文件和 Assets 资源\n3. 推送并创建 PR"): return
@@ -2696,7 +2756,12 @@ class PaperSubmissionGUI:
         """在已有工作区内容时，确认是否允许加载新文件覆盖。"""
         if not self.logic.papers:
             return True
-        return bool(messagebox.askyesno("确认", "加载新文件将覆盖当前工作区。\n\n是否继续？(建议先保存)"))
+        save_choice = self._ask_double_save_choice("切换处理文件将覆盖当前工作区")
+        if save_choice is None:
+            return False
+        if save_choice and (not self.save_current_file()):
+            return False
+        return True
 
     def _ensure_admin_for_db_load(self, title: str, prompt: str) -> bool:
         """确保具备数据库加载权限；若无权限则引导切换管理员模式。"""
@@ -4473,12 +4538,53 @@ class PaperSubmissionGUI:
     def on_closing(self):
         self._confirm_all_pending_file_fields_for_current_paper(show_popup=True, block_on_error=False)
         if self.logic.papers:
-            choice = messagebox.askyesnocancel("确认", "注意！是否保存当前所有论文？如果否，当前所有内容会丢失")
-            if choice is None: return
-            if choice and (not self.save_all_papers()):
+            choice = self._ask_double_save_choice("关闭程序将丢失当前未保存内容")
+            if choice is None:
+                return
+            if choice and (not self.save_current_file()):
                 return
         self.logic.clear_all_temp_assets()
         self.root.destroy()
+
+    def _ask_double_save_choice(self, context_text: str) -> Optional[bool]:
+        first_msg = (
+            f"{context_text}。\n\n"
+            "是否先保存当前所有论文？\n"
+            "【是】先保存并继续\n"
+            "【否】不保存（将进入二次确认）\n"
+            "【取消】取消当前操作"
+        )
+        first = messagebox.askyesnocancel("保存提醒", first_msg)
+        if first is None:
+            return None
+        if first:
+            return True
+
+        second_msg = (
+            f"{context_text}。\n\n"
+            "你刚才选择了不保存。\n"
+            "二次确认：是否改为先保存再继续？\n"
+            "【是】先保存并继续\n"
+            "【否】确认不保存并继续\n"
+            "【取消】取消当前操作"
+        )
+        second = messagebox.askyesnocancel("保存提醒（二次确认）", second_msg)
+        if second is None:
+            return None
+        return bool(second)
+
+    def _show_shortcut_help(self):
+        messagebox.showinfo(
+            "当前快捷键",
+            "Ctrl+S: 保存文件（优先保存到当前加载文件）\n"
+            "Ctrl+Shift+S: 另存为"
+        )
+
+    def _bind_shortcuts(self):
+        self.root.bind("<Control-s>", self.save_current_file)
+        self.root.bind("<Control-S>", self.save_current_file)
+        self.root.bind("<Control-Shift-s>", self.save_all_papers)
+        self.root.bind("<Control-Shift-S>", self.save_all_papers)
 
     def add_from_zotero_meta(self):
         s = self._show_zotero_input_dialog("从Zotero Meta新建论文")
