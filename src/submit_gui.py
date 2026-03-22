@@ -3863,6 +3863,11 @@ class PaperSubmissionGUI:
     def _bind_widget_scroll_events(self, widget):
         widget.bind("<Enter>", lambda e: self._unbind_global_scroll())
         widget.bind("<Leave>", lambda e: self._bind_global_scroll(self.form_canvas.yview_scroll))
+        if isinstance(widget, ttk.Combobox):
+            # 禁止鼠标滚轮在详情栏下拉框上直接改值，避免误操作
+            widget.bind("<MouseWheel>", lambda e: "break")
+            widget.bind("<Button-4>", lambda e: "break")
+            widget.bind("<Button-5>", lambda e: "break")
 
     def ai_suggest_category(self):
         self.run_ai_task(self._ai_suggest_category_task)
