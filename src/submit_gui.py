@@ -99,6 +99,10 @@ class PaperSubmissionGUI:
         self._category_sidebar_visible = False
         self._updating_category_filter_tree = False
         self._init_keyword_field_filter_config()
+        self._init_list_column_config()
+        self._list_columns_popup: Optional[tk.Toplevel] = None
+        self._list_sort_column: Optional[str] = None
+        self._list_sort_desc: bool = False
 
         self.setup_ui()
         
@@ -236,6 +240,186 @@ class PaperSubmissionGUI:
     def _on_keyword_field_selection_change(self):
         self._update_keyword_field_button_text()
         self._on_search_change()
+
+    def _init_list_column_config(self):
+        self._list_column_defs: Dict[str, Dict[str, Any]] = {
+            'ID': {'title': '#', 'width': 56, 'anchor': 'center', 'stretch': False, 'required': True},
+            'Title': {'title': 'Title', 'width': 240, 'anchor': 'w', 'stretch': True, 'required': True},
+            'Status': {'title': 'State', 'width': 90, 'anchor': 'center', 'stretch': False, 'required': True},
+            'Authors': {'title': 'Authors', 'width': 180, 'anchor': 'w', 'stretch': False, 'required': False},
+            'Date': {'title': 'Publish Date', 'width': 110, 'anchor': 'center', 'stretch': False, 'required': False},
+            'Contributor': {'title': 'Contributor', 'width': 120, 'anchor': 'w', 'stretch': False, 'required': False},
+            'Conference': {'title': 'Conference', 'width': 130, 'anchor': 'w', 'stretch': False, 'required': False},
+            'ReadStatus': {'title': 'Reading Status', 'width': 120, 'anchor': 'center', 'stretch': False, 'required': False},
+            'Placeholder': {'title': 'Is Placeholder', 'width': 110, 'anchor': 'center', 'stretch': False, 'required': False},
+        }
+        self._list_optional_defaults = []
+        self._list_column_vars: Dict[str, tk.BooleanVar] = {}
+        for key, cfg in self._list_column_defs.items():
+            is_required = bool(cfg.get('required', False))
+            self._list_column_vars[key] = tk.BooleanVar(value=(is_required or key in self._list_optional_defaults))
+
+    def _get_visible_list_columns(self) -> List[str]:
+        visible: List[str] = []
+        for key in self._list_column_defs:
+            var_obj = self._list_column_vars.get(key)
+            if var_obj is not None and bool(var_obj.get()):
+                visible.append(key)
+        return visible
+
+    def _update_list_columns_button_text(self):
+        if not hasattr(self, 'list_columns_btn'):
+            return
+        visible = self._get_visible_list_columns()
+        optional_selected = [k for k in visible if not self._list_column_defs.get(k, {}).get('required')]
+        self.list_columns_btn.config(text=f'列({len(optional_selected)})')
+
+    def _toggle_list_columns_popup(self):
+        if self._list_columns_popup and self._list_columns_popup.winfo_exists():
+            self._list_columns_popup.destroy()
+            self._list_columns_popup = None
+            return
+
+        popup = tk.Toplevel(self.root)
+        popup.title('列表列配置')
+        popup.transient(self.root)
+        popup.resizable(False, False)
+        self._list_columns_popup = popup
+
+        btn = self.list_columns_btn
+        x = btn.winfo_rootx()
+        y = btn.winfo_rooty() + btn.winfo_height() + 2
+        popup.geometry(f'+{x}+{y}')
+
+        frame = ttk.Frame(popup, padding=8)
+        frame.grid(row=0, column=0, sticky='nsew')
+        frame.columnconfigure(0, weight=1)
+
+        ttk.Label(frame, text='勾选列表显示字段（#、Title 必选）:').grid(row=0, column=0, sticky='w', pady=(0, 6))
+
+        row = 1
+        for key, cfg in self._list_column_defs.items():
+            if cfg.get('required'):
+                continue
+            text = cfg.get('title', key)
+            cb = ttk.Checkbutton(
+                frame,
+                text=text,
+                variable=self._list_column_vars[key],
+                command=self._on_list_column_selection_change,
+            )
+            cb.grid(row=row, column=0, sticky='w')
+            row += 1
+
+        footer = ttk.Frame(frame)
+        footer.grid(row=row, column=0, sticky='ew', pady=(8, 0))
+        ttk.Button(footer, text='默认', command=self._reset_default_list_columns).pack(side=tk.LEFT)
+        ttk.Button(footer, text='关闭', command=self._toggle_list_columns_popup).pack(side=tk.RIGHT)
+
+        popup.protocol('WM_DELETE_WINDOW', self._toggle_list_columns_popup)
+
+    def _reset_default_list_columns(self):
+        for key, cfg in self._list_column_defs.items():
+            is_required = bool(cfg.get('required', False))
+            self._list_column_vars[key].set(is_required or key in self._list_optional_defaults)
+        self._on_list_column_selection_change()
+
+    def _on_list_column_selection_change(self):
+        self._update_list_columns_button_text()
+        self._apply_paper_tree_columns()
+        self.refresh_list_view(self._get_search_keyword(), self._get_category_filter_value(), self._get_status_filter_value())
+
+    def _apply_paper_tree_columns(self):
+        if not hasattr(self, 'paper_tree'):
+            return
+
+        visible_columns = tuple(self._get_visible_list_columns())
+        self.paper_tree.configure(columns=visible_columns)
+
+        sort_col = self._list_sort_column
+        if sort_col not in visible_columns:
+            self._list_sort_column = None
+            self._list_sort_desc = False
+
+        for col in visible_columns:
+            cfg = self._list_column_defs.get(col, {})
+            title = cfg.get('title', col)
+            if col == self._list_sort_column:
+                title = f"{title} {'▼' if self._list_sort_desc else '▲'}"
+            self.paper_tree.heading(col, text=title, command=lambda c=col: self._on_paper_tree_heading_click(c))
+            self.paper_tree.column(
+                col,
+                width=int(cfg.get('width', 120)),
+                minwidth=40,
+                anchor=cfg.get('anchor', 'w'),
+                stretch=bool(cfg.get('stretch', False)),
+            )
+
+    def _on_paper_tree_heading_click(self, column: str):
+        if column == self._list_sort_column:
+            self._list_sort_desc = not self._list_sort_desc
+        else:
+            self._list_sort_column = column
+            self._list_sort_desc = False
+
+        self._apply_paper_tree_columns()
+        self.refresh_list_view(self._get_search_keyword(), self._get_category_filter_value(), self._get_status_filter_value())
+
+    def _get_list_column_display_value(self, paper, real_idx: int, column: str) -> str:
+        if column == 'ID':
+            return str(real_idx + 1)
+        if column == 'Title':
+            title = paper.title or ''
+            return title[:150] + '...' if len(title) > 150 else title
+        if column == 'Authors':
+            return str(getattr(paper, 'authors', '') or '')
+        if column == 'Date':
+            return str(getattr(paper, 'date', '') or '')
+        if column == 'Contributor':
+            return str(getattr(paper, 'contributor', '') or '')
+        if column == 'Conference':
+            return str(getattr(paper, 'conference', '') or '')
+        if column == 'ReadStatus':
+            return str(getattr(paper, 'status', '') or '')
+        if column == 'Placeholder':
+            return 'Yes' if bool(getattr(paper, 'is_placeholder', False)) else 'No'
+        return ''
+
+    def _get_list_sort_key(self, paper, real_idx: int, column: str):
+        if column == 'ID':
+            return real_idx
+        if column == 'Date':
+            date_text = str(getattr(paper, 'date', '') or '').strip()
+            parts = date_text.split('-')
+            if len(parts) == 3 and all(p.isdigit() for p in parts):
+                try:
+                    return int(parts[0]), int(parts[1]), int(parts[2])
+                except Exception:
+                    pass
+            return (9999, 99, 99)
+        if column == 'Placeholder':
+            return int(bool(getattr(paper, 'is_placeholder', False)))
+        text = self._get_list_column_display_value(paper, real_idx, column)
+        return str(text or '').lower()
+
+    def _sort_filtered_indices_for_display(self, indices: List[int]) -> List[int]:
+        sort_col = self._list_sort_column
+        if not sort_col:
+            return list(indices)
+        if sort_col not in self._get_visible_list_columns():
+            return list(indices)
+
+        sorted_indices = list(indices)
+        sorted_indices.sort(
+            key=lambda ridx: self._get_list_sort_key(self.logic.papers[ridx], ridx, sort_col),
+            reverse=self._list_sort_desc,
+        )
+        return sorted_indices
+
+    def _is_drag_reorder_allowed(self) -> bool:
+        sort_col = self._list_sort_column
+        # 仅在无排序或按 # 排序时允许拖拽改序
+        return (not sort_col) or (sort_col == 'ID')
     
     def load_initial_data(self):
         try:
@@ -368,6 +552,14 @@ class PaperSubmissionGUI:
         )
         self.keyword_fields_btn.pack(side=tk.RIGHT, padx=(0, 5))
 
+        self.list_columns_btn = ttk.Button(
+            header_frame,
+            text='列(0)',
+            width=7,
+            command=self._toggle_list_columns_popup,
+        )
+        self.list_columns_btn.pack(side=tk.RIGHT, padx=(0, 5))
+
         # 4. 分类层级侧栏开关（位于筛选字段按钮左侧）
         self.category_sidebar_toggle_btn = ttk.Button(
             header_frame,
@@ -381,6 +573,7 @@ class PaperSubmissionGUI:
         for variable in self._keyword_field_options:
             self._search_field_vars[variable] = tk.BooleanVar(value=(variable in self._keyword_default_fields))
         self._update_keyword_field_button_text()
+        self._update_list_columns_button_text()
         
         # 占位符逻辑
         self._search_placeholder = "输入关键词进行筛选..."
@@ -454,16 +647,8 @@ class PaperSubmissionGUI:
         list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
         
-        columns = ("ID", "Title", "Status") 
-        self.paper_tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=15)
-        
-        self.paper_tree.heading("ID", text="#")
-        self.paper_tree.heading("Title", text="Title")
-        self.paper_tree.heading("Status", text="Status")
-        
-        self.paper_tree.column("ID", width=40, anchor="center", stretch=False)
-        self.paper_tree.column("Title", width=200, stretch=True)
-        self.paper_tree.column("Status", width=70, anchor="center", stretch=False)
+        self.paper_tree = ttk.Treeview(list_frame, columns=(), show="headings", height=15)
+        self._apply_paper_tree_columns()
         
         self.paper_tree.tag_configure('conflict', background=self.color_conflict)
         self.paper_tree.tag_configure('invalid', background=self.color_invalid)
@@ -2058,8 +2243,7 @@ class PaperSubmissionGUI:
             if not self._confirm_before_switch_or_restore(self.current_paper_index, show_popup=True):
                 return "break"
 
-        # 非筛选模式下允许拖拽排序；筛选模式仅作普通选择
-        if self._is_any_filter_active():
+        if not self._is_drag_reorder_allowed():
             return None
 
         # 仅在按下当前已选中项时进入“待拖拽”状态，移动超过阈值后才真正开始拖拽
@@ -2233,11 +2417,14 @@ class PaperSubmissionGUI:
         """更新列表中的单项显示"""
         children = self.paper_tree.get_children()
         if display_index < len(children):
-            title = paper.title[:150] + "..." if len(paper.title) > 150 else paper.title
-
+            real_idx = self.filtered_indices[display_index]
             status_str, tags = self._get_list_status_and_tags(paper)
-            
-            self.paper_tree.item(children[display_index], values=(display_index+1, title, status_str), tags=tags)
+            values = tuple(
+                status_str if col == 'Status' else self._get_list_column_display_value(paper, real_idx, col)
+                for col in self._get_visible_list_columns()
+            )
+
+            self.paper_tree.item(children[display_index], values=values, tags=tags)
 
     # ================= 验证视觉效果 =================
 
@@ -3863,22 +4050,24 @@ class PaperSubmissionGUI:
             status = self._get_status_filter_value()
 
         # 1. 获取筛选后的索引
-        self.filtered_indices, self._search_hit_fields_by_real_idx = self._filter_papers_with_match_fields(keyword, category, status)
+        filtered_indices, self._search_hit_fields_by_real_idx = self._filter_papers_with_match_fields(keyword, category, status)
+        self.filtered_indices = self._sort_filtered_indices_for_display(filtered_indices)
         
         # 2. 清空列表
         for item in self.paper_tree.get_children():
             self.paper_tree.delete(item)
             
         # 3. 填充列表
-        for display_i, real_idx in enumerate(self.filtered_indices):
+        visible_columns = self._get_visible_list_columns()
+        for real_idx in self.filtered_indices:
             paper = self.logic.papers[real_idx]
-            
-            title = paper.title[:150] + "..." if len(paper.title) > 150 else paper.title
-
             status_str, tags = self._get_list_status_and_tags(paper)
-            
-            # 修复：values 必须与 columns=("ID", "Title", "Status") 对应
-            self.paper_tree.insert("", "end", iid=str(real_idx), values=(display_i + 1, title, status_str), tags=tags)
+
+            values = tuple(
+                status_str if col == 'Status' else self._get_list_column_display_value(paper, real_idx, col)
+                for col in visible_columns
+            )
+            self.paper_tree.insert("", "end", iid=str(real_idx), values=values, tags=tags)
 
         self._rebuild_category_filter_tree(select_current=True)
         
@@ -4162,6 +4351,12 @@ class PaperSubmissionGUI:
             self._drag_press_item = None
             self._drag_press_xy = None
             return
+
+        if not self._is_drag_reorder_allowed():
+            self.drag_item = None
+            self._drag_press_item = None
+            self._drag_press_xy = None
+            return
         
         # 检测释放位置是否在 Treeview 内
         tv_width = self.paper_tree.winfo_width()
@@ -4175,18 +4370,30 @@ class PaperSubmissionGUI:
             return
 
         target_item = self.paper_tree.identify_row(event.y)
-        
-        if target_item and target_item != self.drag_item:
+
+        target_mode = 'row'
+        if not target_item:
+            children = self.paper_tree.get_children()
+            if children:
+                last_item = children[-1]
+                last_bbox = self.paper_tree.bbox(last_item)
+                if last_bbox and event.y > (last_bbox[1] + last_bbox[3]):
+                    target_mode = 'append-end'
+
+        if (target_item and target_item != self.drag_item) or target_mode == 'append-end':
             try:
                 real_from = int(self.drag_item)
-                real_to_target = int(target_item)
-                
-                from_index = self.filtered_indices.index(real_from)
-                to_index = self.filtered_indices.index(real_to_target)
-                
+                if target_mode == 'append-end':
+                    real_to_target = len(self.logic.papers) - 1
+                else:
+                    real_to_target = int(target_item)
+
+                from_index = real_from
+                to_index = real_to_target
+
                 self.logic.move_paper(from_index, to_index)
                 self.refresh_list_view()
-                self._highlight_paper(to_index) 
+                self._highlight_paper(to_index)
                 
             except ValueError:
                 pass 
