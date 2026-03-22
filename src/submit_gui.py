@@ -60,7 +60,7 @@ class PaperSubmissionGUI:
         self.style.configure('NeedsConfirm.TButton', foreground="#0D9ABA")
         self.style.configure('SearchHit.TLabel', foreground="#B54708")
 
-        self._default_status_values = ['unread', 'reading', 'done', 'skimmed', 'other person','adopted', 'rejected']
+        self._default_status_values = ['unread', 'reading', 'skimmed', 'done', 'other person','adopted', 'rejected']
         self._search_hit_fields_by_real_idx: Dict[int, set] = {}
 
         try:
@@ -879,7 +879,7 @@ class PaperSubmissionGUI:
                 text_frame = ttk.Frame(self.form_frame)
                 text_frame.grid(row=row, column=1, sticky="we", pady=(2, 2), padx=(5, 0))
                 
-                height = 7 if variable in ['abstract', 'notes'] else 5
+                height = 7 if variable in ['abstract', 'notes'] else 4
                 text_widget = scrolledtext.ScrolledText(text_frame, height=height, width=50, undo=True, maxundo=-1)
                 text_widget.grid(row=0, column=0, sticky="nsew")
                 
@@ -891,8 +891,7 @@ class PaperSubmissionGUI:
                 
                 text_widget.bind("<KeyRelease>", lambda e, v=variable, w=text_widget: self._on_field_change(v, w))
                 self._bind_widget_scroll_events(text_widget)
-                text_widget.bind('<Control-z>', lambda e: self._on_text_undo(e))
-                text_widget.bind('<Control-y>', lambda e: self._on_text_redo(e))
+                self._bind_text_widget_shortcuts(text_widget)
                 
             # === 6. Default String ===
             else:
@@ -4574,17 +4573,87 @@ class PaperSubmissionGUI:
         return bool(second)
 
     def _show_shortcut_help(self):
-        messagebox.showinfo(
-            "当前快捷键",
-            "Ctrl+S: 保存文件（优先保存到当前加载文件）\n"
-            "Ctrl+Shift+S: 另存为"
-        )
+        lines = []
+        for item in self._get_shortcut_catalog():
+            lines.append(f"{item['combo']}: {item['action']}\n  可用范围: {item['available']}")
+        messagebox.showinfo("当前快捷键", "\n\n".join(lines))
 
     def _bind_shortcuts(self):
-        self.root.bind("<Control-s>", self.save_current_file)
-        self.root.bind("<Control-S>", self.save_current_file)
-        self.root.bind("<Control-Shift-s>", self.save_all_papers)
-        self.root.bind("<Control-Shift-S>", self.save_all_papers)
+        for sequence, handler in self._get_global_shortcut_bindings():
+            self.root.bind(sequence, handler)
+
+    def _get_global_shortcut_bindings(self):
+        return [
+            ("<Control-s>", self.save_current_file),
+            ("<Control-S>", self.save_current_file),
+            ("<Control-Shift-s>", self.save_all_papers),
+            ("<Control-Shift-S>", self.save_all_papers),
+            ("<Alt-c>", self.copy_current_paper_title),
+            ("<Alt-C>", self.copy_current_paper_title),
+        ]
+
+    def _get_text_widget_shortcut_bindings(self):
+        return [
+            ('<Control-z>', self._on_text_undo),
+            ('<Control-y>', self._on_text_redo),
+        ]
+
+    def _bind_text_widget_shortcuts(self, text_widget):
+        for sequence, handler in self._get_text_widget_shortcut_bindings():
+            text_widget.bind(sequence, handler)
+
+    def _get_shortcut_catalog(self) -> List[Dict[str, str]]:
+        return [
+            {
+                'combo': 'Ctrl+S',
+                'action': '保存文件（优先保存到当前加载文件）',
+                'available': '全局可用（窗口内）',
+            },
+            {
+                'combo': 'Ctrl+Shift+S',
+                'action': '另存为',
+                'available': '全局可用（窗口内）',
+            },
+            {
+                'combo': 'Alt+C',
+                'action': '复制当前论文标题字段内容到剪贴板',
+                'available': '全局可用，但需要当前选中论文且标题非空',
+            },
+            {
+                'combo': 'Ctrl+Z',
+                'action': '撤销（Undo）',
+                'available': '仅当焦点在多行 text 文本框时可用',
+            },
+            {
+                'combo': 'Ctrl+Y',
+                'action': '重做（Redo）',
+                'available': '仅当焦点在多行 text 文本框时可用',
+            },
+        ]
+
+    def copy_current_paper_title(self, event=None):
+        paper = self._get_current_paper()
+        title_text = ''
+
+        title_widget = self.form_fields.get('title') if hasattr(self, 'form_fields') else None
+        if isinstance(title_widget, tk.Entry):
+            title_text = (title_widget.get() or '').strip()
+
+        if not title_text and paper is not None:
+            title_text = str(getattr(paper, 'title', '') or '').strip()
+
+        if not title_text:
+            self.update_status("复制标题失败：当前未选中论文或标题为空")
+            if event is not None:
+                return "break"
+            return False
+
+        self.root.clipboard_clear()
+        self.root.clipboard_append(title_text)
+        self.update_status("已复制当前论文标题")
+        if event is not None:
+            return "break"
+        return True
 
     def add_from_zotero_meta(self):
         s = self._show_zotero_input_dialog("从Zotero Meta新建论文")

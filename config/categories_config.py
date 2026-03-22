@@ -264,7 +264,7 @@ CATEGORIES_CONFIG = {
             "enabled": True,
             "description": "[三级分类]（User-level Perception） —  用户立场检测",
         },
-        {
+        {#也许改为恶意与异常用户检测更合适？，因为可能有专注于检测异常而非恶意用户的论文
             "unique_name": "Malicious User Detection",
             "order": 8,
             "name": "Malicious User Detection",
