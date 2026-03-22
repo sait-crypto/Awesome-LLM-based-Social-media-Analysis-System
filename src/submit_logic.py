@@ -10,7 +10,7 @@ import subprocess
 import time
 import shutil
 import uuid
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Set
 import re
 import copy # 新增
 
@@ -147,6 +147,149 @@ class SubmitLogic:
         return paper
 
     # ================= 筛选与搜索 =================
+
+    def _paper_category_set(self, paper: Paper) -> Set[str]:
+        raw_cat = getattr(paper, 'category', '') or ''
+        return {c.strip() for c in str(raw_cat).split('|') if c.strip()}
+
+    def build_category_hierarchy(self) -> Tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]], Dict[str, Dict[str, Any]]]:
+        """构建分类树结构并返回 (roots, children_map, by_unique_name)。"""
+        categories = self.config.get_active_categories() or []
+        by_unique: Dict[str, Dict[str, Any]] = {}
+        children_map: Dict[str, List[Dict[str, Any]]] = {}
+        roots: List[Dict[str, Any]] = []
+
+        for cat in categories:
+            unique_name = str(cat.get('unique_name', '')).strip()
+            if not unique_name:
+                continue
+            by_unique[unique_name] = cat
+
+        for cat in by_unique.values():
+            parent = str(cat.get('predecessor_category', '') or '').strip()
+            if parent and parent in by_unique:
+                children_map.setdefault(parent, []).append(cat)
+            else:
+                roots.append(cat)
+
+        roots.sort(key=lambda x: x.get('order', 0))
+        for key in children_map:
+            children_map[key].sort(key=lambda x: x.get('order', 0))
+
+        return roots, children_map, by_unique
+
+    def get_category_scope_with_descendants(self, selected_category: str) -> Set[str]:
+        """返回选中分类及其所有子孙分类的 unique_name 集合。"""
+        selected = (selected_category or '').strip()
+        if not selected:
+            return set()
+
+        _, children_map, by_unique = self.build_category_hierarchy()
+        if selected not in by_unique:
+            return set()
+
+        scope: Set[str] = set()
+        stack = [selected]
+        while stack:
+            current = stack.pop()
+            if current in scope:
+                continue
+            scope.add(current)
+            for child in children_map.get(current, []):
+                child_unique = str(child.get('unique_name', '')).strip()
+                if child_unique:
+                    stack.append(child_unique)
+        return scope
+
+    def get_category_counts_with_descendants(self, papers: Optional[List[Paper]] = None) -> Dict[str, int]:
+        """统计每个分类（含其所有子孙分类）的论文数量。"""
+        _, _, by_unique = self.build_category_hierarchy()
+        if not by_unique:
+            return {}
+
+        source_papers = papers if papers is not None else self.papers
+        counts: Dict[str, int] = {k: 0 for k in by_unique.keys()}
+        scope_cache: Dict[str, Set[str]] = {}
+
+        for unique_name in by_unique.keys():
+            scope_cache[unique_name] = self.get_category_scope_with_descendants(unique_name)
+
+        for paper in source_papers:
+            p_cats = self._paper_category_set(paper)
+            if not p_cats:
+                continue
+            for unique_name, scope in scope_cache.items():
+                if not p_cats.isdisjoint(scope):
+                    counts[unique_name] += 1
+
+        return counts
+
+    def generate_category_tree_structure_text(self) -> str:
+        """生成分类树结构文本（用于复制到剪贴板）。"""
+        roots, children_map, _ = self.build_category_hierarchy()
+        lines: List[str] = []
+
+        def dump_node(cat: Dict[str, Any], prefix: str = ''):
+            name = cat.get('name', '')
+            unique_name = cat.get('unique_name', '')
+            desc = cat.get('description', '')
+
+            lines.append(f"{prefix}{name}")
+            lines.append(f"{prefix}Unique Name: {unique_name}")
+            if desc:
+                lines.append(f"{prefix}Description: {desc}")
+            lines.append('')
+
+            for child in children_map.get(unique_name, []):
+                dump_node(child, prefix + '    ')
+
+        for root in roots:
+            dump_node(root)
+
+        return '\n'.join(lines).rstrip()
+
+    def filter_papers_with_match_fields(
+        self,
+        keyword: str = '',
+        selected_category: str = '',
+        status: str = '',
+        search_fields: Optional[List[str]] = None,
+    ) -> Tuple[List[int], Dict[int, Set[str]]]:
+        """关键词 + 分类(含子类) + 阅读状态联合筛选，并返回命中字段。"""
+        kw = (keyword or '').lower().strip()
+        status_filter = (status or '').strip()
+        fields = list(search_fields or ['title', 'authors', 'doi', 'notes'])
+
+        category_scope = self.get_category_scope_with_descendants(selected_category)
+
+        indices: List[int] = []
+        hit_fields: Dict[int, Set[str]] = {}
+
+        for i, paper in enumerate(self.papers):
+            if category_scope:
+                p_cats = self._paper_category_set(paper)
+                if p_cats.isdisjoint(category_scope):
+                    continue
+
+            if status_filter and status_filter != 'All Status':
+                paper_status = (getattr(paper, 'status', '') or '').strip()
+                if paper_status != status_filter:
+                    continue
+
+            matched: Set[str] = set()
+            if kw:
+                for variable in fields:
+                    value = getattr(paper, variable, '')
+                    text = '' if value is None else str(value)
+                    if text and kw in text.lower():
+                        matched.add(variable)
+                if not matched:
+                    continue
+
+            indices.append(i)
+            hit_fields[i] = matched
+
+        return indices, hit_fields
 
     def filter_papers(self, keyword: str = "", category: str = "") -> List[int]:
         """

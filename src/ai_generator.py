@@ -128,7 +128,7 @@ class AIGenerator:
                 
                 for i in sorted(list(set(pages_to_read))):
                     text += reader.pages[i].extract_text() + "\n"
-            return text[:15000] # 截断防止过长
+            return text[:20000] # 截断防止过长
         except Exception as e:
             return f"[Error reading PDF: {str(e)}]"
 
@@ -149,13 +149,15 @@ If the paper fits multiple categories, separate IDs with ';'.
 If it fits none, reply 'Uncategorized' and explain why.
 If the taxonomy needs modification (new category needed), output 'NEW: <suggestion>' and explain.
 If an item can be classified down to the secondary category, there is no need to fill in its corresponding primary category additionally.
+The classification hierarchy must be consistent: each child must conceptually fall under all of its ancestors without conflict.
+The paper must be highly consistent with its corresponding category, and the number of multiple categories should be as few as possible.
 最后翻译所有输出为中文
 
 {cat_prompt}
 
 Paper Title: {paper.title}
 Abstract: {paper.abstract}
-Context: {paper_text[:2000]}
+Context: {paper_text[:20000]}
 
 Response Format:
 ID1|ID2
@@ -170,16 +172,31 @@ Reasoning: ...
         suggested_cat = lines[0].strip()
         reasoning = "\n".join(lines[1:])
         
-        # 验证分类是否存在
-        valid_ids = [c['unique_name'] for c in categories]
-        parts = suggested_cat.split('|')
+        # 验证分类是否存在（兼容分隔符/名称/中英标点）
+        valid_ids = [str(c.get('unique_name', '')).strip() for c in categories if str(c.get('unique_name', '')).strip()]
+        name_to_id = {
+            str(c.get('name', '')).strip().lower(): str(c.get('unique_name', '')).strip()
+            for c in categories
+            if str(c.get('name', '')).strip() and str(c.get('unique_name', '')).strip()
+        }
+
+        normalized_text = suggested_cat
+        normalized_text = normalized_text.replace('；', ';').replace('，', ',').replace('、', ',').replace('\n', ',')
+        normalized_text = normalized_text.replace('ID:', '').replace('id:', '').replace('ID', '').replace('id', '')
+        for sep in [';', ',', '|']:
+            normalized_text = normalized_text.replace(sep, '|')
+
+        parts = [p.strip().strip('"\'') for p in normalized_text.split('|') if p.strip()]
         clean_parts = []
         for p in parts:
-            p = p.replace('ID:', '').replace('id:', '').replace('ID', '').replace('id', '').strip()
             if p in valid_ids:
                 clean_parts.append(p)
+                continue
+            mapped = name_to_id.get(p.lower())
+            if mapped:
+                clean_parts.append(mapped)
         
-        final_cat = "|".join(clean_parts)
+        final_cat = "|".join(dict.fromkeys(clean_parts))
         if not final_cat and "Uncategorized" not in suggested_cat and "NEW:" not in suggested_cat:
              # 如果解析失败，把整个回复当做 reasoning
              return "", response
@@ -195,7 +212,7 @@ Reasoning: ...
         base_prompt = f"""Paper: {paper.title}
 Category: {category_name}
 Abstract: {paper.abstract}
-Content Snippet: {paper_text[:3000]}
+Context: {paper_text[:20000]}
 
 Req: Generate content for field '{field}'.
 Constraint: 

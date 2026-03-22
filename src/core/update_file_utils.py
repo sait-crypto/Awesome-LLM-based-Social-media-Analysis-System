@@ -273,7 +273,8 @@ class UpdateFileUtils:
         {
           "meta": {
              "generated_at": "...",
-             "column_ids": ["uid", "doi", ...]  <-- 记录当前Tag配置的ID顺序
+             "column_ids": ["uid", "doi", ...],  <-- 记录当前Tag配置的ID顺序
+             "paper_count": 123, <-- 当前更新文件中的论文总数
           },
           "papers": [
              { "uid": "...", "doi": "...", ... }, <-- 键顺序与 column_ids 尽量保持一致（虽JSON无序，但便于阅读）
@@ -299,6 +300,7 @@ class UpdateFileUtils:
             
             existing_meta['generated_at'] = get_current_timestamp()
             existing_meta['column_ids'] = ordered_ids # 显式记录ID逻辑
+            existing_meta['paper_count'] = len(papers) # 当前更新文件中的论文总数
 
             array_fields = self._get_array_fields()
 
