@@ -187,9 +187,18 @@ class ZoteroProcessor:
             
             # 支持 ; / ； / | 混合分隔输入
             cat_names = [c.strip() for c in re.split(r'[;；|]', category_part) if c.strip()]
-            
-            # 添加到结果列表
-            categories.extend(cat_names)
+
+            # 规则：
+            # 1) 含 [AI]（不区分大小写）整项跳过
+            # 2) 其他任意 [....] 片段仅移除该片段，保留剩余文本
+            for cat_name in cat_names:
+                if re.search(r'\[\s*user old\s*\]', cat_name, re.IGNORECASE):
+                    continue
+
+                cleaned_name = re.sub(r'\[[^\]]*\]', '', cat_name)
+                cleaned_name = re.sub(r'\s{2,}', ' ', cleaned_name).strip()
+                if cleaned_name:
+                    categories.append(cleaned_name)
         
         # 去重并保持顺序
         seen = set()

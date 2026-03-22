@@ -59,6 +59,10 @@ class PaperSubmissionGUI:
         self.style.map('Required.TCombobox', fieldbackground=[('readonly', self.color_required_empty)])
         self.style.configure("Conflict.Treeview", background=self.color_conflict)
         self.style.configure('NeedsConfirm.TButton', foreground="#0D9ABA")
+        self.style.configure('SearchHit.TLabel', foreground="#B54708")
+
+        self._default_status_values = ['unread', 'reading', 'done', 'skimmed', 'adopted', 'rejected']
+        self._search_hit_fields_by_real_idx: Dict[int, set] = {}
 
         try:
             pipeline_cfg_max = int(self.settings['database'].get('max_pipeline_images_per_paper', 4))
@@ -88,6 +92,10 @@ class PaperSubmissionGUI:
         }
 
         self._field_vars: Dict[str, Any] = {}
+        self.field_labels: Dict[str, ttk.Label] = {}
+        self._search_fields_popup: Optional[tk.Toplevel] = None
+        self._search_field_vars: Dict[str, tk.BooleanVar] = {}
+        self._init_keyword_field_filter_config()
 
         self.setup_ui()
         
@@ -100,6 +108,126 @@ class PaperSubmissionGUI:
         
         self.tooltip = None
         self.show_placeholder()
+
+    def _init_keyword_field_filter_config(self):
+        self._keyword_field_options = [
+            'title',
+            'title_translation',
+            'abstract',
+            'doi',
+            'authors',
+            'date',
+            'summary_motivation',
+            'summary_innovation',
+            'summary_method',
+            'summary_conclusion',
+            'summary_limitation',
+            'conference',
+            'analogy_summary',
+            'contributor',
+            'notes',
+        ]
+        self._keyword_field_name_map = {}
+        for variable in self._keyword_field_options:
+            tag = self.config.get_tag_by_variable(variable) or {}
+            self._keyword_field_name_map[variable] = tag.get('display_name', variable)
+        self._keyword_default_fields = {'title', 'title_translation', 'abstract'}
+
+    def _get_status_values(self) -> List[str]:
+        status_tag = self.config.get_tag_by_variable('status') or {}
+        values = status_tag.get('options') or []
+        if isinstance(values, list) and values:
+            return [str(v).strip() for v in values if str(v).strip()]
+        return list(self._default_status_values)
+
+    def _get_selected_keyword_fields(self) -> List[str]:
+        return [k for k, v in self._search_field_vars.items() if v.get()]
+
+    def _get_status_filter_value(self) -> str:
+        combo = getattr(self, 'status_filter_combo', None)
+        if combo is None:
+            return 'All Status'
+        return combo.get() or 'All Status'
+
+    def _is_any_filter_active(self) -> bool:
+        return bool(
+            self._get_search_keyword()
+            or self.cat_filter_combo.get() != 'All Categories'
+            or self._get_status_filter_value() != 'All Status'
+        )
+
+    def _update_keyword_field_button_text(self):
+        if not hasattr(self, 'keyword_fields_btn'):
+            return
+        selected_names = [
+            self._keyword_field_name_map.get(v, v)
+            for v in self._get_selected_keyword_fields()
+        ]
+        if len(selected_names) <= 2:
+            text = '筛选字段: ' + '/'.join(selected_names)
+        else:
+            text = f'筛选字段({len(selected_names)})'
+        self.keyword_fields_btn.config(text=text)
+
+    def _toggle_keyword_fields_popup(self):
+        if self._search_fields_popup and self._search_fields_popup.winfo_exists():
+            self._search_fields_popup.destroy()
+            self._search_fields_popup = None
+            return
+
+        popup = tk.Toplevel(self.root)
+        popup.title('关键词筛选字段')
+        popup.transient(self.root)
+        popup.resizable(False, False)
+        self._search_fields_popup = popup
+
+        btn = self.keyword_fields_btn
+        x = btn.winfo_rootx()
+        y = btn.winfo_rooty() + btn.winfo_height() + 2
+        popup.geometry(f'+{x}+{y}')
+
+        frame = ttk.Frame(popup, padding=8)
+        frame.grid(row=0, column=0, sticky='nsew')
+        frame.columnconfigure(0, weight=1)
+
+        ttk.Label(frame, text='勾选参与关键词匹配的字段:').grid(row=0, column=0, sticky='w', pady=(0, 6))
+
+        row = 1
+        for variable in self._keyword_field_options:
+            name = self._keyword_field_name_map.get(variable, variable)
+            var_obj = self._search_field_vars.get(variable)
+            if var_obj is None:
+                continue
+            cb = ttk.Checkbutton(
+                frame,
+                text=name,
+                variable=var_obj,
+                command=self._on_keyword_field_selection_change,
+            )
+            cb.grid(row=row, column=0, sticky='w')
+            row += 1
+
+        footer = ttk.Frame(frame)
+        footer.grid(row=row, column=0, sticky='ew', pady=(8, 0))
+        ttk.Button(footer, text='全选', command=self._select_all_keyword_fields).pack(side=tk.LEFT)
+        ttk.Button(footer, text='默认', command=self._reset_default_keyword_fields).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(footer, text='关闭', command=self._toggle_keyword_fields_popup).pack(side=tk.RIGHT)
+
+        popup.protocol('WM_DELETE_WINDOW', self._toggle_keyword_fields_popup)
+
+    def _select_all_keyword_fields(self):
+        for var in self._search_field_vars.values():
+            var.set(True)
+        self._on_keyword_field_selection_change()
+
+    def _reset_default_keyword_fields(self):
+        for variable, var in self._search_field_vars.items():
+            var.set(variable in self._keyword_default_fields)
+        self._on_keyword_field_selection_change()
+
+    def _on_keyword_field_selection_change(self):
+        self._update_keyword_field_button_text()
+        self._on_search_change()
     
     def load_initial_data(self):
         try:
@@ -209,22 +337,37 @@ class PaperSubmissionGUI:
         header_frame = ttk.Frame(parent)
         header_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
         
-        # 1. 标题
-        list_title = ttk.Label(header_frame, text="📚 论文列表", font=("Arial", 11, "bold"))
-        list_title.pack(side=tk.LEFT, padx=(0, 5))
-        
+        # 1. 阅读状态筛选（位于分类筛选右侧）
+        self.status_filter_combo = ttk.Combobox(header_frame, state="readonly", width=12)
+        self.status_filter_combo['values'] = ['All Status'] + self._get_status_values()
+        self.status_filter_combo.set('All Status')
+        self.status_filter_combo.bind("<<ComboboxSelected>>", self._on_search_change)
+        self.status_filter_combo.pack(side=tk.RIGHT)
+
         # 2. 分类筛选 (Right)
         self.cat_filter_combo = ttk.Combobox(header_frame, state="readonly", width=15)
         cats = ["All Categories"] + [c['name'] for c in self.config.get_active_categories()]
         self.cat_filter_combo['values'] = cats
         self.cat_filter_combo.set("All Categories")
         self.cat_filter_combo.bind("<<ComboboxSelected>>", self._on_search_change)
-        self.cat_filter_combo.pack(side=tk.RIGHT)
-        
+        self.cat_filter_combo.pack(side=tk.RIGHT, padx=(0, 5))
+
         # 3. 搜索框 (Middle Fill) - 带占位符逻辑
         self.search_var = tk.StringVar()
         self.search_entry = ttk.Entry(header_frame, textvariable=self.search_var)
         self.search_entry.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=5)
+
+        # 4. 关键词字段筛选下拉（放在关键词搜索框左边）
+        self.keyword_fields_btn = ttk.Button(
+            header_frame,
+            text='字段',
+            width=9,
+            command=self._toggle_keyword_fields_popup,
+        )
+        self.keyword_fields_btn.pack(side=tk.RIGHT, padx=(0, 5))
+        for variable in self._keyword_field_options:
+            self._search_field_vars[variable] = tk.BooleanVar(value=(variable in self._keyword_default_fields))
+        self._update_keyword_field_button_text()
         
         # 占位符逻辑
         self._search_placeholder = "输入关键词进行筛选..."
@@ -335,6 +478,19 @@ class PaperSubmissionGUI:
         # padx=(5, 5) 这里的左边距需要手动调整以对齐下方的输入框起始位置
         # 下方输入框起始位置 = Label Width + Label Padding
         fill_zotero_btn.grid(row=0, column=1, sticky="ew", padx=(63, 0)) 
+
+        self.search_hit_preview = tk.Text(
+            self.form_container,
+            height=3,
+            wrap=tk.WORD,
+            relief=tk.GROOVE,
+            borderwidth=1,
+            background="#FFFBE6",
+        )
+        self.search_hit_preview.tag_configure('SearchHitPreviewKeyword', background="#FFE58F")
+        self.search_hit_preview.config(state='disabled')
+        self.search_hit_preview.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        self.search_hit_preview.grid_remove()
         
         # --- 可滚动区域 ---
         self.form_canvas = tk.Canvas(self.form_container)
@@ -348,11 +504,11 @@ class PaperSubmissionGUI:
         self.form_canvas.bind('<Enter>', lambda e: self._bind_global_scroll(self.form_canvas.yview_scroll))
         self.form_frame.bind('<Enter>', lambda e: self._bind_global_scroll(self.form_canvas.yview_scroll))
 
-        self.form_canvas.grid(row=1, column=0, sticky="nsew")
-        scrollbar.grid(row=1, column=1, sticky="ns")
+        self.form_canvas.grid(row=2, column=0, sticky="nsew")
+        scrollbar.grid(row=2, column=1, sticky="ns")
         
         self.form_container.columnconfigure(0, weight=1)
-        self.form_container.rowconfigure(1, weight=1)
+        self.form_container.rowconfigure(2, weight=1)
         
         self.form_frame.bind("<Configure>", lambda e: self.form_canvas.configure(scrollregion=self.form_canvas.bbox("all")))
         self.form_canvas.bind("<Configure>", self._on_canvas_configure)
@@ -375,6 +531,7 @@ class PaperSubmissionGUI:
         
         self.form_fields = {}
         self.field_widgets = {}
+        self.field_labels = {}
         self._field_vars = {}
         
         for tag in active_tags:
@@ -403,6 +560,7 @@ class PaperSubmissionGUI:
             label_sticky = tk.NW if field_type == 'text' else tk.W
             
             label.grid(row=row, column=0, sticky=label_sticky, pady=(2, 2))
+            self.field_labels[variable] = label
             if description: self.create_tooltip(label, description)
             
             # === 1. Category Field (Complex) ===
@@ -442,7 +600,7 @@ class PaperSubmissionGUI:
                 values = tag.get('options', [])
                 # Hardcoded fallback for status if not in config
                 if variable == 'status' and not values: 
-                    values = ['unread', 'reading', 'done', 'skimmed', 'adopted', 'conflict']
+                    values = self._get_status_values()
                 
                 combo = ttk.Combobox(self.form_frame, values=values, state='readonly')
                 combo.grid(row=row, column=1, sticky="we", pady=(2, 2), padx=(5, 0))
@@ -1446,7 +1604,167 @@ class PaperSubmissionGUI:
     def _on_search_change(self, *args):
         kw = self._get_search_keyword()
         cat = self.cat_filter_combo.get()
-        self.refresh_list_view(kw, cat)
+        status = self._get_status_filter_value()
+        self.refresh_list_view(kw, cat, status)
+
+    def _get_paper_field_text(self, paper, variable: str) -> str:
+        value = getattr(paper, variable, "")
+        if value is None:
+            return ""
+        return str(value)
+
+    def _filter_papers_with_match_fields(self, keyword: str = "", category: str = "", status: str = "") -> Tuple[List[int], Dict[int, set]]:
+        kw = (keyword or "").lower().strip()
+        cat = (category or "").strip()
+        status_filter = (status or "").strip()
+        search_fields = self._get_selected_keyword_fields()
+
+        indices: List[int] = []
+        hit_fields: Dict[int, set] = {}
+
+        for i, paper in enumerate(self.logic.papers):
+            if cat and cat != 'All Categories':
+                raw_cat = paper.category if paper.category else ""
+                p_cats = [c.strip() for c in str(raw_cat).split('|') if c.strip()]
+                if cat not in p_cats:
+                    continue
+
+            if status_filter and status_filter != 'All Status':
+                paper_status = (getattr(paper, 'status', '') or '').strip()
+                if paper_status != status_filter:
+                    continue
+
+            matched: set = set()
+            if kw:
+                for variable in search_fields:
+                    content = self._get_paper_field_text(paper, variable).lower()
+                    if content and kw in content:
+                        matched.add(variable)
+                if not matched:
+                    continue
+
+            indices.append(i)
+            hit_fields[i] = matched
+
+        return indices, hit_fields
+
+    def _apply_search_hit_highlight(self, real_idx: int):
+        for label in self.field_labels.values():
+            try:
+                label.configure(style='TLabel')
+            except Exception:
+                pass
+
+        for widget in self.form_fields.values():
+            if isinstance(widget, scrolledtext.ScrolledText):
+                self._clear_text_widget_search_highlight(widget)
+
+        if real_idx < 0:
+            self._update_search_hit_preview(real_idx)
+            return
+        if not self._get_search_keyword():
+            self._update_search_hit_preview(real_idx)
+            return
+
+        matched_fields = self._search_hit_fields_by_real_idx.get(real_idx, set())
+        for variable in matched_fields:
+            label = self.field_labels.get(variable)
+            if label is None:
+                continue
+            try:
+                label.configure(style='SearchHit.TLabel')
+            except Exception:
+                pass
+
+            widget = self.form_fields.get(variable)
+            if isinstance(widget, scrolledtext.ScrolledText):
+                self._highlight_keyword_in_text_widget(widget, self._get_search_keyword())
+
+        self._update_search_hit_preview(real_idx)
+
+    def _clear_text_widget_search_highlight(self, widget: scrolledtext.ScrolledText):
+        try:
+            widget.tag_remove('SearchHitTextKeyword', '1.0', tk.END)
+        except Exception:
+            pass
+
+    def _highlight_keyword_in_text_widget(self, widget: scrolledtext.ScrolledText, keyword: str):
+        self._clear_text_widget_search_highlight(widget)
+        kw = (keyword or '').strip()
+        if not kw:
+            return
+
+        widget.tag_configure('SearchHitTextKeyword', background="#FFE58F")
+        start = '1.0'
+        while True:
+            pos = widget.search(kw, start, stopindex=tk.END, nocase=True)
+            if not pos:
+                break
+            end_pos = f"{pos}+{len(kw)}c"
+            widget.tag_add('SearchHitTextKeyword', pos, end_pos)
+            start = end_pos
+
+    def _update_search_hit_preview(self, real_idx: int):
+        panel = getattr(self, 'search_hit_preview', None)
+        if panel is None:
+            return
+
+        keyword = self._get_search_keyword().strip()
+        matched_fields = self._search_hit_fields_by_real_idx.get(real_idx, set()) if real_idx >= 0 else set()
+        if real_idx < 0 or not keyword or not matched_fields:
+            panel.config(state='normal')
+            panel.delete('1.0', tk.END)
+            panel.config(state='disabled')
+            panel.grid_remove()
+            return
+
+        paper = self.logic.papers[real_idx] if 0 <= real_idx < len(self.logic.papers) else None
+        if paper is None:
+            panel.config(state='normal')
+            panel.delete('1.0', tk.END)
+            panel.config(state='disabled')
+            panel.grid_remove()
+            return
+
+        panel.config(state='normal')
+        panel.delete('1.0', tk.END)
+
+        ordered_vars = [v for v in self._keyword_field_options if v in matched_fields]
+        for variable in ordered_vars:
+            raw_text = self._get_paper_field_text(paper, variable).replace('\n', ' ')
+            if not raw_text:
+                continue
+
+            lower_text = raw_text.lower()
+            lower_kw = keyword.lower()
+            hit_pos = lower_text.find(lower_kw)
+            if hit_pos < 0:
+                continue
+
+            left = max(0, hit_pos - 24)
+            right = min(len(raw_text), hit_pos + len(keyword) + 24)
+            prefix = raw_text[left:hit_pos]
+            hit = raw_text[hit_pos:hit_pos + len(keyword)]
+            suffix = raw_text[hit_pos + len(keyword):right]
+
+            display_name = self._keyword_field_name_map.get(variable, variable)
+            panel.insert(tk.END, f"{display_name}: ")
+            panel.insert(tk.END, "..." if left > 0 else "")
+            panel.insert(tk.END, prefix)
+            kw_start = panel.index(tk.INSERT)
+            panel.insert(tk.END, hit)
+            kw_end = panel.index(tk.INSERT)
+            panel.tag_add('SearchHitPreviewKeyword', kw_start, kw_end)
+            panel.insert(tk.END, suffix)
+            panel.insert(tk.END, "..." if right < len(raw_text) else "")
+            panel.insert(tk.END, "\n")
+
+        content = panel.get('1.0', tk.END).strip()
+        panel.config(state='disabled')
+        if content:
+            panel.grid()
+        else:
+            panel.grid_remove()
 
     def _resolve_tree_target_indices(self, item_id: str) -> Tuple[int, int]:
         if not item_id:
@@ -1586,7 +1904,7 @@ class PaperSubmissionGUI:
                 return "break"
 
         # 非筛选模式下允许拖拽排序；筛选模式仅作普通选择
-        if self._get_search_keyword() or self.cat_filter_combo.get() != "All Categories":
+        if self._is_any_filter_active():
             return None
 
         # 仅在按下当前已选中项时进入“待拖拽”状态，移动超过阈值后才真正开始拖拽
@@ -1644,6 +1962,7 @@ class PaperSubmissionGUI:
                     self._update_file_confirm_button_state(variable)
                     if real_idx >= 0:
                         self._validate_single_field_visuals(variable, real_idx)
+            self._apply_search_hit_highlight(real_idx)
         finally: self._disable_callbacks = False
 
     def _on_field_change(self, variable, widget_or_var):
@@ -3086,17 +3405,27 @@ class PaperSubmissionGUI:
         tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         cats = self.config.get_active_categories()
-        parents = {c['unique_name']: c for c in cats if not c.get('primary_category')}
         children = {}
+        roots = []
         for c in cats:
-            p = c.get('primary_category')
-            if p:
-                children.setdefault(p, []).append(c)
-        
-        for pid, p in parents.items():
-            node = tree.insert("", "end", text=p['name'], values=(p['unique_name'], p.get('description','')))
-            for c in children.get(pid, []):
-                tree.insert(node, "end", text=c['name'], values=(c['unique_name'], c.get('description','')))
+            parent = c.get('predecessor_category')
+            if parent:
+                children.setdefault(parent, []).append(c)
+            else:
+                roots.append(c)
+
+        # sort lists for deterministic display
+        roots = sorted(roots, key=lambda x: x.get('order', 0))
+        for k in children:
+            children[k] = sorted(children[k], key=lambda x: x.get('order', 0))
+
+        def insert_rec(parent_id, cat):
+            node = tree.insert(parent_id, "end", text=cat['name'], values=(cat['unique_name'], cat.get('description','')))
+            for child in children.get(cat['unique_name'], []):
+                insert_rec(node, child)
+
+        for root in roots:
+            insert_rec("", root)
 
         def on_double_click(event):
             if not target_combo: return
@@ -3114,24 +3443,17 @@ class PaperSubmissionGUI:
             try:
                 text_lines = []
                 
-                # 遍历所有父分类
-                for pid, p in sorted(parents.items()):
-                    # 添加父分类
-                    text_lines.append(f"{p['name']}")
-                    text_lines.append(f"Unique Name: {p['unique_name']}")
-                    if p.get('description'):
-                        text_lines.append(f"Description: {p.get('description')}")
+                # 递归输出所有根分类及其子孙分类
+                def dump(cat, prefix=""):
+                    text_lines.append(f"{prefix}{cat['name']}")
+                    text_lines.append(f"{prefix}Unique Name: {cat['unique_name']}")
+                    if cat.get('description'):
+                        text_lines.append(f"{prefix}Description: {cat.get('description')}")
                     text_lines.append("")
-                    
-                    # 添加子分类
-                    child_list = children.get(pid, [])
-                    if child_list:
-                        for c in child_list:
-                            text_lines.append(f"└── {c['name']}")
-                            text_lines.append(f"     Unique Name: {c['unique_name']}")
-                            if c.get('description'):
-                                text_lines.append(f"     Description: {c.get('description')}")
-                            text_lines.append("")
+                    for child in children.get(cat['unique_name'], []):
+                        dump(child, prefix + "    ")
+                for root in sorted(roots, key=lambda x: x.get('order',0)):
+                    dump(root)
                 
                 
                 # 将文本复制到剪贴板
@@ -3360,12 +3682,17 @@ class PaperSubmissionGUI:
     
     def update_paper_list(self):
         """兼容旧调用的包装器"""
-        self.refresh_list_view(self._get_search_keyword(), self.cat_filter_combo.get())
+        self.refresh_list_view(self._get_search_keyword(), self.cat_filter_combo.get(), self._get_status_filter_value())
 
-    def refresh_list_view(self, keyword="", category=""):
+    def refresh_list_view(self, keyword="", category="", status=""):
         """根据搜索条件刷新列表 (修复列数据对应)"""
+        if category == "" and hasattr(self, 'cat_filter_combo'):
+            category = self.cat_filter_combo.get()
+        if status == "":
+            status = self._get_status_filter_value()
+
         # 1. 获取筛选后的索引
-        self.filtered_indices = self.logic.filter_papers(keyword, category)
+        self.filtered_indices, self._search_hit_fields_by_real_idx = self._filter_papers_with_match_fields(keyword, category, status)
         
         # 2. 清空列表
         for item in self.paper_tree.get_children():
@@ -3388,6 +3715,8 @@ class PaperSubmissionGUI:
             if not self._select_tree_item_by_real_index(real_idx, focus_item=False, see_item=False):
                 self.current_paper_index = -1
                 self.show_placeholder()
+            else:
+                self._apply_search_hit_highlight(real_idx)
         else:
             self.current_paper_index = -1
             self.show_placeholder()
@@ -3597,7 +3926,8 @@ class PaperSubmissionGUI:
     # ================= 拖拽排序功能 (修改：增加跟随窗口) =================
 
     def _on_drag_start(self, event):
-        if self._get_search_keyword() or self.cat_filter_combo.get() != "All Categories": return
+        if self._is_any_filter_active():
+            return
         item = self.paper_tree.identify_row(event.y)
         if item:
             self.drag_item = item

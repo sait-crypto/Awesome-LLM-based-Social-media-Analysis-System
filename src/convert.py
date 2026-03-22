@@ -71,45 +71,30 @@ class ReadmeGenerator:
         papers_by_category = self._group_papers_by_category(display_papers)
 
         markdown_output = ""
-        cats = [c for c in self.config.get_active_categories() if c.get('enabled', True)]
+        roots, children_map = self._build_category_tree()
 
-        children_map = {}
-        parents = []
-        for c in cats:
-            p = c.get('primary_category')
-            if p is None:
-                parents.append(c)
-            else:
-                children_map.setdefault(p, []).append(c)
+        def render_category(cat, depth: int = 0) -> str:
+            category_name = cat.get('name', cat.get('unique_name'))
+            category_key = cat.get('unique_name')
+            category_count, _ = self._get_category_paper_count_and_anchor(category_key, display_papers)
+            if category_count == 0:
+                return ""
 
-        parents = sorted(parents, key=lambda x: x.get('order', 0))
-        for k in children_map:
-            children_map[k] = sorted(children_map[k], key=lambda x: x.get('order', 0))
+            heading_level = min(6, 3 + depth)
+            heading_prefix = "| " if depth == 0 else ""
+            section = f"\n{'#' * heading_level} {heading_prefix}{category_name} ({category_count} papers)\n\n"
 
-        for parent in parents:
-            parent_name = parent.get('name', parent.get('unique_name'))
-            parent_key = parent.get('unique_name')
+            category_papers = papers_by_category.get(category_key, [])
+            if category_papers:
+                section += self._generate_category_table(category_papers)
 
-            parent_count, _ = self._get_category_paper_count_and_anchor(parent_key, display_papers)
+            for child in children_map.get(category_key, []):
+                section += render_category(child, depth + 1)
 
-            if parent_count == 0:
-                continue
+            return section
 
-            markdown_output += f"\n### | {parent_name} ({parent_count} papers)\n\n"
-
-            parent_papers = papers_by_category.get(parent_key, [])
-            if parent_papers:
-                markdown_output += self._generate_category_table(parent_papers)
-
-            child_list = children_map.get(parent_key, [])
-            for child in child_list:
-                child_name = child.get('name', child.get('unique_name'))
-                child_key = child.get('unique_name')
-                child_papers = papers_by_category.get(child_key, [])
-
-                if child_papers:
-                    markdown_output += f"\n### {child_name} ({len(child_papers)} papers)\n\n"
-                    markdown_output += self._generate_category_table(child_papers)
+        for root in roots:
+            markdown_output += render_category(root)
 
         return markdown_output
 
@@ -294,16 +279,39 @@ class ReadmeGenerator:
         s = re.sub(r'[^A-Za-z0-9\s\-]', '', s)
         return re.sub(r'\s+', '-', s)
 
+    def _build_category_tree(self):
+        cats = [c for c in self.config.get_active_categories() if c.get('enabled', True)]
+        children_map = {}
+        roots = []
+
+        for category in cats:
+            predecessor = category.get('predecessor_category')
+            if predecessor:
+                children_map.setdefault(predecessor, []).append(category)
+            else:
+                roots.append(category)
+
+        roots.sort(key=lambda x: x.get('order', 0))
+        for key in children_map:
+            children_map[key].sort(key=lambda x: x.get('order', 0))
+
+        return roots, children_map
+
     def _get_category_paper_count_and_anchor(self, unique_name: str, all_papers: List[Paper]) -> Tuple[int, str]:
         cat_config = self.config.get_category_by_unique_name(unique_name)
         if not cat_config:
             return 0, ""
 
-        target_cats = {unique_name}
-        if cat_config.get('primary_category') is None:
-            for c in self.config.get_active_categories():
-                if c.get('primary_category') == unique_name:
-                    target_cats.add(c['unique_name'])
+        _, children_map = self._build_category_tree()
+        target_cats = set()
+        stack = [unique_name]
+        while stack:
+            current = stack.pop()
+            if current in target_cats:
+                continue
+            target_cats.add(current)
+            for child in children_map.get(current, []):
+                stack.append(child['unique_name'])
 
         count = 0
         for p in all_papers:
@@ -311,58 +319,38 @@ class ReadmeGenerator:
             if not p_cats.isdisjoint(target_cats):
                 count += 1
 
-        prefix = "|-" if cat_config.get('primary_category') is None else ""
+        prefix = "|-" if cat_config.get('predecessor_category') is None else ""
         raw_anchor = f"{prefix}{cat_config.get('name', unique_name)} {count} papers"
         return count, self._slug(raw_anchor)
 
     def _generate_quick_links(self) -> str:
-        """根据 categories 配置生成 Quick Links 列表（插入到表格前）
-
-        支持两级分类：
-        - 一级分类（primary_category 为 None）作为父条目列出
-        - 二级分类（primary_category 指向父分类的 `unique_name`）会被放在对应一级分类下，换行并缩进显示
-        """
+        """根据 categories 配置递归生成 Quick Links 列表（插入到表格前）"""
         success, display_papers = self._load_display_papers()
         if success:
             self._current_display_papers = display_papers
-        cats = [c for c in self.config.get_active_categories() if c.get('enabled', True)]
-        if not cats:
+        roots, children_map = self._build_category_tree()
+        if not roots:
             return ""
 
-        children_map = {}
-        parents = []
-        for c in cats:
-            p = c.get('primary_category')
-            if p is None:
-                parents.append(c)
-            else:
-                children_map.setdefault(p, []).append(c)
-
-        parents = sorted(parents, key=lambda x: x.get('order', 0))
-        for k in children_map:
-            children_map[k] = sorted(children_map[k], key=lambda x: x.get('order', 0))
-
         lines = ["### Quick Links", ""]
-        for parent in parents:
-            name = parent.get('name', parent.get('unique_name'))
+
+        def append_link(category, depth: int = 0):
+            name = category.get('name', category.get('unique_name'))
             try:
-                parent_key = parent.get('unique_name')
-                parent_count, anchor = self._get_category_paper_count_and_anchor(parent_key, display_papers)
+                category_key = category.get('unique_name')
+                category_count, anchor = self._get_category_paper_count_and_anchor(category_key, display_papers)
             except Exception:
-                parent_count = 0
+                category_count = 0
                 anchor = ""
 
-            lines.append(f"  - [{name}](#{anchor}) ({parent_count} papers)")
-            
-            for child in children_map.get(parent.get('unique_name'), []):
-                child_name = child.get('name', child.get('unique_name'))
-                try:
-                    child_unique = child.get('unique_name')
-                    child_count, child_anchor = self._get_category_paper_count_and_anchor(child_unique, display_papers)
-                except Exception:
-                    child_count = 0
-                    child_anchor = ""
-                lines.append(f"    - [{child_name}](#{child_anchor}) ({child_count} papers)")
+            indent = "  " * (depth + 1)
+            lines.append(f"{indent}- [{name}](#{anchor}) ({category_count} papers)")
+
+            for child in children_map.get(category.get('unique_name'), []):
+                append_link(child, depth + 1)
+
+        for root in roots:
+            append_link(root)
 
         return "\n".join(lines)
 

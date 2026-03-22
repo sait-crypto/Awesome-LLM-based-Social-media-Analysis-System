@@ -96,7 +96,7 @@ TAGS_CONFIG = {
             "order": 4,                     # 不可更改，必须是4
             "table_name": "category",
             "display_name": "category",
-            "description": "论文的分类，可多选，用;分隔。注：有明确二级分类时，不需要填写它对应的一级分类",
+            "description": "论文的分类，可多选，用;分隔。若命中更深层分类，只填写最深层结果；若分类仍有下级分类，则该结果应视为未完成细分。",
             "type": "enum[]",                 #具体取值在categories_config.py中,[]表示可多选，之间用;隔开
             "validation": None,
             "show_in_readme": True,

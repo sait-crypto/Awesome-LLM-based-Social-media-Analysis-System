@@ -20,13 +20,13 @@ dependencies = [
     { name = "pandas" },
     { name = "pillow" },
     { name = "pypdf" },
-    { name = "tkinterdnd2" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "pyinstaller" },
     { name = "requests" },
+    { name = "tkinterdnd2" },
 ]
 
 [package.metadata]
@@ -35,13 +35,13 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pillow", specifier = ">=12.1.0" },
     { name = "pypdf", specifier = ">=6.6.2" },
-    { name = "tkinterdnd2", specifier = ">=0.4.3" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "pyinstaller", specifier = ">=6.18.0" },
     { name = "requests", specifier = ">=2.32.5" },
+    { name = "tkinterdnd2", specifier = ">=0.4.3" },
 ]
 
 [[package]]
