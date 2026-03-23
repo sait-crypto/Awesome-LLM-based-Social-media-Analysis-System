@@ -7,6 +7,7 @@ import os
 import sys
 import re
 import copy
+import json
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, scrolledtext, simpledialog
 from typing import Dict, List, Any, Optional, Tuple
@@ -2028,7 +2029,13 @@ class PaperSubmissionGUI:
         # Group 1: Script Tools
         script_frame = ttk.LabelFrame(buttons_frame, text="Script Tools")
         script_frame.grid(row=0, column=0, padx=5, sticky="ns")
-        ttk.Button(script_frame, text="🔄 运行更新", command=self.run_update_script, width=12).pack(side=tk.LEFT, padx=5, pady=5)
+        self.update_btn_var = tk.StringVar(value="🔄 运行更新 ▾")
+        self.update_btn = ttk.Button(script_frame, textvariable=self.update_btn_var, width=14)
+        self.update_btn.pack(side=tk.LEFT, padx=5, pady=5)
+        self.update_menu = tk.Menu(self.root, tearoff=0)
+        self.update_menu.add_command(label="🔄 正常更新", command=lambda: self.run_update_script(update_mode='normal'))
+        self.update_menu.add_command(label="🗂️ 只更新 database", command=lambda: self.run_update_script(update_mode='database-only'))
+        self.update_btn.bind("<ButtonPress-1>", self._on_update_menu_button_press)
         ttk.Button(script_frame, text="✅ 运行验证", command=self.run_validate_script, width=12).pack(side=tk.LEFT, padx=5, pady=5)
         ttk.Button(script_frame, text="🧹 清除冗余资源", command=self.cleanup_redundant_assets, width=14).pack(side=tk.LEFT, padx=5, pady=5)
 
@@ -2089,6 +2096,11 @@ class PaperSubmissionGUI:
 
     def _on_save_menu_button_press(self, event):
         self._post_menu_above_button(self.save_menu, self.save_btn)
+        self.root.focus_force()
+        return "break"
+
+    def _on_update_menu_button_press(self, event):
+        self._post_menu_above_button(self.update_menu, self.update_btn)
         self.root.focus_force()
         return "break"
 
@@ -2748,21 +2760,6 @@ class PaperSubmissionGUI:
                         "检测到该冲突条目存在基论文，不能直接取消冲突标记。\n请在左侧列表右键该条目，使用“⚔️ 处理冲突...”完成合并。"
                     )
                     return
-
-            # 勾选冲突标记后，同步状态字段
-            if new_bool and hasattr(current_paper, 'status'):
-                setattr(current_paper, 'status', 'conflict')
-                status_widget = self.form_fields.get('status')
-                if status_widget is not None:
-                    self._disable_callbacks = True
-                    try:
-                        if isinstance(status_widget, ttk.Combobox):
-                            status_widget.set('conflict')
-                        elif isinstance(status_widget, tk.Entry):
-                            status_widget.delete(0, tk.END)
-                            status_widget.insert(0, 'conflict')
-                    finally:
-                        self._disable_callbacks = False
         
         setattr(current_paper, variable, new_value)
         self._validate_single_field_visuals(variable, real_idx)
@@ -3569,22 +3566,89 @@ class PaperSubmissionGUI:
         self.root.wait_window(dialog)
         return bool(result['confirmed']), bool(include_var.get())
 
-    def run_update_script(self):
+    def _extract_update_result_json(self, output_text: str) -> Optional[Dict[str, Any]]:
+        prefix = "UPDATE_RESULT_JSON::"
+        for line in reversed(output_text.splitlines()):
+            line = line.strip()
+            if not line.startswith(prefix):
+                continue
+            payload = line[len(prefix):].strip()
+            if not payload:
+                continue
+            try:
+                parsed = json.loads(payload)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                return None
+        return None
+
+    def _maybe_prompt_reload_database_after_update(self, update_result: Dict[str, Any]):
+        loaded_file = self._get_current_loaded_file()
+        if not loaded_file:
+            return
+        if not self.logic._is_database_file(loaded_file):
+            return
+        if not update_result.get('database_changed'):
+            return
+
         if not messagebox.askyesno(
-            "运行更新",
-            "该按钮会执行更新流程：将更新文件合并到数据库，并尝试生成 README。\n"
-            "这会修改核心数据库文件。\n\n"
-            "运行后会在文本日志窗口中显示详细结果与错误信息。\n\n"
-            "是否继续？"
+            "database 变更提示",
+            "database 在更新中发生了变更，是否重新加载 database 文件？"
         ):
             return
 
-        cmd = [sys.executable, os.path.join(BASE_DIR, "src/update.py")]
+        target_db_path = loaded_file
+        try:
+            cnt = self.logic.load_papers_from_file(target_db_path)
+            self._apply_loaded_workspace_state(
+                target_db_path,
+                cnt,
+                status_text=f"已重新加载数据库: {os.path.basename(target_db_path)}",
+                show_success=False,
+            )
+        except Exception as ex:
+            messagebox.showerror("重新加载失败", str(ex))
+
+    def run_update_script(self, update_mode: str = 'normal'):
+        if update_mode == 'database-only':
+            title = "只更新 database"
+            content = (
+                "该模式不会处理任何记录在册的更新文件，只会执行一次 database 空更新（重写）。\n"
+                "这会修改核心数据库文件。\n\n"
+                "运行后会在文本日志窗口中显示详细结果与错误信息。\n\n"
+                "是否继续？"
+            )
+            status_running = "正在运行 database 空更新..."
+        else:
+            title = "运行更新"
+            content = (
+                "该按钮会执行更新流程：将更新文件合并到数据库，并尝试生成 README。\n"
+                "这会修改核心数据库文件。\n\n"
+                "运行后会在文本日志窗口中显示详细结果与错误信息。\n\n"
+                "是否继续？"
+            )
+            status_running = "正在运行更新脚本..."
+
+        if not messagebox.askyesno(title, content):
+            return
+
+        cmd = [sys.executable, os.path.join(BASE_DIR, "src/update.py"), "--mode", update_mode]
+
+        def _on_complete(return_code: int, output_text: str):
+            if return_code != 0:
+                return
+            update_result = self._extract_update_result_json(output_text)
+            if not update_result:
+                return
+            self._maybe_prompt_reload_database_after_update(update_result)
+
         self._run_command_with_output_window(
             title_base="更新脚本输出",
             cmd=cmd,
-            status_running="正在运行更新脚本...",
+            status_running=status_running,
             status_done="更新脚本执行完成",
+            on_complete=_on_complete,
         )
 
     def run_validate_script(self):
@@ -3619,7 +3683,14 @@ class PaperSubmissionGUI:
             append_log("=" * 70)
         return log_win, status_var, append_log, ts
 
-    def _run_command_with_output_window(self, title_base: str, cmd: List[str], status_running: str, status_done: str):
+    def _run_command_with_output_window(
+        self,
+        title_base: str,
+        cmd: List[str],
+        status_running: str,
+        status_done: str,
+        on_complete=None,
+    ):
         """运行命令并将输出实时显示到文本窗口"""
         log_win, status_var, append_log, _ = self._open_timestamped_output_session(
             title_base=title_base,
@@ -3630,6 +3701,7 @@ class PaperSubmissionGUI:
         append_log(f"$ {' '.join(cmd)}")
         append_log(f"cwd: {BASE_DIR}")
         append_log("=" * 70)
+        output_lines: List[str] = []
 
         def worker():
             try:
@@ -3654,6 +3726,7 @@ class PaperSubmissionGUI:
 
                 if proc.stdout is not None:
                     for line in proc.stdout:
+                        output_lines.append(line)
                         self.root.after(0, lambda l=line: append_log(l))
 
                 return_code = proc.wait()
@@ -3661,6 +3734,9 @@ class PaperSubmissionGUI:
                 self.root.after(0, lambda: append_log(f"进程结束，退出码: {return_code}"))
                 self.root.after(0, lambda: status_var.set(f"已结束（退出码: {return_code}）"))
                 self.root.after(0, lambda: self.update_status(status_done if return_code == 0 else f"{status_done}（退出码: {return_code}）"))
+                if on_complete is not None:
+                    output_text = ''.join(output_lines)
+                    self.root.after(0, lambda: on_complete(return_code, output_text))
             except Exception as e:
                 self.root.after(0, lambda: append_log(f"运行失败: {e}"))
                 self.root.after(0, lambda: status_var.set("运行失败"))

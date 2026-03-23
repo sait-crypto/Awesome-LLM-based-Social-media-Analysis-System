@@ -557,7 +557,7 @@ def _papers_fields_equal(new: Union[Paper, Dict[str, Any]], exist: Union[Paper, 
         return True, ''
 
 
-def is_duplicate_paper(existing_papers: List[Paper], new_paper: Paper, complete_compare=False) -> Tuple[bool, str]:
+def is_duplicate_paper(existing_papers: List[Paper], new_paper: Paper, ignore_fields: Optional[List[str]] = None, complete_compare=False) -> Tuple[bool, str]:
     """
     判断新提交是否为重复论文条目：
     - 在 existing_papers 中找出与 new_paper 表示相同论文（一致 identity）的条目集合；
@@ -570,7 +570,7 @@ def is_duplicate_paper(existing_papers: List[Paper], new_paper: Paper, complete_
     for ex in same_identity_entries:
         # _papers_fields_equal 的签名为 (new, exist, ...)
         # 这里应将新提交的论文放在第一个参数，已有条目放在第二个参数
-        equal, first_conflict_field = _papers_fields_equal(new_paper, ex, complete_compare)
+        equal, first_conflict_field = _papers_fields_equal(new_paper, ex, ignore_fields=ignore_fields, complete_compare=complete_compare)
         if equal:
             return True, ''
     return False, first_conflict_field
