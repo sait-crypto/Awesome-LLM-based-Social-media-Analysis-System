@@ -228,6 +228,13 @@ class DatabaseManager:
                     sorted_all_papers.extend(conflict_list)
                 
                 sorted_all_papers.append(main_paper)
+
+        try:
+            repaired = self.update_utils.repair_related_paper_references(sorted_all_papers)
+            if repaired > 0:
+                print(f"相关论文双向引用修正: {repaired} 篇论文已更新")
+        except Exception as ex:
+            print(f"相关论文引用修正失败（database）: {ex}")
         
         # 6. 保存
         success = self.save_database(sorted_all_papers)

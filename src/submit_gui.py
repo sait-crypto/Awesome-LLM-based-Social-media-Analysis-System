@@ -93,6 +93,8 @@ class PaperSubmissionGUI:
 
         self._field_vars: Dict[str, Any] = {}
         self.field_labels: Dict[str, ttk.Label] = {}
+        self._related_papers_ui_state: Dict[str, Dict[str, Any]] = {}
+        self._related_search_dialog: Optional[tk.Toplevel] = None
         self._search_fields_popup: Optional[tk.Toplevel] = None
         self._search_field_vars: Dict[str, tk.BooleanVar] = {}
         self._selected_category_filter = ""
@@ -104,6 +106,7 @@ class PaperSubmissionGUI:
         self._category_tree_count_width = int(default_layout.get('category_tree_count_width', 35))
         self._applying_workspace_layout = False
         self._updating_category_filter_tree = False
+        self._suppress_category_filter_select_event = False
         self._init_keyword_field_filter_config()
         self._init_list_column_config()
         self._list_columns_popup: Optional[tk.Toplevel] = None
@@ -1122,11 +1125,12 @@ class PaperSubmissionGUI:
         self.field_widgets = {}
         self.field_labels = {}
         self._field_vars = {}
+        self._related_papers_ui_state = {}
         
         for tag in active_tags:
             # 逻辑：如果是系统字段且不是管理员模式，隐藏
             # 管理员模式下，显示所有字段（包括 id, conflict_marker 等）
-            is_system = tag.get('system', False)
+            is_system = bool(tag.get('system_var', False))
             if is_system and not self.logic.is_admin:
                 continue
 
@@ -1183,6 +1187,10 @@ class PaperSubmissionGUI:
 
             elif variable == 'paper_file':
                 self._create_file_field_ui(row, variable)
+
+            # === 2.5 Related Papers (paper[]) ===
+            elif field_type == 'paper[]':
+                self._create_related_papers_field_ui(row, variable)
 
             # === 3. Standard Enum ===
             elif field_type == 'enum':
@@ -1985,6 +1993,13 @@ class PaperSubmissionGUI:
         combo.bind("<Enter>", lambda e, c=combo: self._show_category_tooltip(c), add='+')
         combo.bind("<Leave>", lambda e: self._hide_inline_tooltip(), add='+')
 
+        def goto_category_cb(c=combo):
+            self._goto_category_in_hierarchy_from_combo(c)
+
+        btn_goto_category = ttk.Button(row_frame, text="↗", width=3, command=goto_category_cb)
+        btn_goto_category.pack(side='left', padx=(4, 0))
+        self.create_tooltip(btn_goto_category, "转到 hierarchy 中该分类（自动展开并选中）")
+
         def tree_cb(c=combo):
             self.show_category_tree(target_combo=c)
             
@@ -2020,6 +2035,387 @@ class PaperSubmissionGUI:
         
         if len(self.category_rows) >= self._gui_category_max and is_first:
             btn.config(state='disabled')
+
+    def _goto_category_in_hierarchy(self, unique_name: str):
+        target = str(unique_name or '').strip()
+        if not target:
+            messagebox.showwarning('提示', '当前分类为空，无法定位')
+            return
+
+        prev_real_idx = self._get_current_real_index()
+
+        if not self._category_sidebar_visible:
+            self._suppress_category_filter_select_event = True
+            try:
+                self._toggle_category_filter_sidebar()
+            finally:
+                self._suppress_category_filter_select_event = False
+
+        tree = getattr(self, 'category_filter_tree', None)
+        if tree is None:
+            messagebox.showwarning('提示', '分类 hierarchy 不可用')
+            return
+
+        if not tree.exists(target):
+            self._rebuild_category_filter_tree(select_current=False)
+
+        if not tree.exists(target):
+            messagebox.showwarning('提示', f'分类不存在或未启用: {target}')
+            return
+
+        self._suppress_category_filter_select_event = True
+        try:
+            tree.selection_set(target)
+            tree.focus(target)
+            tree.see(target)
+        finally:
+            self._suppress_category_filter_select_event = False
+
+        if prev_real_idx >= 0 and prev_real_idx in self.filtered_indices:
+            self._activate_paper_by_real_index(prev_real_idx)
+
+    def _goto_category_in_hierarchy_from_combo(self, combo: ttk.Combobox):
+        display_name = str(combo.get() or '').strip()
+        if not display_name:
+            messagebox.showwarning('提示', '请先选择一个分类')
+            return
+
+        unique_name = str(getattr(self, 'category_mapping', {}).get(display_name, '') or '').strip()
+        if not unique_name:
+            messagebox.showwarning('提示', f'未找到该分类映射: {display_name}')
+            return
+
+        self._goto_category_in_hierarchy(unique_name)
+
+    def _parse_related_paper_values(self, raw_value: Any) -> List[str]:
+        items: List[str] = []
+        seen = set()
+        for part in str(raw_value or '').split('|'):
+            text = str(part or '').strip()
+            if not text:
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(text)
+        return items
+
+    def _find_paper_index_for_related_item(self, item_text: str, exclude_real_idx: Optional[int] = None) -> int:
+        key = str(item_text or '').strip().lower()
+        if not key:
+            return -1
+        for idx, paper in enumerate(self.logic.papers):
+            if exclude_real_idx is not None and idx == exclude_real_idx:
+                continue
+            p_doi = str(getattr(paper, 'doi', '') or '').strip().lower()
+            p_title = str(getattr(paper, 'title', '') or '').strip().lower()
+            if key and (key == p_doi or key == p_title):
+                return idx
+        return -1
+
+    def _get_related_values_for_paper(self, real_idx: int, variable: str) -> List[str]:
+        if real_idx < 0 or real_idx >= len(self.logic.papers):
+            return []
+        paper = self.logic.papers[real_idx]
+        return self._parse_related_paper_values(getattr(paper, variable, ''))
+
+    def _set_related_values_for_paper(self, real_idx: int, variable: str, values: List[str]):
+        if real_idx < 0 or real_idx >= len(self.logic.papers):
+            return
+        normalized = self._parse_related_paper_values('|'.join(values))
+        setattr(self.logic.papers[real_idx], variable, '|'.join(normalized))
+
+    def _create_related_papers_field_ui(self, row: int, variable: str):
+        frame = ttk.Frame(self.form_frame)
+        frame.grid(row=row, column=1, sticky="we", pady=(2, 2), padx=(5, 0))
+
+        plus_btn = ttk.Button(
+            frame,
+            text='+',
+            width=2,
+            command=lambda v=variable: self._open_related_paper_search_dialog(v),
+        )
+        plus_btn.pack(side=tk.LEFT, padx=(0, 4), anchor='n')
+        self.create_tooltip(plus_btn, '添加相关论文引用')
+
+        rows_container = ttk.Frame(frame)
+        rows_container.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        state = {
+            'rows_container': rows_container,
+            'rows': [],
+            'plus_btn': plus_btn,
+        }
+        self._related_papers_ui_state[variable] = state
+
+        self.form_fields[variable] = frame
+        self.field_widgets[variable] = frame
+
+        self._related_set_rows_from_value(variable, '')
+
+    def _related_set_rows_from_value(self, variable: str, raw_value: str):
+        state = self._related_papers_ui_state.get(variable)
+        if not state:
+            return
+
+        container = state.get('rows_container')
+        if container is None:
+            return
+
+        for child in container.winfo_children():
+            child.destroy()
+
+        values = self._parse_related_paper_values(raw_value)
+        state['rows'] = []
+
+        for item_text in values:
+            row_frame = ttk.Frame(container)
+            row_frame.pack(fill=tk.X, pady=1)
+
+            btn_remove = ttk.Button(
+                row_frame,
+                text='-',
+                width=2,
+                command=lambda v=variable, t=item_text: self._remove_related_reference_item(v, t),
+            )
+            btn_remove.pack(side=tk.LEFT, padx=(0, 4), anchor='w')
+
+            item_var = tk.StringVar(value=item_text)
+            entry = tk.Entry(row_frame, textvariable=item_var, state='readonly', relief=tk.GROOVE, borderwidth=2)
+            entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+            btn_goto = ttk.Button(
+                row_frame,
+                text='➡',
+                width=3,
+                command=lambda t=item_text: self._goto_related_paper_by_item(t),
+            )
+            btn_goto.pack(side=tk.RIGHT, padx=(5, 0))
+            self.create_tooltip(btn_goto, '转到该论文')
+
+            state['rows'].append({'frame': row_frame, 'entry': entry, 'value': item_text})
+
+    def _add_related_reference_bidirectional(self, variable: str, src_idx: int, dst_idx: int) -> bool:
+        if src_idx < 0 or dst_idx < 0 or src_idx >= len(self.logic.papers) or dst_idx >= len(self.logic.papers):
+            return False
+        if src_idx == dst_idx:
+            messagebox.showwarning('提示', '不能引用当前论文本身')
+            return False
+
+        src_paper = self.logic.papers[src_idx]
+        dst_paper = self.logic.papers[dst_idx]
+
+        src_title = str(getattr(src_paper, 'title', '') or '').strip()
+        dst_title = str(getattr(dst_paper, 'title', '') or '').strip()
+
+        if not dst_title:
+            messagebox.showwarning('提示', '目标论文没有 title，无法添加')
+            return False
+        if not src_title:
+            messagebox.showwarning('提示', '当前论文 title 为空，无法建立双向引用')
+            return False
+
+        src_values = self._get_related_values_for_paper(src_idx, variable)
+        dst_values = self._get_related_values_for_paper(dst_idx, variable)
+
+        src_before = list(src_values)
+        dst_before = list(dst_values)
+
+        if all(x.lower() != dst_title.lower() for x in src_values):
+            src_values.append(dst_title)
+        if all(x.lower() != src_title.lower() for x in dst_values):
+            dst_values.append(src_title)
+
+        self._set_related_values_for_paper(src_idx, variable, src_values)
+        self._set_related_values_for_paper(dst_idx, variable, dst_values)
+
+        return (src_before != src_values) or (dst_before != dst_values)
+
+    def _remove_related_reference_item(self, variable: str, item_text: str):
+        src_idx = self._get_current_real_index()
+        if src_idx < 0:
+            return
+
+        src_paper = self.logic.papers[src_idx]
+        src_title = str(getattr(src_paper, 'title', '') or '').strip()
+
+        src_values = self._get_related_values_for_paper(src_idx, variable)
+        target_key = str(item_text or '').strip().lower()
+        src_values = [x for x in src_values if str(x).strip().lower() != target_key]
+        self._set_related_values_for_paper(src_idx, variable, src_values)
+
+        dst_idx = self._find_paper_index_for_related_item(item_text, exclude_real_idx=src_idx)
+        if dst_idx >= 0 and src_title:
+            dst_values = self._get_related_values_for_paper(dst_idx, variable)
+            dst_values = [x for x in dst_values if str(x).strip().lower() != src_title.lower()]
+            self._set_related_values_for_paper(dst_idx, variable, dst_values)
+
+        paper = self.logic.papers[src_idx]
+        self._related_set_rows_from_value(variable, getattr(paper, variable, ''))
+        self._refresh_list_item(self.current_paper_index, paper)
+
+    def _collect_related_search_candidates(self, keyword: str, exclude_real_idx: int) -> List[int]:
+        kw = str(keyword or '').strip().lower()
+        candidates: List[int] = []
+        for idx, paper in enumerate(self.logic.papers):
+            if idx == exclude_real_idx:
+                continue
+            title = str(getattr(paper, 'title', '') or '').strip()
+            doi = str(getattr(paper, 'doi', '') or '').strip()
+            if not kw:
+                candidates.append(idx)
+                continue
+            if kw in title.lower() or kw in doi.lower():
+                candidates.append(idx)
+        return candidates
+
+    def _open_related_paper_search_dialog(self, variable: str):
+        src_idx = self._get_current_real_index()
+        if src_idx < 0:
+            messagebox.showwarning('提示', '请先选择一篇论文')
+            return
+
+        bound_paper = self.logic.papers[src_idx]
+        bound_title = str(getattr(bound_paper, 'title', '') or '').strip()
+        bound_doi = str(getattr(bound_paper, 'doi', '') or '').strip()
+
+        if self._related_search_dialog is not None and self._related_search_dialog.winfo_exists():
+            self._related_search_dialog.destroy()
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title('搜索相关论文')
+        dialog.geometry('780x460')
+        dialog.transient(self.root)
+        self._set_window_ontop(dialog)
+        self._related_search_dialog = dialog
+
+        root_frame = ttk.Frame(dialog, padding=8)
+        root_frame.pack(fill=tk.BOTH, expand=True)
+        root_frame.columnconfigure(0, weight=1)
+        root_frame.rowconfigure(2, weight=1)
+
+        ttk.Label(root_frame, text='输入 DOI 或标题关键词并双击条目添加：').grid(row=0, column=0, sticky='w', pady=(0, 6))
+        ttk.Label(
+            root_frame,
+            text=f"当前绑定论文: {bound_title} | DOI: {bound_doi}",
+            foreground='gray'
+        ).grid(row=0, column=0, sticky='e', pady=(0, 6))
+
+        keyword_var = tk.StringVar()
+        keyword_entry = ttk.Entry(root_frame, textvariable=keyword_var)
+        keyword_entry.grid(row=1, column=0, sticky='ew', pady=(0, 6))
+
+        list_frame = ttk.Frame(root_frame)
+        list_frame.grid(row=2, column=0, sticky='nsew')
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
+
+        listbox = tk.Listbox(list_frame)
+        listbox.grid(row=0, column=0, sticky='nsew')
+        sb = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=listbox.yview)
+        sb.grid(row=0, column=1, sticky='ns')
+        listbox.configure(yscrollcommand=sb.set)
+
+        def on_mousewheel(event):
+            if hasattr(event, 'delta') and event.delta:
+                step = -1 if event.delta > 0 else 1
+                listbox.yview_scroll(step, 'units')
+                return 'break'
+            if getattr(event, 'num', None) == 4:
+                listbox.yview_scroll(-1, 'units')
+                return 'break'
+            if getattr(event, 'num', None) == 5:
+                listbox.yview_scroll(1, 'units')
+                return 'break'
+            return None
+
+        for target in (dialog, root_frame, list_frame, listbox, keyword_entry, sb):
+            target.bind('<MouseWheel>', on_mousewheel, add='+')
+            target.bind('<Button-4>', on_mousewheel, add='+')
+            target.bind('<Button-5>', on_mousewheel, add='+')
+
+        idx_map: List[int] = []
+
+        def refresh_candidates(*_args):
+            listbox.delete(0, tk.END)
+            idx_map.clear()
+            candidates = self._collect_related_search_candidates(keyword_var.get(), src_idx)
+            for ridx in candidates:
+                paper = self.logic.papers[ridx]
+                title = str(getattr(paper, 'title', '') or '').strip()
+                doi = str(getattr(paper, 'doi', '') or '').strip()
+                text = f"{title}    | DOI: {doi}"
+                listbox.insert(tk.END, text)
+                idx_map.append(ridx)
+
+        def add_selected(_event=None):
+            sel = listbox.curselection()
+            if not sel:
+                return
+            chosen = sel[0]
+            if chosen < 0 or chosen >= len(idx_map):
+                return
+            dst_idx = idx_map[chosen]
+            changed = self._add_related_reference_bidirectional(variable, src_idx, dst_idx)
+            src_paper = self.logic.papers[src_idx]
+
+            if src_idx in self.filtered_indices:
+                self._refresh_list_item(self.filtered_indices.index(src_idx), src_paper)
+            if dst_idx in self.filtered_indices:
+                self._refresh_list_item(self.filtered_indices.index(dst_idx), self.logic.papers[dst_idx])
+
+            if self._get_current_real_index() == src_idx:
+                self._related_set_rows_from_value(variable, getattr(src_paper, variable, ''))
+
+            if changed:
+                self.update_status('已添加相关论文双向引用')
+            else:
+                self.update_status('相关论文引用已存在，未重复添加')
+
+            self._related_search_dialog = None
+            dialog.destroy()
+
+        keyword_var.trace_add('write', refresh_candidates)
+        listbox.bind('<Double-1>', add_selected)
+        ttk.Button(
+            root_frame,
+            text='关闭',
+            command=lambda: (setattr(self, '_related_search_dialog', None), dialog.destroy())
+        ).grid(row=3, column=0, sticky='e', pady=(8, 0))
+
+        refresh_candidates()
+        keyword_entry.focus_set()
+        dialog.protocol('WM_DELETE_WINDOW', lambda: (setattr(self, '_related_search_dialog', None), dialog.destroy()))
+
+    def _clear_all_filters_and_refresh(self):
+        if hasattr(self, 'status_filter_combo'):
+            self.status_filter_combo.set('All Status')
+        self._selected_category_filter = ''
+        if hasattr(self, 'search_var') and hasattr(self, 'search_entry'):
+            self._search_is_placeholder = True
+            self.search_var.set(self._search_placeholder)
+            try:
+                self.search_entry.config(foreground='gray')
+            except Exception:
+                pass
+        self.refresh_list_view('', '', 'All Status')
+
+    def _goto_related_paper_by_item(self, item_text: str):
+        src_idx = self._get_current_real_index()
+        target_idx = self._find_paper_index_for_related_item(item_text, exclude_real_idx=src_idx if src_idx >= 0 else None)
+        if target_idx < 0:
+            messagebox.showinfo('提示', '当前工作区未找到该相关论文（按 DOI/标题匹配）')
+            return
+
+        if target_idx in self.filtered_indices:
+            if not self._activate_paper_by_real_index(target_idx):
+                messagebox.showinfo('提示', '目标论文存在，但未能在当前列表中定位')
+            return
+
+        self._clear_all_filters_and_refresh()
+        if not self._activate_paper_by_real_index(target_idx):
+            messagebox.showinfo('提示', '目标论文存在，但未能在清空筛选后定位')
 
     def setup_buttons_frame(self, parent):
         """底部按钮区域"""
@@ -2352,7 +2748,7 @@ class PaperSubmissionGUI:
         self._on_search_change()
 
     def _on_category_filter_tree_select(self, event=None):
-        if self._updating_category_filter_tree:
+        if self._updating_category_filter_tree or self._suppress_category_filter_select_event:
             return
 
         tree = getattr(self, 'category_filter_tree', None)
@@ -2708,6 +3104,9 @@ class PaperSubmissionGUI:
 
                 elif variable == 'pipeline_image':
                     self._pipeline_set_rows_from_value(variable, str(value))
+
+                elif variable in self._related_papers_ui_state:
+                    self._related_set_rows_from_value(variable, str(value))
                 
                 elif isinstance(widget, ttk.Combobox): widget.set(str(value) if value else "")
                 elif isinstance(widget, tk.BooleanVar): widget.set(bool(value))
@@ -2825,8 +3224,9 @@ class PaperSubmissionGUI:
     def _refresh_list_item(self, display_index, paper):
         """更新列表中的单项显示"""
         children = self.paper_tree.get_children()
-        if display_index < len(children):
+        if display_index >= 0 and display_index < len(children):
             real_idx = self.filtered_indices[display_index]
+            paper = self.logic.papers[real_idx]
             status_str, tags = self._get_list_status_and_tags(paper)
             values = tuple(
                 status_str if col == 'Status' else self._get_list_column_display_value(paper, real_idx, col)
@@ -3017,10 +3417,14 @@ class PaperSubmissionGUI:
                 messagebox.showerror("权限错误", "写入数据库需要管理员权限。")
                 return False
             if messagebox.askyesno("警告", "正在写入核心数据库！\n\n数据库模式仅支持【全量重写】。\n这将用当前列表完全覆盖数据库内容。\n\n是否继续？"):
-                self.logic.save_to_file_by_mode(target_path, save_mode='rewrite')
-                self._set_current_loaded_file(target_path)
-                self.update_status(f"保存成功: {os.path.basename(target_path)} (rewrite)")
-                return True
+                try:
+                    self.logic.save_to_file_by_mode(target_path, save_mode='rewrite')
+                    self._set_current_loaded_file(target_path)
+                    self.update_status(f"保存成功: {os.path.basename(target_path)} (rewrite)")
+                    return True
+                except Exception as e:
+                    messagebox.showerror("保存失败", str(e))
+                    return False
             return False
 
         save_mode = self._get_save_mode()
@@ -4548,6 +4952,8 @@ class PaperSubmissionGUI:
 
     def refresh_list_view(self, keyword="", category="", status=""):
         """根据搜索条件刷新列表 (修复列数据对应)"""
+        prev_real_idx = self._get_current_real_index()
+
         if category == "":
             category = self._get_category_filter_value()
         if status == "":
@@ -4575,14 +4981,15 @@ class PaperSubmissionGUI:
 
         self._rebuild_category_filter_tree(select_current=True)
         
-        # 恢复选中状态
-        if self.current_paper_index >= 0 and self.current_paper_index < len(self.filtered_indices):
-            real_idx = self.filtered_indices[self.current_paper_index]
-            if not self._select_tree_item_by_real_index(real_idx, focus_item=False, see_item=False):
-                self.current_paper_index = -1
-                self.show_placeholder()
-            else:
-                self._apply_search_hit_highlight(real_idx)
+        # 恢复选中状态（按真实索引恢复，避免按显示位置错位）
+        if prev_real_idx >= 0 and prev_real_idx in self.filtered_indices:
+            self._suppress_select_event = True
+            try:
+                activated = self._activate_paper_by_real_index(prev_real_idx)
+            finally:
+                self._suppress_select_event = False
+            if activated:
+                self._apply_search_hit_highlight(prev_real_idx)
         else:
             self.current_paper_index = -1
             self.show_placeholder()

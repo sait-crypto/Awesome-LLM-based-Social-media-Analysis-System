@@ -395,6 +395,10 @@ class SubmitLogic:
     def _load_papers_into_workspace(self, filepath: str, set_current_file: bool = True) -> int:
         """统一加载逻辑：读取文件并写入当前工作集。"""
         self.papers = self._read_existing_papers(filepath)
+        try:
+            self.update_utils.repair_related_paper_references(self.papers)
+        except Exception as ex:
+            print(f"相关论文引用修正失败（工作区）: {ex}")
         if set_current_file:
             self.current_file_path = filepath
         return len(self.papers)
@@ -714,12 +718,16 @@ class SubmitLogic:
         # 如果是数据库，走数据库专用逻辑
         if self._is_database_file(target_path):
             if not self.is_admin: raise PermissionError("无权限写入数据库")
-            self.db_manager.save_database(self.papers)
+            success = self.db_manager.save_database(self.papers)
+            if not success:
+                raise IOError(self.update_utils.last_error or f"写入数据库失败: {target_path}")
         else:
             # 普通文件，先处理 Assets 归档
             for p in self.papers:
                 self.update_utils.normalize_assets(p)
-            self.update_utils.write_data(target_path, self.papers)
+            success = self.update_utils.write_data(target_path, self.papers)
+            if not success:
+                raise IOError(self.update_utils.last_error or f"写入失败: {target_path}")
 
     def save_to_file_incremental(self, target_path: str, conflict_decisions: Dict[Tuple[str, str], str]):
         """
@@ -753,7 +761,9 @@ class SubmitLogic:
         
         # 合并
         final_list = existing_papers + papers_to_append
-        self.update_utils.write_data(target_path, final_list)
+        success = self.update_utils.write_data(target_path, final_list)
+        if not success:
+            raise IOError(self.update_utils.last_error or f"写入失败: {target_path}")
         return final_list
 
     def save_to_file_by_mode(

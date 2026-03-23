@@ -24,6 +24,7 @@ class UpdateFileUtils:
     def __init__(self):
         self.config = get_config_instance()
         self.settings = get_config_instance().settings
+        self.last_error: str = ""
         # 路径配置
         self.backup_dir = self.settings['paths']['backup_dir']
         self.assets_dir = self.settings['paths'].get('assets_dir', 'assets/')
@@ -67,6 +68,118 @@ class UpdateFileUtils:
         items = self._array_string_to_json_list(value)
         return '|'.join(items)
 
+    def _get_related_papers_field_name(self) -> str:
+        """获取 related papers 字段名，优先使用 type=paper[] 的 tag。"""
+        for tag in self.config.get_active_tags():
+            var = str(tag.get('variable') or '').strip()
+            typ = str(tag.get('type') or '').strip().lower()
+            if var and typ == 'paper[]':
+                return var
+        return 'related_papers'
+
+    def repair_related_paper_references(self, papers: List[Paper], field_name: Optional[str] = None) -> int:
+        """
+        修正 related papers 双向引用关系。
+
+        规则：
+        1. 仅处理字段有值的论文，值按 '|' 解析并去重。
+        2. 引用项若能匹配到工作区内论文（标题或 DOI 精确不区分大小写），统一写回为目标论文 title。
+        3. 为每个可匹配引用补齐反向引用（目标论文增加源论文 title）。
+        4. 保留无法匹配到本地论文的原始项（避免信息丢失）。
+
+        返回：发生修改的论文数量。
+        """
+        if not papers:
+            return 0
+
+        rel_field = (field_name or '').strip() or self._get_related_papers_field_name()
+        if not rel_field:
+            return 0
+
+        def norm(text: Any) -> str:
+            return str(text or '').strip().lower()
+
+        def parse_unique(raw: Any) -> List[str]:
+            out: List[str] = []
+            seen = set()
+            for item in str(raw or '').split('|'):
+                s = str(item or '').strip()
+                if not s:
+                    continue
+                k = norm(s)
+                if k in seen:
+                    continue
+                seen.add(k)
+                out.append(s)
+            return out
+
+        def append_unique(items: List[str], val: str):
+            k = norm(val)
+            if not k:
+                return
+            if all(norm(x) != k for x in items):
+                items.append(val)
+
+        title_map: Dict[str, int] = {}
+        doi_map: Dict[str, int] = {}
+        for idx, paper in enumerate(papers):
+            title_key = norm(getattr(paper, 'title', ''))
+            doi_key = norm(getattr(paper, 'doi', ''))
+            if title_key and title_key not in title_map:
+                title_map[title_key] = idx
+            if doi_key and doi_key not in doi_map:
+                doi_map[doi_key] = idx
+
+        refs_by_idx: List[List[str]] = [parse_unique(getattr(p, rel_field, '')) for p in papers]
+
+        for src_idx, paper in enumerate(papers):
+            src_title = str(getattr(paper, 'title', '') or '').strip()
+            src_title_key = norm(src_title)
+
+            original_refs = list(refs_by_idx[src_idx])
+            rebuilt_refs: List[str] = []
+
+            for raw_ref in original_refs:
+                ref_key = norm(raw_ref)
+                if not ref_key:
+                    continue
+
+                dst_idx = -1
+                if ref_key in doi_map:
+                    dst_idx = doi_map[ref_key]
+                elif ref_key in title_map:
+                    dst_idx = title_map[ref_key]
+
+                if dst_idx < 0:
+                    append_unique(rebuilt_refs, raw_ref)
+                    continue
+
+                if dst_idx == src_idx:
+                    continue
+
+                dst_paper = papers[dst_idx]
+                dst_title = str(getattr(dst_paper, 'title', '') or '').strip()
+                if not dst_title:
+                    append_unique(rebuilt_refs, raw_ref)
+                    continue
+
+                append_unique(rebuilt_refs, dst_title)
+
+                if src_title_key and src_title_key != norm(dst_title):
+                    append_unique(refs_by_idx[dst_idx], src_title)
+
+            refs_by_idx[src_idx] = rebuilt_refs
+
+        changed = 0
+        for idx, paper in enumerate(papers):
+            new_val = '|'.join(refs_by_idx[idx])
+            old_val = str(getattr(paper, rel_field, '') or '').strip()
+            if old_val != new_val:
+                setattr(paper, rel_field, new_val)
+                changed += 1
+
+        return changed
+
     # ================= 统一 IO 接口 =================
 
     def read_data(self, filepath: str) -> Tuple[bool, List[Paper]]:
@@ -92,7 +205,9 @@ class UpdateFileUtils:
         根据后缀自动判断 CSV 或 JSON
         注意：此操作会自动规范化文件结构（重写表头/Meta）
         """
+        self.last_error = ""
         if not filepath:
+            self.last_error = "写入路径为空"
             return False
         
         ensure_directory(os.path.dirname(filepath))
@@ -103,7 +218,8 @@ class UpdateFileUtils:
         elif ext == '.csv':
             return self.save_papers_to_csv(filepath, papers)
         else:
-            print(f"不支持的写入格式: {filepath}")
+            self.last_error = f"不支持的写入格式: {filepath}"
+            print(self.last_error)
             return False
 
     # ================= CSV 处理 (核心逻辑) =================
@@ -216,7 +332,8 @@ class UpdateFileUtils:
                     writer.writerow(row)
             return True
         except Exception as e:
-            print(f"写入 CSV 失败 {filepath}: {e}")
+            self.last_error = f"写入 CSV 失败 {filepath}: {e}"
+            print(self.last_error)
             return False
 
     # ================= JSON 处理 (核心逻辑) =================
@@ -330,7 +447,8 @@ class UpdateFileUtils:
                 json.dump(output, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
-            print(f"写入 JSON 失败 {filepath}: {e}")
+            self.last_error = f"写入 JSON 失败 {filepath}: {e}"
+            print(self.last_error)
             return False
 
     # ================= 资源管理 (Assets) =================

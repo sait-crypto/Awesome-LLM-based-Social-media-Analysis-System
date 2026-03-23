@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generated_at": "2026-03-23 14:16:10",
+    "generated_at": "2026-03-24 01:31:27",
     "column_ids": [
       "doi",
       "title",
@@ -20,6 +20,7 @@
       "pipeline_image",
       "abstract",
       "contributor",
+      "related_papers",
       "notes",
       "show_in_readme",
       "status",
@@ -30,45 +31,9 @@
       "conflict_marker",
       "invalid_fields"
     ],
-    "paper_count": 7
+    "paper_count": 11
   },
   "papers": [
-    {
-      "doi": "10.1109/ICRA46639.2022.9811991",
-      "title": "Incorporating rich social interactions into MDPs",
-      "authors": "Ravi Tejwani, Yen-Ling Kuo, Tianmin Shu, Bennett Stankovits, Dan Gutfreund, Joshua B. Tenenbaum, Boris Katz, Andrei Barbu",
-      "date": "2022-05-23",
-      "category": [
-        "Agent-based Social Simulation",
-        "Dynamic Social Simulation",
-        "Individual-oriented Social Simulation",
-        "Micro Social Simulation"
-      ],
-      "summary_motivation": "",
-      "summary_innovation": "",
-      "summary_method": "",
-      "summary_conclusion": "",
-      "summary_limitation": "",
-      "paper_url": "https://ieeexplore.ieee.org/document/9811991/",
-      "project_url": "",
-      "conference": "2022 IEEE International Conference on Robotics and Automation (ICRA)",
-      "title_translation": "",
-      "analogy_summary": "TLDR: It is demonstrated that a rich theory of social interactions originating from microsociology can be formalized by extending a nested MDP where agents reason about arbitrary functions of each other's rewards, which allows for a robotic agent capable of executing social interactions in new environments with no interaction-specific training.",
-      "pipeline_image": [],
-      "abstract": "",
-      "contributor": "",
-      "notes": "catSuggestion\n{\n  \"target_ids\": [\n    \"Micro Social Simulation\",\n    \"Dynamic Social Simulation\",\n    \"Agent-based Social Simulation\",\n    \"Individual-oriented Social Simulation\"\n  ],\n  \"status\": \"matched\",\n  \"suggestion\": null,\n  \"meta\": {\n    \"title\": \"Incorporating rich social interactions into MDPs\",\n    \"publication_date\": \"2022-5-23\"\n  },\n  \"paper_summary\": \"\"\n}\nDeepSeek Analysis Data\n        Updated: 2026/3/8 22:19:55\n        Status: matched\n        Suggestion: None\n        \n        {\n  \"target_ids\": [\n    \"Social Simulation\"\n  ],\n  \"status\": \"matched\",\n  \"suggestion\": null\n}",
-      "show_in_readme": true,
-      "status": "unread",
-      "submission_time": "",
-      "is_placeholder": false,
-      "paper_file": "",
-      "uid": "6e88c8a1",
-      "conflict_marker": false,
-      "invalid_fields": [
-        "abstract"
-      ]
-    },
     {
       "doi": "10.48550/arXiv.2411.11581",
       "title": "OASIS: Open agent social interaction simulations with one million agents",
@@ -93,10 +58,11 @@
       "analogy_summary": "TLDR: OASIS is a generalizable and scalable social media simulator that replicates various social phenomena, including information spreading, group polarization, and herd effects across X and Reddit platforms, and demonstrates OASIS's potential as a powerful tool for studying complex systems in digital environments.",
       "pipeline_image": [],
       "abstract": "There has been a growing interest in enhancing rule-based agent-based models (ABMs) for social media platforms (i.e., X, Reddit) with more realistic large language model (LLM) agents, thereby allowing for a more nuanced study of complex systems. As a result, several LLM-based ABMs have been proposed in the past year. While they hold promise, each simulator is specifically designed to study a particular scenario, making it time-consuming and resource-intensive to explore other phenomena using the same ABM. Additionally, these models simulate only a limited number of agents, whereas real-world social media platforms involve millions of users. To this end, we propose OASIS, a generalizable and scalable social media simulator. OASIS is designed based on real-world social media platforms, incorporating dynamically updated environments (i.e., dynamic social networks and post information), diverse action spaces (i.e., following, commenting), and recommendation systems (i.e., interest-based and hot-score-based). Additionally, OASIS supports large-scale user simulations, capable of modeling up to one million users. With these features, OASIS can be easily extended to different social media platforms to study large-scale group phenomena and behaviors. We replicate various social phenomena, including information spreading, group polarization, and herd effects across X and Reddit platforms. Moreover, we provide observations of social phenomena at different agent group scales. We observe that the larger agent group scale leads to more enhanced group dynamics and more diverse and helpful agents' opinions. These findings demonstrate OASIS's potential as a powerful tool for studying complex systems in digital environments.",
-      "contributor": "",
+      "contributor": "me",
+      "related_papers": [],
       "notes": "catSuggestion\n{\n  \"target_ids\": [\n    \"Macro Social Simulation\",\n    \"Dynamic Social Simulation\",\n    \"Agent-based Social Simulation\",\n    \"Group-oriented Social Simulation\",\n    \"Social Simulation for Social Media\"\n  ],\n  \"status\": \"matched\",\n  \"suggestion\": null,\n  \"meta\": {\n    \"title\": \"OASIS: Open agent social interaction simulations with one million agents\",\n    \"publication_date\": \"2025-03-23\"\n  },\n  \"paper_summary\": \"There has been a growing interest in enhancing rule-based agent-based models (ABMs) for social media platforms (i.e., X, Reddit) with more realistic large language model (LLM) agents, thereby allowing for a more nuanced study of complex systems. As a result, several LLM-based ABMs have been proposed in the past year. While they hold promise, each simulator is specifically designed to study a particular scenario, making it time-consuming and resource-intensive to explore other phenomena using the\"\n}\nDeepSeek Analysis Data\n        Updated: 2026/3/8 22:19:11\n        Status: matched\n        Suggestion: None\n        \n        {\n  \"target_ids\": [\n    \"Social Network Simulation\"\n  ],\n  \"status\": \"matched\",\n  \"suggestion\": null\n}",
       "show_in_readme": true,
-      "status": "unread",
+      "status": "reading",
       "submission_time": "",
       "is_placeholder": false,
       "paper_file": "",
@@ -105,7 +71,7 @@
       "invalid_fields": []
     },
     {
-      "doi": "",
+      "doi": "10.0000/placeholder-Social-agents:",
       "title": "Social agents: Collective intelligence improves LLM predictions",
       "authors": "Aanisha Bhattacharyya, Abhilekh Borah, Yaman Kumar Singla, Rajiv Ratn Shah, Changyou Chen, Balaji Krishnamurthy",
       "date": "2025-10-08",
@@ -126,59 +92,101 @@
       "conference": "The Fourteenth International Conference on Learning Representations",
       "title_translation": "",
       "analogy_summary": "",
-      "pipeline_image": [],
+      "pipeline_image": [
+        "assets/7d44cfb3/COLLECTIVE INTELLIGENCE.png"
+      ],
       "abstract": "In human society, collective decision making has often outperformed the judgment of individuals. Classic examples range from estimating livestock weights to predicting elections and financial markets, where averaging many independent guesses often yields results more accurate than experts. These successes arise because groups bring together diverse perspectives, independent voices, and distributed knowledge, combining them in ways that cancel individual biases. This principle, known as the Wisdom of Crowds, underpins practices in forecasting, marketing, and preference modeling. Large Language Models (LLMs), however, typically produce a single definitive answer. While effective in many settings, this uniformity overlooks the diversity of human judgments shaping responses to ads, videos, and webpages. Inspired by how societies benefit from diverse opinions, we ask whether LLM predictions can be improved by simulating not one answer but many. We introduce Social Agents, a multi-agent framework that instantiates a synthetic society of human-like personas with diverse demographic (e.g., age, gender) and psychographic (e.g., values, interests) attributes. Each persona independently appraises a stimulus such as an advertisement, video, or webpage, offering both a quantitative score (e.g., click-through likelihood, recall score, likability) and a qualitative rationale. Aggregating these opinions produces a distribution of preferences that more closely mirrors real human crowds. Across eleven behavioral prediction tasks, Social Agents outperforms single-LLM baselines by up to 67.45% on simple judgments (e.g. webpage likability) and 9.88% on complex interpretive reasoning (e.g. video memorability). Social Agents’ individual persona predictions also align with human judgments, reaching Pearson correlations up to 0.71. These results position computational crowd simulation as a scalable, interpretable tool for improving behavioral prediction and supporting societal decision making.",
-      "contributor": "",
-      "notes": "catSuggestion\n{\n  \"target_ids\": [\n    \"Micro Social Simulation\",\n    \"Dynamic Social Simulation\",\n    \"Agent-based Social Simulation\",\n    \"Individual-oriented Social Simulation\",\n    \"Social Simulation for Social Media\"\n  ],\n  \"status\": \"matched\",\n  \"suggestion\": \"\",\n  \"meta\": {\n    \"title\": \"Social agents: Collective intelligence improves LLM predictions\",\n    \"publication_date\": \"2025/10/08\"\n  },\n  \"paper_summary\": \"In human society, collective decision making has often outperformed the judgment of individuals. Classic examples range from estimating livestock weights to predicting elections and financial markets, where averaging many independent guesses often yields results more accurate than experts. These successes arise because groups bring together diverse perspectives, independent voices, and distributed knowledge, combining them in ways that cancel individual biases. This principle, known as the Wisdo\"\n}",
+      "contributor": "me",
+      "related_papers": [],
+      "notes": "目的是通过agent小团体形式集体决策实现LLM本身预测能力提升，主要是处理社媒相关任务（如CTR）",
       "show_in_readme": true,
-      "status": "unread",
+      "status": "reading",
       "submission_time": "",
       "is_placeholder": false,
-      "paper_file": "",
+      "paper_file": "assets/7d44cfb3/Bhattacharyya 等 - 2025 - Social agents Collective intelligence improves LLM predictions.pdf",
       "uid": "7d44cfb3",
       "conflict_marker": false,
-      "invalid_fields": [
-        "doi"
-      ]
+      "invalid_fields": []
     },
     {
-      "doi": "",
+      "doi": "10.0000/placeholder-Social-interactions-as",
       "title": "Social interactions as recursive MDPs",
       "authors": "Ravi Tejwani, Yen-Ling Kuo, Tianmin Shu, Boris Katz, Andrei Barbu",
-      "date": "",
+      "date": "2022-01-11",
       "category": [
         "Agent-based Social Simulation",
         "Dynamic Social Simulation",
         "Individual-oriented Social Simulation",
-        "Micro Social Simulation",
-        "Social Simulation for Other Fields"
+        "Micro Social Simulation"
       ],
       "summary_motivation": "",
       "summary_innovation": "",
       "summary_method": "",
       "summary_conclusion": "",
       "summary_limitation": "",
-      "paper_url": "",
+      "paper_url": "https://proceedings.mlr.press/v164/tejwani22a.html",
       "project_url": "",
-      "conference": "",
+      "conference": "Conference on Robot Learning",
       "title_translation": "",
       "analogy_summary": "",
-      "pipeline_image": [],
+      "pipeline_image": [
+        "assets/e588ac3d/Social MDP-[1].png"
+      ],
       "abstract": "While machines and robots must interact with humans, providing them with social skills has been a largely overlooked topic. This is mostly a consequence of the fact that tasks such as navigation, command following, and even game playing are well-deﬁned, while social reasoning still mostly remains a pre-theoretic problem. We demonstrate how social interactions can be effectively incorporated into MDPs (Markov decision processes) by reasoning recursively about the goals of other agents. In essence, our method extends the reward function to include a combination of physical goals (something agents want to accomplish in the conﬁguration space, a traditional MDP) and social goals (something agents want to accomplish relative to the goals of other agents). Our Social MDPs allow specifying reward functions in terms of the estimated reward functions of other agents, modeling interactions such as helping or hindering another agent (by maximizing or minimizing the other agent’s reward) while balancing this with the actual physical goals of each agent. Our formulation allows for an arbitrary function of another agent’s estimated reward structure and physical goals, enabling more complex behaviors such as politely hindering another agent or aggressively helping them. Extending Social MDPs in the same manner as I-POMDPs (Interactivepartially observed Markov decision processes) extension would enable interactions such as convincing another agent that something is true. To what extent the Social MDPs presented here and their potential Social POMDPs variant account for all possible social interactions is unknown, but having a precise mathematical model to guide questions about social interactions has both practical value (we demonstrate how to make zero-shot social inferences and one could imagine chatbots and robots guided by Social MDPs) and theoretical value by bringing the tools of MDP that have so successfully organized research around navigation to shed light on what social interactions really are given their extreme importance to human well-being and human civilization.",
-      "contributor": "",
+      "contributor": "me",
+      "related_papers": [
+        "Incorporating rich social interactions into MDPs",
+        "Zero-Shot Linear Combinations of Grounded Social Interactions with Linear Social MDPs"
+      ],
       "notes": "catSuggestion\n{\n  \"target_ids\": [\n    \"Micro Social Simulation\",\n    \"Dynamic Social Simulation\",\n    \"Agent-based Social Simulation\",\n    \"Individual-oriented Social Simulation\",\n    \"Social Simulation for Other Fields\"\n  ],\n  \"status\": \"matched\",\n  \"suggestion\": \"\",\n  \"meta\": {\n    \"title\": \"Social interactions as recursive MDPs\",\n    \"publication_date\": null\n  },\n  \"paper_summary\": \"While machines and robots must interact with humans, providing them with social skills has been a largely overlooked topic. This is mostly a consequence of the fact that tasks such as navigation, command following, and even game playing are well-deﬁned, while social reasoning still mostly remains a pre-theoretic problem. We demonstrate how social interactions can be effectively incorporated into MDPs (Markov decision processes) by reasoning recursively about the goals of other agents. In essence\"\n}",
       "show_in_readme": true,
-      "status": "unread",
+      "status": "reading",
       "submission_time": "",
       "is_placeholder": false,
       "paper_file": "",
       "uid": "e588ac3d",
       "conflict_marker": false,
-      "invalid_fields": [
-        "doi",
-        "date",
-        "paper_url"
-      ]
+      "invalid_fields": []
+    },
+    {
+      "doi": "10.1109/ICRA46639.2022.9811991",
+      "title": "Incorporating rich social interactions into MDPs",
+      "authors": "Ravi Tejwani, Yen-Ling Kuo, Tianmin Shu, Bennett Stankovits, Dan Gutfreund, Joshua B. Tenenbaum, Boris Katz, Andrei Barbu",
+      "date": "2022-05-23",
+      "category": [
+        "Agent-based Social Simulation",
+        "Dynamic Social Simulation",
+        "Individual-oriented Social Simulation",
+        "Micro Social Simulation"
+      ],
+      "summary_motivation": "",
+      "summary_innovation": "",
+      "summary_method": "",
+      "summary_conclusion": "",
+      "summary_limitation": "",
+      "paper_url": "https://ieeexplore.ieee.org/document/9811991/",
+      "project_url": "",
+      "conference": "2022 IEEE International Conference on Robotics and Automation (ICRA)",
+      "title_translation": "",
+      "analogy_summary": "",
+      "pipeline_image": [
+        "assets/6e88c8a1/Social MDP-[2].png"
+      ],
+      "abstract": "Abstract— Much of what we do as humans is engage socially with other agents, a skill that robots must also eventually possess. We demonstrate that a rich theory of social interactions originating from microsociology and economics can be formalized by extending a nested MDP where agents reason about arbitrary functions of each other’s hidden rewards. This extended Social MDP allows us to encode the five basic interactions that underlie microsociology: cooperation, conflict, coercion, competition, and exchange. The result is a robotic agent capable of executing social interactions zero-shot in new environments; like humans it can engage socially in novel ways even without a single example of that social interaction. Moreover, the judgments of these Social MDPs align closely with those of humans when considering which social interaction is taking place in an environment. This method both sheds light on the nature of social interactions, by providing concrete mathematical definitions, and brings rich social interactions into a mathematical framework that has proven to be natural for robotics, MDPs.",
+      "contributor": "me",
+      "related_papers": [
+        "Social interactions as recursive MDPs",
+        "Zero-Shot Linear Combinations of Grounded Social Interactions with Linear Social MDPs"
+      ],
+      "notes": "[social MDP连续工作1]",
+      "show_in_readme": true,
+      "status": "reading",
+      "submission_time": "",
+      "is_placeholder": false,
+      "paper_file": "assets/6e88c8a1/Tejwani 等 - 2022 - Incorporating rich social interactions into MDPs.pdf",
+      "uid": "6e88c8a1",
+      "conflict_marker": false,
+      "invalid_fields": []
     },
     {
       "doi": "10.1609/aaai.v37i1.25080",
@@ -201,10 +209,16 @@
       "conference": "AAAI",
       "title_translation": "",
       "analogy_summary": "TLDR: A new model, the Linear Social MDP, enables zero-shot reasoning about complex social interactions, provides a mathematical basis for the long-standing intuition that social interactions should compose, and leads to interesting new behaviors that are validated using human observers.",
-      "pipeline_image": [],
+      "pipeline_image": [
+        "assets/473fbb19/Social MDP-[3].png"
+      ],
       "abstract": "Humans and animals engage in rich social interactions. It is often theorized that a relatively small number of basic social interactions give rise to the full range of behavior observed. But no computational theory explaining how social interactions combine together has been proposed before. We do so here. We take a model, the Social MDP, which is able to express a range of social interactions, and extend it to represent linear combinations of social interactions. Practically for robotics applications, such models are now able to not just express that an agent should help another agent, but to express goal-centric social interactions. Perhaps an agent is helping someone get dressed, but preventing them from falling, and is happy to exchange stories in the meantime. How an agent responds socially, should depend on what it thinks the other agent is doing at that point in time. To encode this notion, we take linear combinations of social interactions as defined in Social MDPs, and compute the weights on those combinations on the fly depending on the estimated goals of other agents. This new model, the Linear Social MDP, enables zero-shot reasoning about complex social interactions, provides a mathematical basis for the long-standing intuition that social interactions should compose, and leads to interesting new behaviors that we validate using human observers. Complex social interactions are part of the future of intelligent agents, and having principled mathematical models built on a foundation like MDPs will make it possible to bring social interactions to every robotic application.",
       "contributor": "",
-      "notes": "catSuggestion\n{\n  \"target_ids\": [\n    \"Micro Social Simulation\",\n    \"Dynamic Social Simulation\",\n    \"Agent-based Social Simulation\",\n    \"Individual-oriented Social Simulation\"\n  ],\n  \"status\": \"matched\",\n  \"suggestion\": \"\",\n  \"meta\": {\n    \"title\": \"Zero-Shot Linear Combinations of Grounded Social Interactions with Linear Social MDPs\",\n    \"publication_date\": \"2023-06-26\"\n  },\n  \"paper_summary\": \"Humans and animals engage in rich social interactions. It is often theorized that a relatively small number of basic social interactions give rise to the full range of behavior observed. But no computational theory explaining how social interactions combine together has been proposed before. We do so here. We take a model, the Social MDP, which is able to express a range of social interactions, and extend it to represent linear combinations of social interactions. Practically for robotics applic\"\n}",
+      "related_papers": [
+        "Social interactions as recursive MDPs",
+        "Incorporating rich social interactions into MDPs"
+      ],
+      "notes": "[social MDP连续工作3]",
       "show_in_readme": true,
       "status": "unread",
       "submission_time": "",
@@ -233,7 +247,8 @@
       "pipeline_image": [],
       "abstract": "Automatic counterspeech generation methods have been developed to assist efforts in combating hate speech. Existing research focuses on generating counterspeech with linguistic attributes such as being polite, informative, and intent-driven. However, the real impact of counterspeech in online environments is seldom considered. This study aims to develop methods for generating counterspeech constrained by conversation outcomes and evaluate their effectiveness. We experiment with large language models (LLMs) to incorporate into the text generation process two desired conversation outcomes: low conversation incivility and non-hateful hater reentry. Specifically, we experiment with instruction prompts, LLM finetuning, and LLM reinforcement learning (RL). Evaluation results show that our methods effectively steer the generation of counterspeech toward the desired outcomes. Our analyses, however, show that there are differences in the quality and style depending on the model.",
       "contributor": "",
-      "notes": "catSuggestion\n{\n  \"target_ids\": [\n    \"Counter-Hate Speech Generation\",\n    \"Social Simulation for Social Media\"\n  ],\n  \"status\": \"missing_category\",\n  \"suggestion\": \"Social Simulation for Counter-Hate Speech\",\n  \"meta\": {\n    \"title\": \"Outcome-Constrained Large Language Models for Countering Hate Speech\",\n    \"publication_date\": \"2024\"\n  },\n  \"paper_summary\": \"Automatic counterspeech generation methods have been developed to assist efforts in combating hate speech. Existing research focuses on generating counterspeech with linguistic attributes such as being polite, informative, and intent-driven. However, the real impact of counterspeech in online environments is seldom considered. This study aims to develop methods for generating counterspeech constrained by conversation outcomes and evaluate their effectiveness. We experiment with large language mo\"\n}",
+      "related_papers": [],
+      "notes": "",
       "show_in_readme": true,
       "status": "unread",
       "submission_time": "",
@@ -266,6 +281,7 @@
       "pipeline_image": [],
       "abstract": "Recent advancements in deep learning have significantly enhanced the efficiency and accuracy of natural language processing (NLP) tasks. However, these models often require substantial computational resources, which remains a major drawback. Reducing the complexity of deep learning architectures, and exploring simpler yet effective approaches can lead to cost-efficient NLP solutions. This is also a step towards explainable AI, i.e., uncovering how a particular task is carried out. For this analysis, we chose the task of hate speech detection. We address hate speech detection by introducing a model that employs a weighted sum of valence, arousal, and dominance (VAD) scores for classification. To determine the optimal weights and classification strategies, we analyze hate speech and non-hate speech words based on both their individual and summed VAD-values. Our experimental results demonstrate that this straightforward approach can compete with state-of-the-art neural network methods, including GPT-based models, in detecting hate speech.",
       "contributor": "",
+      "related_papers": [],
       "notes": "catSuggestion\n{\n  \"target_ids\": [\n    \"Hate Speech Analysis\"\n  ],\n  \"status\": \"matched\",\n  \"suggestion\": null,\n  \"meta\": {\n    \"title\": \"Towards Explainable Hate Speech Detection\",\n    \"publication_date\": \"2025\"\n  },\n  \"paper_summary\": \"Recent advancements in deep learning have significantly enhanced the efficiency and accuracy of natural language processing (NLP) tasks. However, these models often require substantial computational resources, which remains a major drawback. Reducing the complexity of deep learning architectures, and exploring simpler yet effective approaches can lead to cost-efficient NLP solutions. This is also a step towards explainable AI, i.e., uncovering how a particular task is carried out. For this analy\"\n}",
       "show_in_readme": true,
       "status": "unread",
@@ -275,6 +291,151 @@
       "uid": "d756f316",
       "conflict_marker": false,
       "invalid_fields": []
+    },
+    {
+      "doi": "10.1145/3746027.3754828",
+      "title": "From individuals to crowds: Dual-level public response prediction in social media",
+      "authors": "Jinghui Zhang, Kaiyang Wan, Longwei Xu, Ao Li, Zongfang Liu, Xiuying Chen",
+      "date": "十月 27, 2025",
+      "category": [
+        "Dynamic Social Simulation",
+        "Empirical-and-statistical-model-based Social Simulation",
+        "Macro Social Simulation",
+        "Micro Social Simulation",
+        "Social Simulation for Social Media"
+      ],
+      "summary_motivation": "",
+      "summary_innovation": "",
+      "summary_method": "",
+      "summary_conclusion": "",
+      "summary_limitation": "",
+      "paper_url": "https://dl.acm.org/doi/10.1145/3746027.3754828",
+      "project_url": "",
+      "conference": "Proceedings of the 33rd ACM International Conference on Multimedia",
+      "title_translation": "",
+      "analogy_summary": "TLDR: Experimental results on SentiWeibo and related LaMP benchmark demonstrate that SocialAlign surpasses strong baselines, showing improved accuracy, interpretability, and generalization in public response prediction.",
+      "pipeline_image": [],
+      "abstract": "Public response prediction is critical for understanding how individuals or groups might react to specific events, policies, or social phenomena, making it highly valuable for crisis management, policy-making, and social media analysis. However, existing works face notable limitations. First, they lack micro-level personalization, producing generic responses that ignore individual user preferences. Moreover, they overlook macro-level sentiment distribution and only deal with individual-level sentiment, constraining them from analyzing broader societal trends and group sentiment dynamics. To address these challenges, we propose SocialAlign, a unified framework that predicts real-world responses at both micro and macro levels in social contexts. At the micro level, SocialAlign employs SocialLLM with an articulate Personalized Analyze-Compose LoRA (PAC-LoRA) structure, which deploys specialized expert modules for content analysis and response generation across diverse topics and user profiles, enabling the generation of personalized comments with corresponding sentiments. At the macro level, it models group sentiment distributions and aligns predictions with real-world sentiment trends derived from social media data. To evaluate SocialAlign in real-world scenarios, we introduce SentiWeibo, a large-scale dataset curated from authentic social interactions on the Weibo platform. Experimental results on our SentiWeibo and related LaMP benchmark demonstrate that SocialAlign surpasses strong baselines, showing improved accuracy, interpretability, and generalization in public response prediction. We hope our work inspires further research in public response prediction and computational social science: https://github.com/Znull-1220/SocialAlign.",
+      "contributor": "",
+      "related_papers": [],
+      "notes": "catSuggestion\n{\n  \"target_ids\": [\n    \"Social Simulation for Social Media\",\n    \"Micro Social Simulation\",\n    \"Macro Social Simulation\",\n    \"Dynamic Social Simulation\",\n    \"Empirical-and-statistical-model-based Social Simulation\"\n  ],\n  \"status\": \"matched\",\n  \"suggestion\": \"\",\n  \"meta\": {\n    \"title\": \"From individuals to crowds: Dual-level public response prediction in social media\",\n    \"publication_date\": \"十月 27, 2025\"\n  },\n  \"paper_summary\": \"Public response prediction is critical for understanding how individuals or groups might react to specific events, policies, or social phenomena, making it highly valuable for crisis management, policy-making, and social media analysis. However, existing works face notable limitations. First, they lack micro-level personalization, producing generic responses that ignore individual user preferences. Moreover, they overlook macro-level sentiment distribution and only deal with individual-level sen\"\n}",
+      "show_in_readme": true,
+      "status": "unread",
+      "submission_time": "",
+      "is_placeholder": false,
+      "paper_file": "",
+      "uid": "9e6ef8d8",
+      "conflict_marker": false,
+      "invalid_fields": [
+        "date"
+      ]
+    },
+    {
+      "doi": "10.1145/3543873.3587605",
+      "title": "LLMs to the Moon? Reddit Market Sentiment Analysis with Large Language Models",
+      "authors": "Xiang Deng, Vasilisa Bashlovkina, Feng Han, Simon Baumgartner, Michael Bendersky",
+      "date": "2023-04-30",
+      "category": [
+        "Sentiment Analysis",
+        "Social Simulation for Social Media"
+      ],
+      "summary_motivation": "",
+      "summary_innovation": "",
+      "summary_method": "",
+      "summary_conclusion": "",
+      "summary_limitation": "",
+      "paper_url": "https://dl.acm.org/doi/10.1145/3543873.3587605",
+      "project_url": "",
+      "conference": "Companion Proceedings of the ACM Web Conference 2023",
+      "title_translation": "",
+      "analogy_summary": "TLDR: This case study conducts a case study approaching market sentiment analysis on social media content with semi-supervised learning using a large language model (LLM), finding that prompting the LLM to produce Chain-of-Thought summaries and forcing it through several reasoning paths helps generate more stable and accurate labels.",
+      "pipeline_image": [],
+      "abstract": "Market sentiment analysis on social media content requires knowledge of both financial markets and social media jargon, which makes it a challenging task for human raters. The resulting lack of high-quality labeled data stands in the way of conventional supervised learning methods. In this work, we conduct a case study approaching this problem with semi-supervised learning using a large language model (LLM). We select Reddit as the target social media platform due to its broad coverage of topics and content types. Our pipeline first generates weak financial sentiment labels for Reddit posts with an LLM and then uses that data to train a small model that can be served in production. We find that prompting the LLM to produce Chain-of-Thought summaries and forcing it through several reasoning paths helps generate more stable and accurate labels, while training the student model using a regression loss further improves distillation quality. With only a handful of prompts, the final model performs on par with existing supervised models. Though production applications of our model are limited by ethical considerations, the model’s competitive performance points to the great potential of using LLMs for tasks that otherwise require skill-intensive annotation.",
+      "contributor": "",
+      "related_papers": [],
+      "notes": "catSuggestion\n{\n  \"target_ids\": [\n    \"Sentiment Analysis\",\n    \"Social Simulation for Social Media\"\n  ],\n  \"status\": \"matched\",\n  \"meta\": {\n    \"title\": \"LLMs to the Moon? Reddit Market Sentiment Analysis with Large Language Models\",\n    \"publication_date\": \"2023-04-30\"\n  },\n  \"paper_summary\": \"Market sentiment analysis on social media content requires knowledge of both financial markets and social media jargon, which makes it a challenging task for human raters. The resulting lack of high-quality labeled data stands in the way of conventional supervised learning methods. In this work, we conduct a case study approaching this problem with semi-supervised learning using a large language model (LLM). We select Reddit as the target social media platform due to its broad coverage of topics\"\n}\nDeepSeek Analysis Data\n        Updated: 2026/3/8 22:19:07\n        Status: matched\n        Suggestion: None\n        \n        {\n  \"target_ids\": [\n    \"Sentiment Analysis\"\n  ],\n  \"status\": \"matched\"\n}",
+      "show_in_readme": true,
+      "status": "unread",
+      "submission_time": "",
+      "is_placeholder": false,
+      "paper_file": "",
+      "uid": "adfb2fb1",
+      "conflict_marker": false,
+      "invalid_fields": []
+    },
+    {
+      "doi": "10.18653/v1/2025.emnlp-main.619",
+      "title": "A symbolic adversarial learning framework for evolving fake news generation and detection",
+      "authors": "Chong Tian, Qirong Ho, Xiuying Chen",
+      "date": "2025-11",
+      "category": [
+        "Agent-based Social Simulation",
+        "Dynamic Social Simulation",
+        "Individual-oriented Social Simulation",
+        "Micro Social Simulation",
+        "Social Simulation for Social Media"
+      ],
+      "summary_motivation": "",
+      "summary_innovation": "",
+      "summary_method": "",
+      "summary_conclusion": "",
+      "summary_limitation": "",
+      "paper_url": "https://aclanthology.org/2025.emnlp-main.619/",
+      "project_url": "",
+      "conference": "EMNLP 2025",
+      "title_translation": "",
+      "analogy_summary": "",
+      "pipeline_image": [],
+      "abstract": "Rapid LLM advancements heighten fake news risks by enabling the automatic generation of increasingly sophisticated misinformation. Previous detection methods, including fine-tuned small models or LLM-based detectors, often struggle with its dynamically evolving nature. In this work, we propose a novel framework called the Symbolic Adversarial Learning Framework (SALF), which implements an adversarial training paradigm by an agent symbolic learning optimization process, rather than relying on numerical updates. SALF introduces a paradigm where the generation agent crafts deceptive narratives, and the detection agent uses structured debates to identify logical and factual flaws for detection, and they iteratively refine themselves through such adversarial interactions. Unlike traditional neural updates, we represent agents using agent symbolic learning, where learnable weights are defined by agent prompts, and simulate back-propagation and gradient descent by operating on natural language representations of weights, loss, and gradients. Experiments on two multilingual benchmark datasets demonstrate SALF's effectiveness, showing it generates sophisticated fake news that degrades state-of-the-art detection performance by up to 53.4% in Chinese and 34.2% in English on average. SALF also refines detectors, improving detection of refined content by up to 7.7%. We hope our work inspires further exploration into more robust, adaptable fake news detection systems.",
+      "contributor": "",
+      "related_papers": [],
+      "notes": "catSuggestion\n{\n  \"target_ids\": [\n    \"Social Simulation\",\n    \"Micro Social Simulation\",\n    \"Dynamic Social Simulation\",\n    \"Agent-based Social Simulation\",\n    \"Individual-oriented Social Simulation\",\n    \"Social Simulation for Social Media\"\n  ],\n  \"status\": \"matched\",\n  \"meta\": {\n    \"title\": \"A symbolic adversarial learning framework for evolving fake news generation and detection\",\n    \"publication_date\": \"2025-11\"\n  },\n  \"paper_summary\": \"Rapid LLM advancements heighten fake news risks by enabling the automatic generation of increasingly sophisticated misinformation. Previous detection methods, including fine-tuned small models or LLM-based detectors, often struggle with its dynamically evolving nature. In this work, we propose a novel framework called the Symbolic Adversarial Learning Framework (SALF), which implements an adversarial training paradigm by an agent symbolic learning optimization process, rather than relying on num\"\n}",
+      "show_in_readme": true,
+      "status": "unread",
+      "submission_time": "",
+      "is_placeholder": false,
+      "paper_file": "",
+      "uid": "0769fb9d",
+      "conflict_marker": false,
+      "invalid_fields": []
+    },
+    {
+      "doi": "10.18653/v1/2025.emnlp-main.1330",
+      "title": "The stepwise deception: Simulating the evolution from true news to fake news with LLM agents",
+      "authors": "Yuhan Liu, Zirui Song, Juntian Zhang, Xiaoqing Zhang, Xiuying Chen, Rui Yan",
+      "date": "2025",
+      "category": [
+        "Agent-based Social Simulation",
+        "Dynamic Social Simulation",
+        "Individual-oriented Social Simulation",
+        "Micro Social Simulation",
+        "Social Simulation for Social Media"
+      ],
+      "summary_motivation": "",
+      "summary_innovation": "",
+      "summary_method": "",
+      "summary_conclusion": "",
+      "summary_limitation": "",
+      "paper_url": "http://arxiv.org/abs/2410.19064",
+      "project_url": "",
+      "conference": "Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing",
+      "title_translation": "",
+      "analogy_summary": "TLDR: A novel Large Language Model-based simulation approach explicitly focusing on fake news evolution from real news, which effectively captures fake news evolution patterns and accurately reproduces known fake news, aligning closely with human evaluations.",
+      "pipeline_image": [],
+      "abstract": "",
+      "contributor": "",
+      "related_papers": [],
+      "notes": "catSuggestion\n{\n  \"target_ids\": [\n    \"Micro Social Simulation\",\n    \"Dynamic Social Simulation\",\n    \"Agent-based Social Simulation\",\n    \"Individual-oriented Social Simulation\",\n    \"Social Simulation for Social Media\"\n  ],\n  \"status\": \"matched\",\n  \"suggestion\": null,\n  \"meta\": {\n    \"title\": \"The stepwise deception: Simulating the evolution from true news to fake news with LLM agents\",\n    \"publication_date\": \"2025\"\n  },\n  \"paper_summary\": \"\"\n}",
+      "show_in_readme": true,
+      "status": "unread",
+      "submission_time": "",
+      "is_placeholder": false,
+      "paper_file": "",
+      "uid": "67ebdd0a",
+      "conflict_marker": false,
+      "invalid_fields": [
+        "abstract"
+      ]
     }
   ]
 }

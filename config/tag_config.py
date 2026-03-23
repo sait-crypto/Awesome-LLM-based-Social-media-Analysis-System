@@ -264,7 +264,7 @@ TAGS_CONFIG = {
         
         {
             "variable": "paper_file",
-            "order": 23,
+            "order": 24,
             "table_name": "paper file",
             "display_name": "论文文件",
             "description": "拖动/打开/填写文件,或将本地论文PDF放到papers文件夹下，在此填写文件全名（带后缀）",  #直接在readme的论文列表中根据路径显示图片
@@ -307,8 +307,22 @@ TAGS_CONFIG = {
 
         },
         {
-            "variable": "notes",
+            "variable": "related_papers",
             "order": 18,
+            "table_name": "related papers",
+            "display_name": "相关论文",
+            "description": "相关论文标题列表（系统自动维护双向引用，使用|分隔）",
+            "type": "paper[]",
+            "validation": None,
+            "show_in_readme": False,
+            "enabled": True,
+            "immutable": False,
+            "required": False,
+            "system_var": False,
+        },
+        {
+            "variable": "notes",
+            "order": 19,
             "table_name": "notes",
             "display_name": "notes",
             "description": "其他笔记信息",
@@ -323,7 +337,7 @@ TAGS_CONFIG = {
         },
         {
             "variable": "status",
-            "order": 20,
+            "order": 21,
             "table_name": "status",
             "display_name": "阅读状态",
             "description": "论文的阅读状态", #unread，reading、done、adopted、skimmed
@@ -339,7 +353,7 @@ TAGS_CONFIG = {
         #占位符论文发生冲突事件时无脑将其替换（暂未实现），需要在更新流程中可见，
         {
             "variable": "is_placeholder",
-            "order": 22,
+            "order": 23,
             "table_name": "is placeholder",
             "display_name": "is placeholder",
             "description": "该论文是否为占位符论文（用于1.测试；2.暂时占位，后续待完善信息）",
@@ -355,7 +369,7 @@ TAGS_CONFIG = {
         # ==================== 数据库内部控制标签，不供提交时手动填写，供系统使用!! ====================
         {
             "variable": "show_in_readme",
-            "order": 19,
+            "order": 20,
             "table_name": "show in readme",
             "display_name": "显示控制",
             "description": "控制论文是否在README中显示",
@@ -371,7 +385,7 @@ TAGS_CONFIG = {
 
         {
             "variable": "submission_time",
-            "order": 21,
+            "order": 22,
             "table_name": "submission time",
             "display_name": "submission time",
             "description": "论文提交时间",
@@ -385,7 +399,7 @@ TAGS_CONFIG = {
         },
         {
             "variable": "conflict_marker",
-            "order": 25,
+            "order": 26,
             "table_name": "conflict marker",
             "display_name": "conflict marker",
             "description": "冲突标志",
@@ -399,7 +413,7 @@ TAGS_CONFIG = {
         },
         {
             "variable": "invalid_fields",
-            "order": 26,
+            "order": 27,
             "table_name": "invalid fields",
             "display_name": "invalid fields",
             "description": "该论文哪些字段不规范，需要人工审核；值为tag variable列表，CSV中使用|分隔，JSON中使用数组",
@@ -413,7 +427,7 @@ TAGS_CONFIG = {
         },
         {
             "variable": "uid",  # 唯一资源ID，用于关联 assets/{uid} 文件夹
-            "order": 24,
+            "order": 25,
             "table_name": "UID",
             "display_name": "UID",
             "description": "系统生成的唯一ID，用于关联资源文件",

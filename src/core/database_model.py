@@ -56,6 +56,7 @@ class Paper:
 
     abstract: str = ""
     contributor: str = ""
+    related_papers: str = ""
     notes: str = ""
 
     # 系统字段
