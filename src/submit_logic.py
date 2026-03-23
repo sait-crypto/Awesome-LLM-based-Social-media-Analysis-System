@@ -11,6 +11,7 @@ import time
 import shutil
 import uuid
 import configparser
+import json
 from typing import Dict, List, Any, Optional, Tuple, Set
 import re
 import copy # 新增
@@ -32,6 +33,15 @@ class SubmitLogic:
 
     VALID_SAVE_VALIDATION_STRATEGIES = {'strict', 'lenient'}
     VALID_SAVE_MODES = {'incremental', 'rewrite'}
+    DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME = 'default'
+    DEFAULT_WORKSPACE_LAYOUT = {
+        'main_pane_ratio': 0.47,
+        'category_sidebar_visible': False,
+        'category_sidebar_ratio': 0.40,
+        'optional_columns': [],
+        'column_widths': {},
+        'category_tree_count_width': 35,
+    }
 
     def __init__(self):
         # 加载配置
@@ -124,12 +134,219 @@ class SubmitLogic:
         self._persist_ui_setting('save_validation_strategy', normalized)
         return normalized
 
-    def set_save_mode(self, mode: str, require_admin: bool = True) -> str:
+    def set_save_mode(self, mode: str, require_admin: bool = False) -> str:
         if require_admin and not self.is_admin:
             raise PermissionError("仅管理员可修改保存模式")
         normalized = self._normalize_save_mode(mode)
         self._persist_ui_setting('save_mode', normalized)
         return normalized
+
+    def _build_default_workspace_layout_profile(self) -> Dict[str, Any]:
+        return {
+            'name': self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME,
+            'display_name': '默认配置',
+            'locked': True,
+            'layout': copy.deepcopy(self.DEFAULT_WORKSPACE_LAYOUT)
+        }
+
+    def get_default_workspace_layout_payload(self) -> Dict[str, Any]:
+        return copy.deepcopy(self.DEFAULT_WORKSPACE_LAYOUT)
+
+    def _normalize_workspace_ratio(self, value: Any, default: float, minimum: float = 0.10, maximum: float = 0.90) -> float:
+        try:
+            ratio = float(value)
+        except Exception:
+            ratio = float(default)
+        return max(minimum, min(maximum, ratio))
+
+    def _normalize_workspace_layout_payload(self, payload: Any) -> Dict[str, Any]:
+        data = payload if isinstance(payload, dict) else {}
+        defaults = self.DEFAULT_WORKSPACE_LAYOUT
+
+        optional_columns: List[str] = []
+        raw_optional = data.get('optional_columns', [])
+        if isinstance(raw_optional, list):
+            for item in raw_optional:
+                text = str(item or '').strip()
+                if text and text not in optional_columns:
+                    optional_columns.append(text)
+
+        column_widths: Dict[str, int] = {}
+        raw_widths = data.get('column_widths', {})
+        if isinstance(raw_widths, dict):
+            for key, val in raw_widths.items():
+                column = str(key or '').strip()
+                if not column:
+                    continue
+                try:
+                    width = int(val)
+                except Exception:
+                    continue
+                column_widths[column] = max(30, min(1000, width))
+
+        try:
+            category_tree_count_width = int(data.get('category_tree_count_width', defaults.get('category_tree_count_width', 35)))
+        except Exception:
+            category_tree_count_width = int(defaults.get('category_tree_count_width', 35))
+        category_tree_count_width = max(24, min(240, category_tree_count_width))
+
+        return {
+            'main_pane_ratio': self._normalize_workspace_ratio(
+                data.get('main_pane_ratio', defaults.get('main_pane_ratio', 0.40)),
+                float(defaults.get('main_pane_ratio', 0.40)),
+            ),
+            'category_sidebar_visible': bool(data.get('category_sidebar_visible', defaults.get('category_sidebar_visible', False))),
+            'category_sidebar_ratio': self._normalize_workspace_ratio(
+                data.get('category_sidebar_ratio', defaults.get('category_sidebar_ratio', 0.40)),
+                float(defaults.get('category_sidebar_ratio', 0.40)),
+            ),
+            'optional_columns': optional_columns,
+            'column_widths': column_widths,
+            'category_tree_count_width': category_tree_count_width,
+        }
+
+    def _normalize_workspace_layout_profile(self, profile: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(profile, dict):
+            return None
+
+        name = str(profile.get('name', '')).strip()
+        if not name:
+            return None
+
+        display_name = str(profile.get('display_name', name)).strip() or name
+        locked = bool(profile.get('locked', False))
+        layout_payload = self._normalize_workspace_layout_payload(profile.get('layout', {}))
+
+        return {
+            'name': name,
+            'display_name': display_name,
+            'locked': locked,
+            'layout': layout_payload,
+        }
+
+    def _load_workspace_layout_profiles_state(self) -> Tuple[List[Dict[str, Any]], str]:
+        ui_cfg = self.settings.get('ui', {}) or {}
+        raw_profiles = ui_cfg.get('workspace_layout_profiles_json', '[]')
+
+        parsed_profiles: List[Dict[str, Any]] = []
+        try:
+            profile_items = json.loads(raw_profiles) if raw_profiles else []
+        except Exception:
+            profile_items = []
+
+        if isinstance(profile_items, list):
+            for item in profile_items:
+                normalized = self._normalize_workspace_layout_profile(item)
+                if normalized is None:
+                    continue
+                if normalized.get('name') == self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME:
+                    continue
+                parsed_profiles.append(normalized)
+
+        profiles = [self._build_default_workspace_layout_profile()] + parsed_profiles
+
+        active_name = str(ui_cfg.get('active_workspace_layout_profile', self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME)).strip()
+        available_names = {p.get('name', '') for p in profiles}
+        if active_name not in available_names:
+            active_name = self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME
+
+        return profiles, active_name
+
+    def _persist_workspace_layout_profiles_state(self, profiles: List[Dict[str, Any]], active_name: str):
+        serializable_profiles: List[Dict[str, Any]] = []
+        for profile in profiles:
+            if profile.get('name') == self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME:
+                continue
+            serializable_profiles.append({
+                'name': profile.get('name', ''),
+                'display_name': profile.get('display_name', profile.get('name', '')),
+                'locked': bool(profile.get('locked', False)),
+                'layout': self._normalize_workspace_layout_payload(profile.get('layout', {})),
+            })
+
+        self._persist_ui_setting('workspace_layout_profiles_json', json.dumps(serializable_profiles, ensure_ascii=False))
+        self._persist_ui_setting('active_workspace_layout_profile', str(active_name or self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME))
+
+    def get_workspace_layout_profiles(self) -> Tuple[List[Dict[str, Any]], str]:
+        profiles, active_name = self._load_workspace_layout_profiles_state()
+        return copy.deepcopy(profiles), active_name
+
+    def get_active_workspace_layout_profile(self) -> Dict[str, Any]:
+        profiles, active_name = self._load_workspace_layout_profiles_state()
+        for profile in profiles:
+            if profile.get('name') == active_name:
+                return copy.deepcopy(profile)
+        return copy.deepcopy(self._build_default_workspace_layout_profile())
+
+    def set_active_workspace_layout_profile(self, profile_name: str) -> Dict[str, Any]:
+        target_name = str(profile_name or '').strip()
+        profiles, _ = self._load_workspace_layout_profiles_state()
+
+        target_profile: Optional[Dict[str, Any]] = None
+        for profile in profiles:
+            if profile.get('name') == target_name:
+                target_profile = profile
+                break
+
+        if target_profile is None:
+            raise ValueError(f"布局配置不存在: {target_name}")
+
+        self._persist_workspace_layout_profiles_state(profiles, target_name)
+        return copy.deepcopy(target_profile)
+
+    def save_workspace_layout_profile(self, profile_name: str, layout_payload: Dict[str, Any], overwrite: bool = False) -> Dict[str, Any]:
+        name = str(profile_name or '').strip()
+        if not name:
+            raise ValueError('配置名不能为空')
+        if name == self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME:
+            raise PermissionError('默认配置不可修改')
+
+        normalized_payload = self._normalize_workspace_layout_payload(layout_payload)
+        profiles, _ = self._load_workspace_layout_profiles_state()
+
+        existing_idx = -1
+        for idx, profile in enumerate(profiles):
+            if profile.get('name') == name:
+                existing_idx = idx
+                break
+
+        if existing_idx >= 0:
+            if not overwrite:
+                raise ValueError(f"配置已存在: {name}")
+            if profiles[existing_idx].get('locked', False):
+                raise PermissionError('该配置不可修改')
+            profiles[existing_idx]['display_name'] = name
+            profiles[existing_idx]['layout'] = normalized_payload
+            saved_profile = profiles[existing_idx]
+        else:
+            saved_profile = {
+                'name': name,
+                'display_name': name,
+                'locked': False,
+                'layout': normalized_payload,
+            }
+            profiles.append(saved_profile)
+
+        self._persist_workspace_layout_profiles_state(profiles, name)
+        return copy.deepcopy(saved_profile)
+
+    def delete_workspace_layout_profile(self, profile_name: str):
+        name = str(profile_name or '').strip()
+        if not name:
+            raise ValueError('配置名不能为空')
+        if name == self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME:
+            raise PermissionError('默认配置不可删除')
+
+        profiles, active_name = self._load_workspace_layout_profiles_state()
+        kept_profiles = [p for p in profiles if p.get('name') != name]
+        if len(kept_profiles) == len(profiles):
+            raise ValueError(f"配置不存在: {name}")
+
+        next_active = active_name
+        if active_name == name:
+            next_active = self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME
+
+        self._persist_workspace_layout_profiles_state(kept_profiles, next_active)
     # ================= 文件加载与管理 =================
 
     def load_papers_from_file(self, filepath: str) -> int:

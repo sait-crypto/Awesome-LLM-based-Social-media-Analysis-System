@@ -96,6 +96,12 @@ class PaperSubmissionGUI:
         self._search_field_vars: Dict[str, tk.BooleanVar] = {}
         self._selected_category_filter = ""
         self._category_sidebar_visible = False
+        default_layout = self.logic.get_default_workspace_layout_payload()
+        self._default_main_pane_ratio = float(default_layout.get('main_pane_ratio', 0.47))
+        self._default_category_sidebar_ratio = float(default_layout.get('category_sidebar_ratio', 0.40))
+        self._category_sidebar_ratio = self._default_category_sidebar_ratio
+        self._category_tree_count_width = int(default_layout.get('category_tree_count_width', 35))
+        self._applying_workspace_layout = False
         self._updating_category_filter_tree = False
         self._init_keyword_field_filter_config()
         self._init_list_column_config()
@@ -104,6 +110,7 @@ class PaperSubmissionGUI:
         self._list_sort_desc: bool = False
 
         self.setup_ui()
+        self._apply_active_workspace_layout(startup=True)
         self._bind_shortcuts()
         
         # 检查管理员状态并更新UI
@@ -242,22 +249,47 @@ class PaperSubmissionGUI:
         self._on_search_change()
 
     def _init_list_column_config(self):
+        optional_titles = {
+            'Authors': 'Authors',
+            'Date': 'Publish Date',
+            'Contributor': 'Contributor',
+            'Conference': 'Conference',
+            'ReadStatus': 'Reading Status',
+            'Placeholder': 'Is Placeholder',
+        }
         self._list_column_defs: Dict[str, Dict[str, Any]] = {
-            'ID': {'title': '#', 'width': 56, 'anchor': 'center', 'stretch': False, 'required': True},
+            'ID': {'title': '#', 'width': 34, 'anchor': 'center', 'stretch': False, 'required': True},
             'Title': {'title': 'Title', 'width': 240, 'anchor': 'w', 'stretch': True, 'required': True},
-            'Status': {'title': 'State', 'width': 90, 'anchor': 'center', 'stretch': False, 'required': True},
-            'Authors': {'title': 'Authors', 'width': 180, 'anchor': 'w', 'stretch': False, 'required': False},
-            'Date': {'title': 'Publish Date', 'width': 110, 'anchor': 'center', 'stretch': False, 'required': False},
-            'Contributor': {'title': 'Contributor', 'width': 120, 'anchor': 'w', 'stretch': False, 'required': False},
-            'Conference': {'title': 'Conference', 'width': 130, 'anchor': 'w', 'stretch': False, 'required': False},
-            'ReadStatus': {'title': 'Reading Status', 'width': 120, 'anchor': 'center', 'stretch': False, 'required': False},
-            'Placeholder': {'title': 'Is Placeholder', 'width': 110, 'anchor': 'center', 'stretch': False, 'required': False},
+            'Status': {'title': 'State', 'width': 58, 'anchor': 'center', 'stretch': False, 'required': True},
+            'Authors': {'title': 'Authors', 'width': self._calc_optional_column_width(optional_titles['Authors']), 'anchor': 'w', 'stretch': False, 'required': False},
+            'Date': {'title': 'Publish Date', 'width': self._calc_optional_column_width(optional_titles['Date']), 'anchor': 'center', 'stretch': False, 'required': False},
+            'Contributor': {'title': 'Contributor', 'width': self._calc_optional_column_width(optional_titles['Contributor']), 'anchor': 'w', 'stretch': False, 'required': False},
+            'Conference': {'title': 'Conference', 'width': self._calc_optional_column_width(optional_titles['Conference']), 'anchor': 'w', 'stretch': False, 'required': False},
+            'ReadStatus': {'title': 'Reading Status', 'width': self._calc_optional_column_width(optional_titles['ReadStatus']), 'anchor': 'center', 'stretch': False, 'required': False},
+            'Placeholder': {'title': 'Is Placeholder', 'width': self._calc_optional_column_width(optional_titles['Placeholder']), 'anchor': 'center', 'stretch': False, 'required': False},
         }
         self._list_optional_defaults = []
         self._list_column_vars: Dict[str, tk.BooleanVar] = {}
         for key, cfg in self._list_column_defs.items():
             is_required = bool(cfg.get('required', False))
             self._list_column_vars[key] = tk.BooleanVar(value=(is_required or key in self._list_optional_defaults))
+
+    def _recompute_default_column_widths(self):
+        """按当前默认规则实时重算列表列宽。"""
+        for key, cfg in self._list_column_defs.items():
+            title = str(cfg.get('title', key) or key)
+            if key == 'ID':
+                cfg['width'] = 34
+            elif key == 'Status':
+                cfg['width'] = 58
+            elif key == 'Title':
+                cfg['width'] = 240
+            else:
+                cfg['width'] = self._calc_optional_column_width(title)
+
+    def _calc_optional_column_width(self, title: str) -> int:
+        char_count = max(1, len(str(title or '').strip()))
+        return max(70, min(210, 8 + char_count * 8))
 
     def _get_visible_list_columns(self) -> List[str]:
         visible: List[str] = []
@@ -328,6 +360,306 @@ class PaperSubmissionGUI:
         self._update_list_columns_button_text()
         self._apply_paper_tree_columns()
         self.refresh_list_view(self._get_search_keyword(), self._get_category_filter_value(), self._get_status_filter_value())
+
+    def _get_paned_ratio(self, paned: tk.PanedWindow, default_ratio: float) -> float:
+        try:
+            total_width = paned.winfo_width()
+            if total_width <= 1:
+                return default_ratio
+            sash_x, _ = paned.sash_coord(0)
+            ratio = float(sash_x) / float(total_width)
+            return max(0.10, min(0.90, ratio))
+        except Exception:
+            return default_ratio
+
+    def _apply_main_pane_ratio(self, ratio: float):
+        target = max(0.10, min(0.90, float(ratio)))
+
+        def _place():
+            try:
+                total_width = self.paned_window.winfo_width()
+                if total_width > 1:
+                    self.paned_window.sash_place(0, int(total_width * target), 0)
+            except Exception:
+                pass
+
+        self.root.after_idle(_place)
+
+    def _apply_category_sidebar_ratio(self, ratio: float):
+        target = max(0.10, min(0.90, float(ratio)))
+        self._category_sidebar_ratio = target
+
+        if not self._category_sidebar_visible:
+            return
+
+        def _place():
+            try:
+                total_width = self.list_content_paned.winfo_width()
+                if total_width > 1:
+                    self.list_content_paned.sash_place(0, int(total_width * target), 0)
+                    self._fit_category_tree_columns()
+            except Exception:
+                pass
+
+        self.root.after_idle(_place)
+        self.root.after(160, _place)
+
+    def _capture_workspace_layout_payload(self) -> Dict[str, Any]:
+        # 记录当前列宽，确保“保存后切换回来”视觉一致
+        column_widths: Dict[str, int] = {}
+        for column, cfg in self._list_column_defs.items():
+            width = int(cfg.get('width', 120))
+            try:
+                if hasattr(self, 'paper_tree') and self.paper_tree is not None:
+                    width = int(self.paper_tree.column(column, option='width'))
+            except Exception:
+                pass
+            column_widths[column] = max(30, min(1000, int(width)))
+
+        optional_columns = []
+        for key, cfg in self._list_column_defs.items():
+            if cfg.get('required'):
+                continue
+            if bool(self._list_column_vars.get(key).get()):
+                optional_columns.append(key)
+
+        payload = {
+            'main_pane_ratio': self._get_paned_ratio(self.paned_window, self._default_main_pane_ratio),
+            'category_sidebar_visible': bool(self._category_sidebar_visible),
+            'category_sidebar_ratio': self._get_paned_ratio(self.list_content_paned, self._category_sidebar_ratio) if self._category_sidebar_visible else self._category_sidebar_ratio,
+            'optional_columns': optional_columns,
+            'column_widths': column_widths,
+            'category_tree_count_width': int(self.category_filter_tree.column('Count', option='width')) if hasattr(self, 'category_filter_tree') else int(self._category_tree_count_width),
+        }
+        return payload
+
+    def _apply_workspace_layout_payload(self, layout_payload: Dict[str, Any], startup: bool = False, force_recompute_default_widths: bool = False):
+        if not isinstance(layout_payload, dict):
+            return
+
+        self._applying_workspace_layout = True
+        try:
+            # 1. 列显示状态
+            optional_selected = set(layout_payload.get('optional_columns', []) or [])
+            for key, cfg in self._list_column_defs.items():
+                is_required = bool(cfg.get('required', False))
+                self._list_column_vars[key].set(is_required or key in optional_selected)
+
+            # 2. 列宽
+            if force_recompute_default_widths:
+                self._recompute_default_column_widths()
+
+            raw_widths = layout_payload.get('column_widths', {}) or {}
+            if (not force_recompute_default_widths) and isinstance(raw_widths, dict):
+                for key, width in raw_widths.items():
+                    if key not in self._list_column_defs:
+                        continue
+                    try:
+                        width_int = int(width)
+                    except Exception:
+                        continue
+                    self._list_column_defs[key]['width'] = max(30, min(1000, width_int))
+
+            self._update_list_columns_button_text()
+            self._apply_paper_tree_columns()
+
+            # 3. 左右主栏占比
+            main_ratio = float(layout_payload.get('main_pane_ratio', self._default_main_pane_ratio) or self._default_main_pane_ratio)
+            self._apply_main_pane_ratio(main_ratio)
+
+            # 4. 分类 hierarchy 是否展开 + 占比
+            target_sidebar_visible = bool(layout_payload.get('category_sidebar_visible', False))
+            target_sidebar_ratio = float(layout_payload.get('category_sidebar_ratio', self._default_category_sidebar_ratio) or self._default_category_sidebar_ratio)
+            self._category_sidebar_ratio = max(0.10, min(0.90, target_sidebar_ratio))
+
+            self._category_tree_count_width = max(24, min(240, int(layout_payload.get('category_tree_count_width', self._category_tree_count_width))))
+            if hasattr(self, 'category_filter_tree') and self.category_filter_tree is not None:
+                self.category_filter_tree.column('#0', stretch=True)
+                self.category_filter_tree.column('Count', width=self._category_tree_count_width, stretch=False)
+                self._fit_category_tree_columns()
+
+            if target_sidebar_visible != self._category_sidebar_visible:
+                self._toggle_category_filter_sidebar()
+
+            if target_sidebar_visible:
+                self._apply_category_sidebar_ratio(self._category_sidebar_ratio)
+
+            if not startup:
+                self.refresh_list_view(self._get_search_keyword(), self._get_category_filter_value(), self._get_status_filter_value())
+        finally:
+            self._applying_workspace_layout = False
+
+    def _apply_active_workspace_layout(self, startup: bool = False):
+        try:
+            active_profile = self.logic.get_active_workspace_layout_profile()
+            is_default = (active_profile.get('name', '') == self.logic.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME)
+
+            def _apply_once():
+                self._apply_workspace_layout_payload(
+                    active_profile.get('layout', {}),
+                    startup=startup,
+                    force_recompute_default_widths=is_default,
+                )
+
+            _apply_once()
+
+            # 启动阶段窗口宽度会经历多次变化；补应用可避免分栏比例偏移。
+            if startup:
+                self.root.after(180, _apply_once)
+                self.root.after(420, _apply_once)
+        except Exception as ex:
+            self.update_status(f"应用布局配置失败: {ex}")
+
+    def open_ui_layout_config_dialog(self):
+        if hasattr(self, '_ui_layout_cfg_win') and self._ui_layout_cfg_win.winfo_exists():
+            self._ui_layout_cfg_win.lift()
+            return
+
+        win = tk.Toplevel(self.root)
+        self._ui_layout_cfg_win = win
+        win.title("UI 布局配置")
+        win.geometry("560x420")
+        self._set_window_ontop(win)
+
+        main = ttk.Frame(win, padding=10)
+        main.pack(fill=tk.BOTH, expand=True)
+        main.columnconfigure(0, weight=1)
+        main.rowconfigure(1, weight=1)
+
+        ttk.Label(main, text="选择布局配置：", font=("Arial", 10, "bold")).grid(row=0, column=0, sticky='w', pady=(0, 6))
+
+        tree = ttk.Treeview(main, columns=('Name', 'Type', 'Status'), show='headings', height=10)
+        tree.heading('Name', text='名称')
+        tree.heading('Type', text='类型')
+        tree.heading('Status', text='状态')
+        tree.column('Name', width=220, anchor='w')
+        tree.column('Type', width=120, anchor='center')
+        tree.column('Status', width=150, anchor='center')
+        tree.grid(row=1, column=0, sticky='nsew')
+
+        name_map: Dict[str, Dict[str, Any]] = {}
+
+        def refresh_tree(select_name: Optional[str] = None):
+            profiles, active_name = self.logic.get_workspace_layout_profiles()
+            for item in tree.get_children():
+                tree.delete(item)
+            name_map.clear()
+
+            target_name = select_name or active_name
+            target_iid = ''
+            for profile in profiles:
+                name = profile.get('name', '')
+                display_name = profile.get('display_name', name)
+                locked = bool(profile.get('locked', False))
+                status = '当前使用' if name == active_name else ''
+                profile_type = '默认(只读)' if locked else '自定义'
+                iid = name or display_name
+                tree.insert('', 'end', iid=iid, values=(display_name, profile_type, status))
+                name_map[iid] = profile
+                if name == target_name:
+                    target_iid = iid
+
+            if target_iid and tree.exists(target_iid):
+                tree.selection_set(target_iid)
+                tree.focus(target_iid)
+                tree.see(target_iid)
+
+        def get_selected_profile() -> Optional[Dict[str, Any]]:
+            sel = tree.selection()
+            if not sel:
+                return None
+            return name_map.get(sel[0])
+
+        def apply_selected_profile():
+            profile = get_selected_profile()
+            if profile is None:
+                messagebox.showwarning("提示", "请先选择一个布局配置", parent=win)
+                return
+            name = profile.get('name', '')
+            selected_profile = self.logic.set_active_workspace_layout_profile(name)
+            is_default = (name == self.logic.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME)
+            self._apply_workspace_layout_payload(
+                selected_profile.get('layout', {}),
+                startup=False,
+                force_recompute_default_widths=is_default,
+            )
+            self.settings = self.logic.settings
+            self.update_status(f"已切换布局配置: {selected_profile.get('display_name', name)}")
+            refresh_tree(select_name=name)
+
+        def save_to_selected_profile():
+            profile = get_selected_profile()
+            if profile is None:
+                messagebox.showwarning("提示", "请先选择一个布局配置", parent=win)
+                return
+            if bool(profile.get('locked', False)):
+                messagebox.showwarning("提示", "默认配置不可修改，请使用“另存为”", parent=win)
+                return
+
+            payload = self._capture_workspace_layout_payload()
+            saved = self.logic.save_workspace_layout_profile(profile.get('name', ''), payload, overwrite=True)
+            self.settings = self.logic.settings
+            self.update_status(f"布局配置已保存: {saved.get('display_name', saved.get('name', ''))}")
+            refresh_tree(select_name=saved.get('name', ''))
+
+        def save_as_new_profile():
+            new_name = simpledialog.askstring("另存为", "请输入新布局配置名称:", parent=win)
+            if not new_name:
+                return
+            new_name = new_name.strip()
+            if not new_name:
+                messagebox.showwarning("提示", "配置名不能为空", parent=win)
+                return
+
+            payload = self._capture_workspace_layout_payload()
+            try:
+                saved = self.logic.save_workspace_layout_profile(new_name, payload, overwrite=False)
+            except ValueError:
+                if not messagebox.askyesno("已存在", f"配置 '{new_name}' 已存在，是否覆盖？", parent=win):
+                    return
+                saved = self.logic.save_workspace_layout_profile(new_name, payload, overwrite=True)
+
+            self.settings = self.logic.settings
+            self.update_status(f"布局配置已另存为: {saved.get('display_name', saved.get('name', ''))}")
+            refresh_tree(select_name=saved.get('name', ''))
+
+        def delete_selected_profile():
+            profile = get_selected_profile()
+            if profile is None:
+                messagebox.showwarning("提示", "请先选择一个布局配置", parent=win)
+                return
+            if bool(profile.get('locked', False)):
+                messagebox.showwarning("提示", "默认配置不可删除", parent=win)
+                return
+
+            display_name = profile.get('display_name', profile.get('name', ''))
+            if not messagebox.askyesno("确认删除", f"确定删除布局配置 '{display_name}' 吗？", parent=win):
+                return
+
+            self.logic.delete_workspace_layout_profile(profile.get('name', ''))
+            self.settings = self.logic.settings
+            self.update_status(f"布局配置已删除: {display_name}")
+
+            active_profile = self.logic.get_active_workspace_layout_profile()
+            is_default = (active_profile.get('name', '') == self.logic.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME)
+            self._apply_workspace_layout_payload(
+                active_profile.get('layout', {}),
+                startup=False,
+                force_recompute_default_widths=is_default,
+            )
+            refresh_tree(select_name=active_profile.get('name', ''))
+
+        button_row = ttk.Frame(main)
+        button_row.grid(row=2, column=0, sticky='ew', pady=(10, 0))
+        ttk.Button(button_row, text='✅ 选择并应用', command=apply_selected_profile).pack(side=tk.LEFT)
+        ttk.Button(button_row, text='💾 保存到当前', command=save_to_selected_profile).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(button_row, text='📝 另存为', command=save_as_new_profile).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(button_row, text='🗑 删除', command=delete_selected_profile).pack(side=tk.LEFT, padx=(6, 0))
+        ttk.Button(button_row, text='关闭', command=win.destroy).pack(side=tk.RIGHT)
+
+        tree.bind('<Double-1>', lambda e: apply_selected_profile())
+        win.protocol('WM_DELETE_WINDOW', lambda: (setattr(self, '_ui_layout_cfg_win', None), win.destroy()))
+        refresh_tree()
 
     def _apply_paper_tree_columns(self):
         if not hasattr(self, 'paper_tree'):
@@ -472,6 +804,9 @@ class PaperSubmissionGUI:
         self.shortcut_btn = ttk.Button(header_frame, text="⌨ 快捷键", command=self._show_shortcut_help, width=12)
         self.shortcut_btn.pack(side=tk.RIGHT, padx=(0, 6))
 
+        self.ui_layout_btn = ttk.Button(header_frame, text="🧩 UI布局", command=self.open_ui_layout_config_dialog, width=12)
+        self.ui_layout_btn.pack(side=tk.RIGHT, padx=(0, 6))
+
         # 管理员切换按钮
         self.admin_btn = ttk.Button(header_frame, text="🔒 管理员模式", command=self._toggle_admin_mode, width=15)
         self.admin_btn.pack(side=tk.RIGHT)
@@ -497,7 +832,7 @@ class PaperSubmissionGUI:
         def _set_initial_sash_position():
             total_width = self.paned_window.winfo_width()
             if total_width > 1:
-                self.paned_window.sash_place(0, int(total_width * 0.22), 0)
+                self.paned_window.sash_place(0, int(total_width * self._default_main_pane_ratio), 0)
         self.root.after_idle(_set_initial_sash_position)
 
         self.placeholder_label = ttk.Label(
@@ -628,8 +963,8 @@ class PaperSubmissionGUI:
         )
         self.category_filter_tree.heading('#0', text='Category')
         self.category_filter_tree.heading('Count', text='Count')
-        self.category_filter_tree.column('#0', width=220, stretch=False)
-        self.category_filter_tree.column('Count', width=35, anchor='e', stretch=False)
+        self.category_filter_tree.column('#0', width=220, stretch=True)
+        self.category_filter_tree.column('Count', width=self._category_tree_count_width, anchor='e', stretch=False)
 
         category_scrollbar = ttk.Scrollbar(category_tree_frame, orient=tk.VERTICAL, command=self.category_filter_tree.yview)
         self.category_filter_tree.configure(yscrollcommand=category_scrollbar.set)
@@ -638,6 +973,7 @@ class PaperSubmissionGUI:
         self.category_filter_tree.bind('<<TreeviewSelect>>', self._on_category_filter_tree_select)
         self.category_filter_tree.bind('<Enter>', lambda e: self._bind_global_scroll(self.category_filter_tree.yview_scroll))
         self.category_filter_tree.bind('<Configure>', lambda e: self._fit_category_tree_columns())
+        self.category_filter_tree.bind('<ButtonRelease-1>', self._on_category_tree_mouse_release)
 
         ttk.Button(
             self.category_filter_panel,
@@ -680,7 +1016,7 @@ class PaperSubmissionGUI:
                 return
             total_width = self.list_content_paned.winfo_width()
             if total_width > 1:
-                self.list_content_paned.sash_place(0, int(total_width * 0.40), 0)
+                self.list_content_paned.sash_place(0, int(total_width * self._default_category_sidebar_ratio), 0)
         self.root.after_idle(_set_initial_list_sash_position)
 
         self._rebuild_category_filter_tree(select_current=True)
@@ -1710,12 +2046,12 @@ class PaperSubmissionGUI:
         self.save_menu.add_command(label="📝 另存为 (Ctrl+Shift+S)", command=self.save_all_papers)
         self.save_btn.bind("<ButtonPress-1>", self._on_save_menu_button_press)
 
-        self.save_policy_btn = ttk.Button(file_frame, text="", command=self._change_save_validation_strategy, width=18)
-        self.save_policy_btn.pack(side=tk.LEFT, padx=5, pady=5)
-        self.save_mode_btn = ttk.Button(file_frame, text="", command=self._change_save_mode, width=18)
-        self.save_mode_btn.pack(side=tk.LEFT, padx=5, pady=5)
-        self._refresh_save_policy_button_text()
-        self._refresh_save_mode_button_text()
+        self.save_config_btn_var = tk.StringVar(value="⚙️ 保存配置 ▾")
+        self.save_config_btn = ttk.Button(file_frame, textvariable=self.save_config_btn_var, width=14)
+        self.save_config_btn.pack(side=tk.LEFT, padx=5, pady=5)
+        self.save_config_menu = tk.Menu(self.root, tearoff=0)
+        self._refresh_save_config_menu()
+        self.save_config_btn.bind("<ButtonPress-1>", self._on_save_config_menu_button_press)
         ttk.Button(file_frame, text="📂 加载文件", command=self.load_template, width=12).pack(side=tk.LEFT, padx=5, pady=5)
         ttk.Button(file_frame, text="📄 打开当前文件", command=self.open_current_file, width=14).pack(side=tk.LEFT, padx=5, pady=5)
 
@@ -1753,6 +2089,12 @@ class PaperSubmissionGUI:
 
     def _on_save_menu_button_press(self, event):
         self._post_menu_above_button(self.save_menu, self.save_btn)
+        self.root.focus_force()
+        return "break"
+
+    def _on_save_config_menu_button_press(self, event):
+        self._refresh_save_config_menu()
+        self._post_menu_above_button(self.save_config_menu, self.save_config_btn)
         self.root.focus_force()
         return "break"
 
@@ -1794,23 +2136,14 @@ class PaperSubmissionGUI:
 
     def _update_admin_ui_state(self):
         """更新UI以反映管理员状态"""
-        self._refresh_save_policy_button_text()
-        self._refresh_save_mode_button_text()
+        self._refresh_save_config_menu()
 
         if self.logic.is_admin:
             self.admin_btn.config(text="🔓 管理员: ON")
             self.root.title("Awesome 论文规范化处理提交程序 [管理员模式]")
-            if hasattr(self, 'save_policy_btn') and self.save_policy_btn.winfo_manager() != 'pack':
-                self.save_policy_btn.pack(side=tk.LEFT, padx=5, pady=5)
-            if hasattr(self, 'save_mode_btn') and self.save_mode_btn.winfo_manager() != 'pack':
-                self.save_mode_btn.pack(side=tk.LEFT, padx=5, pady=5)
         else:
             self.admin_btn.config(text="🔒 管理员: OFF")
             self.root.title("Awesome 论文规范化处理提交程序")
-            if hasattr(self, 'save_policy_btn') and self.save_policy_btn.winfo_manager() == 'pack':
-                self.save_policy_btn.pack_forget()
-            if hasattr(self, 'save_mode_btn') and self.save_mode_btn.winfo_manager() == 'pack':
-                self.save_mode_btn.pack_forget()
 
     def _get_save_validation_strategy(self) -> str:
         return self.logic.get_save_validation_strategy()
@@ -1819,16 +2152,29 @@ class PaperSubmissionGUI:
         return self.logic.get_save_mode()
 
     def _refresh_save_policy_button_text(self):
-        if not hasattr(self, 'save_policy_btn'):
+        if not hasattr(self, 'save_config_menu'):
             return
+        self._refresh_save_config_menu()
+
+    def _refresh_save_config_menu(self):
+        if not hasattr(self, 'save_config_menu'):
+            return
+        self.save_config_menu.delete(0, tk.END)
         strategy = self._get_save_validation_strategy()
-        self.save_policy_btn.config(text=f"🧭 保存策略: {strategy}")
+        mode = self._get_save_mode()
+
+        self.save_config_menu.add_command(
+            label=f"💾 保存模式: {mode}",
+            command=self._change_save_mode
+        )
+        if self.logic.is_admin:
+            self.save_config_menu.add_command(
+                label=f"🧭 保存策略: {strategy}",
+                command=self._change_save_validation_strategy
+            )
 
     def _refresh_save_mode_button_text(self):
-        if not hasattr(self, 'save_mode_btn'):
-            return
-        mode = self._get_save_mode()
-        self.save_mode_btn.config(text=f"💾 保存模式: {mode}")
+        self._refresh_save_config_menu()
 
     def _change_save_validation_strategy(self):
         cur = self._get_save_validation_strategy()
@@ -1869,7 +2215,7 @@ class PaperSubmissionGUI:
 
         new_mode = 'rewrite' if cur == 'incremental' else 'incremental'
         try:
-            self.logic.set_save_mode(new_mode, require_admin=True)
+            self.logic.set_save_mode(new_mode, require_admin=False)
             self.settings = self.logic.settings
             self._refresh_save_mode_button_text()
             self.update_status(f"保存模式已更新为: {new_mode}")
@@ -1924,6 +2270,7 @@ class PaperSubmissionGUI:
 
     def _toggle_category_filter_sidebar(self):
         if self._category_sidebar_visible:
+            self._category_sidebar_ratio = self._get_paned_ratio(self.list_content_paned, self._category_sidebar_ratio)
             try:
                 self.list_content_paned.forget(self.category_filter_panel)
             finally:
@@ -1932,7 +2279,7 @@ class PaperSubmissionGUI:
             return
 
         total_width = self.list_content_paned.winfo_width()
-        target_width = int(total_width * 0.40) if total_width > 1 else 240
+        target_width = int(total_width * self._category_sidebar_ratio) if total_width > 1 else 240
         target_width = max(120, target_width)
 
         panes = self.list_content_paned.panes()
@@ -1952,7 +2299,7 @@ class PaperSubmissionGUI:
         self.list_content_paned.update_idletasks()
         total_width = self.list_content_paned.winfo_width()
         if total_width > 1:
-            self.list_content_paned.sash_place(0, int(total_width * 0.40), 0)
+            self.list_content_paned.sash_place(0, int(total_width * self._category_sidebar_ratio), 0)
 
     def _fit_category_tree_columns(self):
         tree = getattr(self, 'category_filter_tree', None)
@@ -1965,10 +2312,25 @@ class PaperSubmissionGUI:
         if total <= 1:
             return
 
-        count_w = 35
-        name_w = max(120, total - count_w - 8)
-        tree.column('#0', width=name_w, stretch=False)
+        # Category 列作为伸缩填充列，不持久化用户拖动宽度。
+        count_w = max(24, min(int(self._category_tree_count_width), total - 60))
+        name_w = max(80, total - count_w - 8)
+        tree.column('#0', width=name_w, stretch=True)
         tree.column('Count', width=count_w, stretch=False)
+
+    def _on_category_tree_mouse_release(self, event=None):
+        tree = getattr(self, 'category_filter_tree', None)
+        if tree is None:
+            return
+
+        try:
+            # 允许用户拖动 Count 列分隔线，并将结果写回布局状态。
+            cur_width = int(tree.column('Count', option='width'))
+            self._category_tree_count_width = max(24, min(240, cur_width))
+        except Exception:
+            pass
+
+        self.root.after_idle(self._fit_category_tree_columns)
 
     def _clear_category_filter(self):
         if not self._get_category_filter_value():
