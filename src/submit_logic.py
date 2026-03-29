@@ -26,7 +26,7 @@ from src.core.database_model import Paper, is_same_identity
 from src.core.database_manager import DatabaseManager
 from src.core.update_file_utils import get_update_file_utils
 from src.process_zotero_meta import ZoteroProcessor
-from src.utils import clean_doi, ensure_directory, generate_paper_uid
+from src.utils import clean_doi, ensure_directory, generate_paper_uid, backup_file
 
 # 锚定根目录
 BASE_DIR = str(get_config_instance().project_root)
@@ -94,6 +94,7 @@ class SubmitLogic:
              self.admin_password_path = os.path.join(BASE_DIR, 'admin_key.txt')
 
         self.update_json_path = self.settings['paths'].get('update_json', 'submit_template.json')
+        self.backup_dir = self.settings['paths'].get('backup_dir', 'backups')
 
     # ================= UI 配置逻辑 =================
 
@@ -125,6 +126,10 @@ class SubmitLogic:
         if 'ui' not in cfg:
             cfg['ui'] = {}
         cfg['ui'][key] = str(value)
+
+        if os.path.exists(cfg_path):
+            backup_file(cfg_path, self.backup_dir)
+
         with open(cfg_path, 'w', encoding='utf-8') as f:
             cfg.write(f)
 
@@ -933,6 +938,10 @@ class SubmitLogic:
 
     def set_admin_password(self, password: str):
         ensure_directory(os.path.dirname(self.admin_password_path))
+
+        if os.path.exists(self.admin_password_path):
+            backup_file(self.admin_password_path, self.backup_dir)
+
         with open(self.admin_password_path, 'w', encoding='utf-8') as f:
             f.write(password)
 

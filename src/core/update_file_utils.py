@@ -211,6 +211,16 @@ class UpdateFileUtils:
             return False
         
         ensure_directory(os.path.dirname(filepath))
+
+        # 统一备份入口：所有覆盖写入前先调用 backup_file。
+        if os.path.exists(filepath):
+            try:
+                backup_file(filepath, self.backup_dir)
+            except Exception as e:
+                self.last_error = f"写入前备份失败 {filepath}: {e}"
+                print(self.last_error)
+                return False
+
         ext = os.path.splitext(filepath)[1].lower()
         
         if ext == '.json':
