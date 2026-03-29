@@ -1,6 +1,9 @@
 """
 项目入口2：将更新文件（CSV/JSON）的内容更新到核心数据库（CSV）
 """
+import argparse
+import hashlib
+import json
 import os
 import sys
 from typing import Dict, List, Tuple
@@ -48,7 +51,23 @@ class UpdateProcessor:
         # 这里的 enable_ai_generation 控制自动流程
         self.enable_ai = str(self.settings['ai'].get('enable_ai_generation', 'true')).lower() == 'true'
     
-    def process_updates(self, conflict_resolution: str = 'mark') -> Dict:
+    def _get_database_abs_path(self) -> str:
+        db_path = self.db_manager.database_path
+        if os.path.isabs(db_path):
+            return db_path
+        return os.path.abspath(os.path.join(str(self.config.project_root), db_path))
+
+    def _get_database_fingerprint(self) -> str:
+        db_path = self._get_database_abs_path()
+        if not os.path.exists(db_path):
+            return ""
+        try:
+            with open(db_path, 'rb') as f:
+                return hashlib.sha256(f.read()).hexdigest()
+        except Exception:
+            return ""
+
+    def process_updates(self, conflict_resolution: str = 'mark', update_mode: str = 'normal') -> Dict:
         """
         处理更新文件
         conflict_resolution: 'mark', 'skip', 'replace'
@@ -60,22 +79,36 @@ class UpdateProcessor:
             'conflicts': [],
             'errors': [],
             'ai_generated': 0,
-            'invalid_msg': []
+            'invalid_msg': [],
+            'update_mode': update_mode,
+            'database_changed': False,
+            'database_rewrite_only': False,
+            'database_rewrite_attempted': False,
+            'empty_update_used': False,
+            'empty_update_reason': '',
+            'processed_files': 0,
+            'files_with_entries': 0,
         }
+
+        db_before = self._get_database_fingerprint()
+        had_db_update_attempt = False
         
         # 过滤有效文件
         valid_files = [f for f in self.update_files if f and os.path.exists(f)]
-        
-        if not valid_files:
-            result['errors'].append("没有找到任何有效的更新文件")
-            return result
 
-        print(f"检测到 {len(valid_files)} 个更新文件，开始逐一处理...")
+        if update_mode == 'database-only':
+            print("当前模式: 只更新 database（不处理任何更新文件）")
+            valid_files = []
+        elif not valid_files:
+            print("未找到有效更新文件，将执行空更新（通过 add_papers）")
+        else:
+            print(f"检测到 {len(valid_files)} 个更新文件，开始逐一处理...")
 
         total_added_papers = []
         total_conflict_papers = []
         
         for file_path in valid_files:
+            result['processed_files'] += 1
             print(f"\n📝--- 处理文件: {os.path.basename(file_path)} ---")
             
             # 1. 加载论文
@@ -95,6 +128,8 @@ class UpdateProcessor:
             if not current_papers:
                 print(f"⚠ 文件中没有论文数据")
                 continue
+
+            result['files_with_entries'] += 1
 
             print(f"读取到 {len(current_papers)} 篇论文")
 
@@ -169,6 +204,7 @@ class UpdateProcessor:
             # 5. 添加到数据库
             print(f"正在更新 {len(valid_papers)} 篇论文到数据库...")
             try:
+                had_db_update_attempt = True
                 added, conflicts, inv_msgs = self.db_manager.add_papers(
                     valid_papers, 
                     conflict_resolution
@@ -216,6 +252,23 @@ class UpdateProcessor:
                     result['errors'].append(err)
                     print(f"警告: {err}")
 
+        # 正常模式下如果没有触发数据库更新，执行一次空更新；
+        # database-only 模式始终执行一次空更新。
+        if update_mode == 'database-only' or not had_db_update_attempt:
+            result['empty_update_used'] = True
+            result['empty_update_reason'] = 'database-only' if update_mode == 'database-only' else 'no-valid-updates'
+            result['database_rewrite_attempted'] = True
+            try:
+                added, conflicts, inv_msgs = self.db_manager.add_papers([], conflict_resolution)
+                total_added_papers.extend(added)
+                total_conflict_papers.extend(conflicts)
+                result['invalid_msg'].extend(inv_msgs)
+                result['new_papers'] += len(added)
+            except Exception as e:
+                err = f"空更新失败（add_papers）: {e}"
+                result['errors'].append(err)
+                print(err)
+
         # 整理冲突信息
         conflicts_list = []
         # 注意: add_papers 返回的 conflicts 已经是 Paper 对象列表（已标记）
@@ -228,7 +281,18 @@ class UpdateProcessor:
         result['conflicts'] = conflicts_list
         result['invalid_msg'] = list(set(result['invalid_msg']))
 
-        if result['new_papers'] > 0 or result['conflicts'] or result['ai_generated'] > 0:
+        db_after = self._get_database_fingerprint()
+        result['database_changed'] = (db_before != db_after)
+        result['database_rewrite_only'] = bool(
+            result['empty_update_used']
+            and result['empty_update_reason'] in ('database-only', 'no-valid-updates')
+            and result['database_changed']
+            and result['new_papers'] == 0
+            and len(result['conflicts']) == 0
+            and result['ai_generated'] == 0
+        )
+
+        if result['new_papers'] > 0 or result['conflicts'] or result['ai_generated'] > 0 or result['database_changed']:
             result['success'] = True
 
         return result
@@ -254,7 +318,9 @@ class UpdateProcessor:
         print("更新处理结束")
         print("="*50)
         
-        if result['success']:
+        if result.get('database_rewrite_only'):
+            print("✓ 本次仅执行了空更新（通过add_papers），且 database 发生变化")
+        elif result['success']:
             print(f"✓ 成功添加 {result['new_papers']} 篇新论文")
             if result['ai_generated'] > 0:
                 print(f"✓ AI生成了 {result['ai_generated']} 处内容")
@@ -262,6 +328,11 @@ class UpdateProcessor:
                 print(f"⚠ 发现 {len(result['conflicts'])} 处冲突，已标记并添加，请在 GUI 中搜索 '{self.settings['database']['conflict_marker']}' 处理")
         else:
             print("- 没有产生有效更新")
+
+        if result.get('database_changed'):
+            print("✓ database 文件在本次更新中发生了变更")
+        else:
+            print("- database 文件在本次更新中未发生变更")
             
         if result['errors']:
             print("\n❌ 错误:")
@@ -272,11 +343,12 @@ class UpdateProcessor:
             for m in result['invalid_msg'][:5]: print(f"  - {m}")
             if len(result['invalid_msg']) > 5: print("  ...")
 
-def main():
+def main(update_mode: str = 'normal'):
     print("开始处理更新...")
     processor = UpdateProcessor()
-    result = processor.process_updates(conflict_resolution='mark')
+    result = processor.process_updates(conflict_resolution='mark', update_mode=update_mode)
     processor.print_result(result)
+    print(f"UPDATE_RESULT_JSON::{json.dumps(result, ensure_ascii=False)}")
     backup_file("assets","backups")
     if result['success']:
         print("\n正在重新生成 README...")
@@ -291,4 +363,12 @@ def main():
             print(f"❌ README 生成出错: {e}")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="处理更新文件并更新数据库")
+    parser.add_argument(
+        '--mode',
+        choices=['normal', 'database-only'],
+        default='normal',
+        help='更新模式：normal=正常更新；database-only=只重写database',
+    )
+    args = parser.parse_args()
+    main(update_mode=args.mode)

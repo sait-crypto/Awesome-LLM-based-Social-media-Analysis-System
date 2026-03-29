@@ -11,6 +11,10 @@ import time
 import shutil
 import uuid
 import configparser
+import json
+import glob
+import sqlite3
+import tempfile
 from typing import Dict, List, Any, Optional, Tuple, Set
 import re
 import copy # 新增
@@ -30,8 +34,19 @@ BASE_DIR = str(get_config_instance().project_root)
 class SubmitLogic:
     """提交系统的业务逻辑控制器"""
 
+    ZOTERO_REF_FIELD = 'zotero_item_ref'
+
     VALID_SAVE_VALIDATION_STRATEGIES = {'strict', 'lenient'}
     VALID_SAVE_MODES = {'incremental', 'rewrite'}
+    DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME = 'default'
+    DEFAULT_WORKSPACE_LAYOUT = {
+        'main_pane_ratio': 0.47,
+        'category_sidebar_visible': False,
+        'category_sidebar_ratio': 0.40,
+        'optional_columns': [],
+        'column_widths': {},
+        'category_tree_count_width': 35,
+    }
 
     def __init__(self):
         # 加载配置
@@ -124,12 +139,219 @@ class SubmitLogic:
         self._persist_ui_setting('save_validation_strategy', normalized)
         return normalized
 
-    def set_save_mode(self, mode: str, require_admin: bool = True) -> str:
+    def set_save_mode(self, mode: str, require_admin: bool = False) -> str:
         if require_admin and not self.is_admin:
             raise PermissionError("仅管理员可修改保存模式")
         normalized = self._normalize_save_mode(mode)
         self._persist_ui_setting('save_mode', normalized)
         return normalized
+
+    def _build_default_workspace_layout_profile(self) -> Dict[str, Any]:
+        return {
+            'name': self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME,
+            'display_name': '默认配置',
+            'locked': True,
+            'layout': copy.deepcopy(self.DEFAULT_WORKSPACE_LAYOUT)
+        }
+
+    def get_default_workspace_layout_payload(self) -> Dict[str, Any]:
+        return copy.deepcopy(self.DEFAULT_WORKSPACE_LAYOUT)
+
+    def _normalize_workspace_ratio(self, value: Any, default: float, minimum: float = 0.10, maximum: float = 0.90) -> float:
+        try:
+            ratio = float(value)
+        except Exception:
+            ratio = float(default)
+        return max(minimum, min(maximum, ratio))
+
+    def _normalize_workspace_layout_payload(self, payload: Any) -> Dict[str, Any]:
+        data = payload if isinstance(payload, dict) else {}
+        defaults = self.DEFAULT_WORKSPACE_LAYOUT
+
+        optional_columns: List[str] = []
+        raw_optional = data.get('optional_columns', [])
+        if isinstance(raw_optional, list):
+            for item in raw_optional:
+                text = str(item or '').strip()
+                if text and text not in optional_columns:
+                    optional_columns.append(text)
+
+        column_widths: Dict[str, int] = {}
+        raw_widths = data.get('column_widths', {})
+        if isinstance(raw_widths, dict):
+            for key, val in raw_widths.items():
+                column = str(key or '').strip()
+                if not column:
+                    continue
+                try:
+                    width = int(val)
+                except Exception:
+                    continue
+                column_widths[column] = max(30, min(1000, width))
+
+        try:
+            category_tree_count_width = int(data.get('category_tree_count_width', defaults.get('category_tree_count_width', 35)))
+        except Exception:
+            category_tree_count_width = int(defaults.get('category_tree_count_width', 35))
+        category_tree_count_width = max(24, min(240, category_tree_count_width))
+
+        return {
+            'main_pane_ratio': self._normalize_workspace_ratio(
+                data.get('main_pane_ratio', defaults.get('main_pane_ratio', 0.40)),
+                float(defaults.get('main_pane_ratio', 0.40)),
+            ),
+            'category_sidebar_visible': bool(data.get('category_sidebar_visible', defaults.get('category_sidebar_visible', False))),
+            'category_sidebar_ratio': self._normalize_workspace_ratio(
+                data.get('category_sidebar_ratio', defaults.get('category_sidebar_ratio', 0.40)),
+                float(defaults.get('category_sidebar_ratio', 0.40)),
+            ),
+            'optional_columns': optional_columns,
+            'column_widths': column_widths,
+            'category_tree_count_width': category_tree_count_width,
+        }
+
+    def _normalize_workspace_layout_profile(self, profile: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(profile, dict):
+            return None
+
+        name = str(profile.get('name', '')).strip()
+        if not name:
+            return None
+
+        display_name = str(profile.get('display_name', name)).strip() or name
+        locked = bool(profile.get('locked', False))
+        layout_payload = self._normalize_workspace_layout_payload(profile.get('layout', {}))
+
+        return {
+            'name': name,
+            'display_name': display_name,
+            'locked': locked,
+            'layout': layout_payload,
+        }
+
+    def _load_workspace_layout_profiles_state(self) -> Tuple[List[Dict[str, Any]], str]:
+        ui_cfg = self.settings.get('ui', {}) or {}
+        raw_profiles = ui_cfg.get('workspace_layout_profiles_json', '[]')
+
+        parsed_profiles: List[Dict[str, Any]] = []
+        try:
+            profile_items = json.loads(raw_profiles) if raw_profiles else []
+        except Exception:
+            profile_items = []
+
+        if isinstance(profile_items, list):
+            for item in profile_items:
+                normalized = self._normalize_workspace_layout_profile(item)
+                if normalized is None:
+                    continue
+                if normalized.get('name') == self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME:
+                    continue
+                parsed_profiles.append(normalized)
+
+        profiles = [self._build_default_workspace_layout_profile()] + parsed_profiles
+
+        active_name = str(ui_cfg.get('active_workspace_layout_profile', self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME)).strip()
+        available_names = {p.get('name', '') for p in profiles}
+        if active_name not in available_names:
+            active_name = self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME
+
+        return profiles, active_name
+
+    def _persist_workspace_layout_profiles_state(self, profiles: List[Dict[str, Any]], active_name: str):
+        serializable_profiles: List[Dict[str, Any]] = []
+        for profile in profiles:
+            if profile.get('name') == self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME:
+                continue
+            serializable_profiles.append({
+                'name': profile.get('name', ''),
+                'display_name': profile.get('display_name', profile.get('name', '')),
+                'locked': bool(profile.get('locked', False)),
+                'layout': self._normalize_workspace_layout_payload(profile.get('layout', {})),
+            })
+
+        self._persist_ui_setting('workspace_layout_profiles_json', json.dumps(serializable_profiles, ensure_ascii=False))
+        self._persist_ui_setting('active_workspace_layout_profile', str(active_name or self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME))
+
+    def get_workspace_layout_profiles(self) -> Tuple[List[Dict[str, Any]], str]:
+        profiles, active_name = self._load_workspace_layout_profiles_state()
+        return copy.deepcopy(profiles), active_name
+
+    def get_active_workspace_layout_profile(self) -> Dict[str, Any]:
+        profiles, active_name = self._load_workspace_layout_profiles_state()
+        for profile in profiles:
+            if profile.get('name') == active_name:
+                return copy.deepcopy(profile)
+        return copy.deepcopy(self._build_default_workspace_layout_profile())
+
+    def set_active_workspace_layout_profile(self, profile_name: str) -> Dict[str, Any]:
+        target_name = str(profile_name or '').strip()
+        profiles, _ = self._load_workspace_layout_profiles_state()
+
+        target_profile: Optional[Dict[str, Any]] = None
+        for profile in profiles:
+            if profile.get('name') == target_name:
+                target_profile = profile
+                break
+
+        if target_profile is None:
+            raise ValueError(f"布局配置不存在: {target_name}")
+
+        self._persist_workspace_layout_profiles_state(profiles, target_name)
+        return copy.deepcopy(target_profile)
+
+    def save_workspace_layout_profile(self, profile_name: str, layout_payload: Dict[str, Any], overwrite: bool = False) -> Dict[str, Any]:
+        name = str(profile_name or '').strip()
+        if not name:
+            raise ValueError('配置名不能为空')
+        if name == self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME:
+            raise PermissionError('默认配置不可修改')
+
+        normalized_payload = self._normalize_workspace_layout_payload(layout_payload)
+        profiles, _ = self._load_workspace_layout_profiles_state()
+
+        existing_idx = -1
+        for idx, profile in enumerate(profiles):
+            if profile.get('name') == name:
+                existing_idx = idx
+                break
+
+        if existing_idx >= 0:
+            if not overwrite:
+                raise ValueError(f"配置已存在: {name}")
+            if profiles[existing_idx].get('locked', False):
+                raise PermissionError('该配置不可修改')
+            profiles[existing_idx]['display_name'] = name
+            profiles[existing_idx]['layout'] = normalized_payload
+            saved_profile = profiles[existing_idx]
+        else:
+            saved_profile = {
+                'name': name,
+                'display_name': name,
+                'locked': False,
+                'layout': normalized_payload,
+            }
+            profiles.append(saved_profile)
+
+        self._persist_workspace_layout_profiles_state(profiles, name)
+        return copy.deepcopy(saved_profile)
+
+    def delete_workspace_layout_profile(self, profile_name: str):
+        name = str(profile_name or '').strip()
+        if not name:
+            raise ValueError('配置名不能为空')
+        if name == self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME:
+            raise PermissionError('默认配置不可删除')
+
+        profiles, active_name = self._load_workspace_layout_profiles_state()
+        kept_profiles = [p for p in profiles if p.get('name') != name]
+        if len(kept_profiles) == len(profiles):
+            raise ValueError(f"配置不存在: {name}")
+
+        next_active = active_name
+        if active_name == name:
+            next_active = self.DEFAULT_WORKSPACE_LAYOUT_PROFILE_NAME
+
+        self._persist_workspace_layout_profiles_state(kept_profiles, next_active)
     # ================= 文件加载与管理 =================
 
     def load_papers_from_file(self, filepath: str) -> int:
@@ -178,6 +400,10 @@ class SubmitLogic:
     def _load_papers_into_workspace(self, filepath: str, set_current_file: bool = True) -> int:
         """统一加载逻辑：读取文件并写入当前工作集。"""
         self.papers = self._read_existing_papers(filepath)
+        try:
+            self.update_utils.repair_related_paper_references(self.papers)
+        except Exception as ex:
+            print(f"相关论文引用修正失败（工作区）: {ex}")
         if set_current_file:
             self.current_file_path = filepath
         return len(self.papers)
@@ -497,12 +723,16 @@ class SubmitLogic:
         # 如果是数据库，走数据库专用逻辑
         if self._is_database_file(target_path):
             if not self.is_admin: raise PermissionError("无权限写入数据库")
-            self.db_manager.save_database(self.papers)
+            success = self.db_manager.save_database(self.papers)
+            if not success:
+                raise IOError(self.update_utils.last_error or f"写入数据库失败: {target_path}")
         else:
             # 普通文件，先处理 Assets 归档
             for p in self.papers:
                 self.update_utils.normalize_assets(p)
-            self.update_utils.write_data(target_path, self.papers)
+            success = self.update_utils.write_data(target_path, self.papers)
+            if not success:
+                raise IOError(self.update_utils.last_error or f"写入失败: {target_path}")
 
     def save_to_file_incremental(self, target_path: str, conflict_decisions: Dict[Tuple[str, str], str]):
         """
@@ -536,7 +766,9 @@ class SubmitLogic:
         
         # 合并
         final_list = existing_papers + papers_to_append
-        self.update_utils.write_data(target_path, final_list)
+        success = self.update_utils.write_data(target_path, final_list)
+        if not success:
+            raise IOError(self.update_utils.last_error or f"写入失败: {target_path}")
         return final_list
 
     def save_to_file_by_mode(
@@ -721,6 +953,359 @@ class SubmitLogic:
         self.papers.extend(papers)
         return len(papers)
 
+    def _normalize_doi_for_zotero_lookup(self, doi_text: str) -> str:
+        text = str(doi_text or '').strip().lower()
+        text = re.sub(r'^https?://(dx\.)?doi\.org/', '', text)
+        text = re.sub(r'^doi\s*:\s*', '', text)
+        return text.strip()
+
+    def _normalize_title_for_zotero_lookup(self, title_text: str) -> str:
+        text = str(title_text or '').strip().lower()
+        return re.sub(r'\s+', ' ', text)
+
+    def _normalize_zotero_ref(self, ref_text: str) -> str:
+        text = str(ref_text or '').strip()
+        if not text:
+            return ''
+        m = re.match(r'^\s*(\d+)\s*:\s*([A-Za-z0-9]+)\s*$', text)
+        if m:
+            return f"{int(m.group(1))}:{m.group(2).strip()}"
+        # 仅填 key 时，默认视为个人库 libraryID=1
+        m2 = re.match(r'^\s*([A-Za-z0-9]+)\s*$', text)
+        if m2:
+            return f"1:{m2.group(1).strip()}"
+        return text
+
+    def _compose_zotero_ref(self, library_id: int, key: str) -> str:
+        lid = int(library_id or 1)
+        return f"{lid}:{str(key or '').strip()}"
+
+    def _default_zotero_db_path(self) -> Optional[str]:
+        appdata = os.environ.get('APPDATA', '').strip()
+        candidates: List[str] = []
+        if appdata:
+            candidates.extend(glob.glob(os.path.join(appdata, 'Zotero', 'Profiles', '*', 'zotero.sqlite')))
+            candidates.extend(glob.glob(os.path.join(appdata, 'Zotero', 'Zotero', 'Profiles', '*', 'zotero.sqlite')))
+
+        user_home = os.path.expanduser('~')
+        candidates.append(os.path.join(user_home, 'Zotero', 'zotero.sqlite'))
+
+        existing = [p for p in candidates if os.path.isfile(p)]
+        if not existing:
+            return None
+        existing.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        return existing[0]
+
+    def _config_zotero_db_path(self) -> Optional[str]:
+        zotero_cfg = self.settings.get('zotero', {}) or {}
+        raw = str(zotero_cfg.get('database_path', '') or '').strip()
+        if not raw:
+            return None
+        return raw if os.path.isabs(raw) else os.path.join(BASE_DIR, raw)
+
+    def get_zotero_db_candidates(self) -> List[str]:
+        candidates: List[str] = []
+        default_path = self._default_zotero_db_path()
+        config_path = self._config_zotero_db_path()
+        if default_path:
+            candidates.append(default_path)
+        if config_path:
+            candidates.append(config_path)
+
+        # 去重保序
+        uniq: List[str] = []
+        seen = set()
+        for p in candidates:
+            norm = os.path.normpath(p)
+            if norm in seen:
+                continue
+            seen.add(norm)
+            uniq.append(norm)
+        return uniq
+
+    def _pick_available_zotero_db_path(self) -> Optional[str]:
+        for p in self.get_zotero_db_candidates():
+            if os.path.isfile(p):
+                return p
+        return None
+
+    def _copy_zotero_db_for_query(self, db_path: str) -> str:
+        # Zotero 运行时主库可能被锁，先复制副本再查询更稳定。
+        tmp_dir = os.path.join(tempfile.gettempdir(), 'awesome_llm_zotero')
+        ensure_directory(tmp_dir)
+        last_err: Optional[Exception] = None
+        for i in range(3):
+            dst = os.path.join(tmp_dir, f"zotero_query_{os.getpid()}_{int(time.time() * 1000)}_{i}.sqlite")
+            try:
+                shutil.copy2(db_path, dst)
+                return dst
+            except Exception as ex:
+                last_err = ex
+                time.sleep(0.2)
+        if last_err is not None:
+            raise last_err
+        raise RuntimeError("复制 Zotero 数据库副本失败")
+
+    def _connect_zotero_db_readonly(self, db_path: str) -> sqlite3.Connection:
+        path_posix = db_path.replace('\\', '/')
+        if re.match(r'^[A-Za-z]:/', path_posix):
+            base_uri = f"file:/{path_posix}"
+        else:
+            base_uri = f"file:{path_posix}"
+
+        last_err: Optional[Exception] = None
+        for suffix in ("?mode=ro", "?mode=ro&immutable=1"):
+            try:
+                conn = sqlite3.connect(f"{base_uri}{suffix}", uri=True, timeout=0.2)
+                conn.execute("PRAGMA query_only = ON")
+                return conn
+            except sqlite3.OperationalError as ex:
+                last_err = ex
+                msg = str(ex).lower()
+                if "locked" not in msg and "busy" not in msg:
+                    raise
+
+        if last_err is not None:
+            raise last_err
+        raise RuntimeError("无法连接 Zotero 数据库")
+
+    def _build_zotero_select_uri(self, conn: sqlite3.Connection, key: str, library_id: int) -> str:
+        if int(library_id or 0) <= 1:
+            return f"zotero://select/library/items/{key}"
+
+        cur = conn.cursor()
+        cur.execute("SELECT groupID FROM groups WHERE libraryID = ? LIMIT 1", (library_id,))
+        row = cur.fetchone()
+        if row and row[0]:
+            return f"zotero://select/groups/{row[0]}/items/{key}"
+        return f"zotero://select/library/items/{key}"
+
+    def _query_zotero_item_by_ref(self, conn: sqlite3.Connection, ref_text: str) -> Optional[Dict[str, Any]]:
+        ref_norm = self._normalize_zotero_ref(ref_text)
+        if not ref_norm or ':' not in ref_norm:
+            return None
+
+        lid_text, key = ref_norm.split(':', 1)
+        try:
+            library_id = int(lid_text)
+        except Exception:
+            library_id = 1
+
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT i.key, i.libraryID
+            FROM items i
+            LEFT JOIN deletedItems d ON d.itemID = i.itemID
+            LEFT JOIN itemAttachments ia ON ia.itemID = i.itemID
+            LEFT JOIN itemNotes n ON n.itemID = i.itemID
+            WHERE d.itemID IS NULL
+              AND ia.itemID IS NULL
+              AND n.itemID IS NULL
+              AND i.key = ?
+              AND i.libraryID = ?
+            LIMIT 1
+            """,
+            (key, library_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+
+        found_key, found_library_id = row
+        return {
+            'uri': self._build_zotero_select_uri(conn, found_key, int(found_library_id or 1)),
+            'ref': self._compose_zotero_ref(int(found_library_id or 1), str(found_key or '')),
+        }
+
+    def _query_zotero_item_by_doi_or_title(self, conn: sqlite3.Connection, doi_text: str, title_text: str) -> Optional[Dict[str, Any]]:
+        doi_norm = self._normalize_doi_for_zotero_lookup(doi_text)
+        title_norm = self._normalize_title_for_zotero_lookup(title_text)
+        cur = conn.cursor()
+
+        doi_matches: List[Dict[str, Any]] = []
+        title_matches: List[Dict[str, Any]] = []
+
+        if doi_norm:
+            cur.execute(
+                """
+                SELECT i.key, i.libraryID, v.value
+                FROM items i
+                JOIN itemData id ON id.itemID = i.itemID
+                JOIN fields f ON f.fieldID = id.fieldID
+                JOIN itemDataValues v ON v.valueID = id.valueID
+                LEFT JOIN deletedItems d ON d.itemID = i.itemID
+                LEFT JOIN itemAttachments ia ON ia.itemID = i.itemID
+                LEFT JOIN itemNotes n ON n.itemID = i.itemID
+                WHERE d.itemID IS NULL
+                  AND ia.itemID IS NULL
+                  AND n.itemID IS NULL
+                  AND f.fieldName = 'DOI'
+                """
+            )
+            for key, library_id, raw_doi in cur.fetchall():
+                if self._normalize_doi_for_zotero_lookup(raw_doi) == doi_norm:
+                    lid = int(library_id or 1)
+                    key_text = str(key or '').strip()
+                    doi_matches.append({
+                        'uri': self._build_zotero_select_uri(conn, key_text, lid),
+                        'ref': self._compose_zotero_ref(lid, key_text),
+                    })
+
+        if title_norm:
+            cur.execute(
+                """
+                SELECT i.key, i.libraryID, v.value
+                FROM items i
+                JOIN itemData id ON id.itemID = i.itemID
+                JOIN fields f ON f.fieldID = id.fieldID
+                JOIN itemDataValues v ON v.valueID = id.valueID
+                LEFT JOIN deletedItems d ON d.itemID = i.itemID
+                LEFT JOIN itemAttachments ia ON ia.itemID = i.itemID
+                LEFT JOIN itemNotes n ON n.itemID = i.itemID
+                WHERE d.itemID IS NULL
+                  AND ia.itemID IS NULL
+                  AND n.itemID IS NULL
+                  AND f.fieldName = 'title'
+                """
+            )
+            for key, library_id, raw_title in cur.fetchall():
+                if self._normalize_title_for_zotero_lookup(raw_title) == title_norm:
+                    lid = int(library_id or 1)
+                    key_text = str(key or '').strip()
+                    title_matches.append({
+                        'uri': self._build_zotero_select_uri(conn, key_text, lid),
+                        'ref': self._compose_zotero_ref(lid, key_text),
+                    })
+
+        # DOI 和标题都提供时：优先选择“同时命中同一条目”的结果。
+        if doi_matches and title_matches:
+            title_refs = {m.get('ref') for m in title_matches if m.get('ref')}
+            for m in doi_matches:
+                if m.get('ref') in title_refs:
+                    return m
+
+            # 若无法同时命中，按需求忽略 DOI，优先使用标题命中结果。
+            return title_matches[0]
+
+        # 仅标题命中时，使用标题结果。
+        if title_matches:
+            return title_matches[0]
+
+        # 仅 DOI 命中时，直接使用 DOI 结果。
+        if doi_matches:
+            return doi_matches[0]
+
+        return None
+
+    def locate_paper_in_zotero(self, paper: Paper) -> Dict[str, Any]:
+        db_path = self._pick_available_zotero_db_path()
+        if not db_path:
+            return {'status': 'no_db', 'db_path': None}
+
+        copied_db_path: Optional[str] = None
+        conn: Optional[sqlite3.Connection] = None
+        try:
+            copied_db_path = self._copy_zotero_db_for_query(db_path)
+            conn = self._connect_zotero_db_readonly(copied_db_path)
+
+            stored_ref = str(getattr(paper, self.ZOTERO_REF_FIELD, '') or '').strip()
+            doi_text = str(getattr(paper, 'doi', '') or '').strip()
+            title_text = str(getattr(paper, 'title', '') or '').strip()
+
+            by_meta = self._query_zotero_item_by_doi_or_title(conn, doi_text, title_text)
+
+            if stored_ref:
+                by_ref = self._query_zotero_item_by_ref(conn, stored_ref)
+                if by_ref:
+                    mismatch = bool(by_meta and by_meta.get('ref') and by_meta.get('ref') != by_ref.get('ref'))
+                    return {
+                        'status': 'matched',
+                        'db_path': db_path,
+                        'uri': by_ref.get('uri'),
+                        'matched_ref': by_ref.get('ref'),
+                        'stored_ref': stored_ref,
+                        'suggested_ref': (by_meta or {}).get('ref'),
+                        'suggested_uri': (by_meta or {}).get('uri'),
+                        'mismatch': mismatch,
+                    }
+
+                # 已有字段但查不到，回退 DOI/Title
+                if by_meta:
+                    return {
+                        'status': 'matched',
+                        'db_path': db_path,
+                        'uri': by_meta.get('uri'),
+                        'matched_ref': by_meta.get('ref'),
+                        'stored_ref': stored_ref,
+                        'suggested_ref': by_meta.get('ref'),
+                        'suggested_uri': by_meta.get('uri'),
+                        'mismatch': True,
+                    }
+
+                return {
+                    'status': 'not_found',
+                    'db_path': db_path,
+                    'stored_ref': stored_ref,
+                }
+
+            if by_meta:
+                return {
+                    'status': 'matched',
+                    'db_path': db_path,
+                    'uri': by_meta.get('uri'),
+                    'matched_ref': by_meta.get('ref'),
+                    'stored_ref': '',
+                    'suggested_ref': by_meta.get('ref'),
+                    'suggested_uri': by_meta.get('uri'),
+                    'mismatch': False,
+                }
+
+            return {'status': 'not_found', 'db_path': db_path, 'stored_ref': stored_ref}
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            if copied_db_path and os.path.isfile(copied_db_path):
+                try:
+                    os.remove(copied_db_path)
+                except Exception:
+                    pass
+
+    def clear_all_zotero_item_refs(self) -> int:
+        changed = 0
+        for paper in self.papers:
+            cur = str(getattr(paper, self.ZOTERO_REF_FIELD, '') or '').strip()
+            if cur:
+                setattr(paper, self.ZOTERO_REF_FIELD, '')
+                changed += 1
+        return changed
+
+    # ================= 文件路径与打开逻辑 =================
+
+    def resolve_existing_path(self, raw_path: str) -> Tuple[bool, Optional[str], str]:
+        if not raw_path:
+            return False, None, "路径为空"
+        abs_path = raw_path if os.path.isabs(raw_path) else os.path.join(BASE_DIR, raw_path)
+        abs_path = os.path.normpath(os.path.abspath(abs_path))
+        if not os.path.exists(abs_path):
+            return False, None, f"文件不存在: {abs_path}"
+        return True, abs_path, ""
+
+    def open_path_with_default_app(self, abs_path: str) -> Tuple[bool, str]:
+        try:
+            if sys.platform == 'win32':
+                os.startfile(abs_path)
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', abs_path], check=False)
+            else:
+                subprocess.run(['xdg-open', abs_path], check=False)
+            return True, ""
+        except Exception as e:
+            return False, str(e)
+
     def get_zotero_fill_updates(self, source_paper: Paper, target_index: int) -> Tuple[List[str], List[Tuple[str, Any]]]:
         """计算Zotero填充的更新内容"""
         if not (0 <= target_index < len(self.papers)):
@@ -735,9 +1320,12 @@ class SubmitLogic:
             for t in self.config.get_system_tags()
             if t.get("variable")
         ]
+        allowed_system_fill_fields = {self.ZOTERO_REF_FIELD}
         
         for field in source_paper.__dataclass_fields__:
-            if field in ['invalid_fields', 'is_placeholder', 'uid'] or field in system_fields:
+            if field in ['invalid_fields', 'is_placeholder', 'uid']:
+                continue
+            if field in system_fields and field not in allowed_system_fill_fields:
                 continue
             
             val = getattr(source_paper, field)

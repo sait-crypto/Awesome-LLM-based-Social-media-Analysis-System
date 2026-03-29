@@ -50,6 +50,16 @@ class AIGenerator:
         self.profiles = self._load_profiles_from_settings()
         self.active_profile_name = self.settings['ai'].get('active_profile', 'default_deepseek')
         self.active_profile = self.get_profile(self.active_profile_name)
+        self.user_prompts = self.config_loader.load_user_prompts()
+
+    def get_user_prompts(self) -> Dict[str, Any]:
+        """获取用户 Prompt 配置。"""
+        return dict(self.user_prompts or {})
+
+    def save_user_prompts(self, prompts_payload: Dict[str, Any]) -> None:
+        """保存用户 Prompt 配置。"""
+        self.config_loader.save_user_prompts(prompts_payload)
+        self.user_prompts = self.config_loader.load_user_prompts()
 
     def _load_profiles_from_settings(self) -> Dict[str, Dict]:
         """从 settings 中转换 Profiles 列表为字典"""
@@ -100,7 +110,7 @@ class AIGenerator:
                 }
         return {"api_url": "", "models": []}
 
-    def save_profiles(self, profiles_list: List[Dict], enable_ai: bool, active_profile_name: str, key_path: str = None):
+    def save_profiles(self, profiles_list: List[Dict], enable_ai: bool, active_profile_name: str, key_path: Optional[str] = None):
         """保存配置 (代理到 ConfigLoader)"""
         self.config_loader.save_ai_settings(enable_ai, active_profile_name, profiles_list, key_path)
         # 刷新自身状态
@@ -203,12 +213,194 @@ Reasoning: ...
         
         return final_cat, response
 
-    def generate_field(self, paper: Paper, field: str, paper_text: str = "") -> str:
+    def _build_user_prompt_block(self, current_user_idea: str = "") -> str:
+        """拼接用户侧 Prompt 上下文。"""
+        prompts = self.get_user_prompts()
+        vibe_papers = prompts.get('vibe_papers', []) if isinstance(prompts.get('vibe_papers', []), list) else []
+        writing_ctx = str(prompts.get('writing_paper_context', '') or '').strip()
+        other_prompt = str(prompts.get('other_user_prompt', '') or '').strip()
+        user_idea = str(current_user_idea or '').strip()
+
+        lines = [
+            "User Prompt Context (must be faithfully integrated):",
+        ]
+
+        lines.extend([
+            "Role Boundary (strict):",
+            "- Current paper (the one being processed now) is the ONLY source of factual content.",
+            "- Vibe papers are ONLY for language style imitation and sentence-level expression patterns.",
+            "- Writing paper context is ONLY for focus selection 、discourse and sentence-level organization.",
+            "- Never mix facts, methods, results, or claims from vibe/writing papers into the current paper summary.",
+        ])
+
+        if vibe_papers:
+            lines.append("- Vibe papers (imitate writing style only, do not copy content):")
+            for idx, item in enumerate(vibe_papers, start=1):
+                lines.append(f"  {idx}. {item}")
+        else:
+            lines.append("- Vibe papers: (none)")
+
+        lines.append(f"- Writing paper context: {writing_ctx if writing_ctx else '(none)'}")
+        lines.append(f"- Other user prompt: {other_prompt if other_prompt else '(none)'}")
+        lines.append(f"- User idea for this generation: {user_idea if user_idea else '(none)'}")
+        return "\n".join(lines)
+
+    def _build_question_current_paper_context(self, paper: Paper, paper_text: str = "") -> str:
+        """构建提问时当前论文的分层上下文，显式区分事实来源优先级。"""
+        paper_dict = asdict(paper)
+        summary_fields = {
+            'category': paper_dict.get('category', ''),
+            'summary_motivation': paper_dict.get('summary_motivation', ''),
+            'summary_innovation': paper_dict.get('summary_innovation', ''),
+            'summary_method': paper_dict.get('summary_method', ''),
+            'summary_conclusion': paper_dict.get('summary_conclusion', ''),
+            'summary_limitation': paper_dict.get('summary_limitation', ''),
+            'summary_citable_paragraph': paper_dict.get('summary_citable_paragraph', ''),
+            'analogy_summary': paper_dict.get('analogy_summary', ''),
+            'title_translation': paper_dict.get('title_translation', ''),
+            'notes': paper_dict.get('notes', ''),
+        }
+
+        meta_fields = {
+            'uid': paper_dict.get('uid', ''),
+            'doi': paper_dict.get('doi', ''),
+            'title': paper_dict.get('title', ''),
+            'authors': paper_dict.get('authors', ''),
+            'date': paper_dict.get('date', ''),
+            'conference': paper_dict.get('conference', ''),
+            'paper_url': paper_dict.get('paper_url', ''),
+            'project_url': paper_dict.get('project_url', ''),
+            'contributor': paper_dict.get('contributor', ''),
+            'status': paper_dict.get('status', ''),
+            'related_papers': paper_dict.get('related_papers', ''),
+            'pipeline_image': paper_dict.get('pipeline_image', ''),
+            'paper_file': paper_dict.get('paper_file', ''),
+            'zotero_item_ref': paper_dict.get('zotero_item_ref', ''),
+        }
+
+        context_lines = [
+            "[Current Paper Context | Source Priority]",
+            "P0-FACT (highest): Abstract and Paper Full Text.",
+            "P1-FACT (supporting): Metadata fields.",
+            "P2-REFERENCE (lowest): Summary/analogy fields may contain paraphrase distortion and must be verified against P0.",
+            "",
+            "[P0-FACT: Abstract]",
+            str(paper_dict.get('abstract', '') or '').strip(),
+            "",
+            "[P0-FACT: Paper Full Text Excerpt]",
+            str(paper_text or '').strip(),
+            "",
+            "[P1-FACT: Metadata JSON]",
+            json.dumps(meta_fields, ensure_ascii=False, indent=2),
+            "",
+            "[P2-REFERENCE: Summary Fields JSON]",
+            json.dumps(summary_fields, ensure_ascii=False, indent=2),
+        ]
+        return "\n".join(context_lines)
+
+    def _build_question_workspace_context(self, papers: List[Paper], current_uid: str = "") -> str:
+        """构建跨论文提问上下文，显式区分当前论文与数据库其余条目。"""
+        rows: List[Dict[str, Any]] = []
+        for idx, p in enumerate(papers):
+            payload = asdict(p)
+            row = {
+                'workspace_index': idx,
+                'is_current_paper': bool(current_uid and payload.get('uid', '') == current_uid),
+                'paper_item': payload,
+            }
+            rows.append(row)
+
+        context_lines = [
+            "[Workspace Database Context | For Cross-Paper Reasoning]",
+            "The following entries are workspace papers, separated from the current-paper context above.",
+            "Do not confuse current paper with database peer papers.",
+            json.dumps(rows, ensure_ascii=False, indent=2),
+        ]
+        return "\n".join(context_lines)
+
+    def _build_question_related_papers_context(self, papers: List[Paper], current_uid: str = "") -> str:
+        """构建当前论文 related_papers 对应论文上下文。"""
+        rows: List[Dict[str, Any]] = []
+        for idx, p in enumerate(papers):
+            payload = asdict(p)
+            rows.append({
+                'related_index': idx,
+                'is_current_paper': bool(current_uid and payload.get('uid', '') == current_uid),
+                'related_paper_item': payload,
+            })
+
+        context_lines = [
+            "[Related Papers Context | Linked from Current Paper]",
+            "The following papers are linked by the current paper's related_papers field.",
+            "Use them as additional references only; do not confuse them with the current paper.",
+            json.dumps(rows, ensure_ascii=False, indent=2),
+        ]
+        return "\n".join(context_lines)
+
+    def answer_question_with_paper_context(
+        self,
+        paper: Paper,
+        question: str,
+        paper_text: str = "",
+        workspace_papers: Optional[List[Paper]] = None,
+        related_context_papers: Optional[List[Paper]] = None,
+    ) -> str:
+        """使用当前论文 item 上下文回答问题，可选附带整个工作区数据库上下文。"""
+        if not self.is_available():
+            return ""
+
+        q = str(question or '').strip()
+        if not q:
+            return ""
+
+        current_context = self._build_question_current_paper_context(paper, paper_text)
+        workspace_context = ""
+        if workspace_papers:
+            workspace_context = self._build_question_workspace_context(workspace_papers, current_uid=paper.uid)
+
+        related_context = ""
+        if related_context_papers:
+            related_context = self._build_question_related_papers_context(related_context_papers, current_uid=paper.uid)
+
+        prompt_parts = [
+            "Task: Answer the user's question about the current paper accurately.",
+            "Language: Chinese.",
+            "",
+            "Hard Rules:",
+            "1) Treat P0-FACT (abstract + paper full text) as the primary truth source.",
+            "2) If summary/analogy fields conflict with P0-FACT, explicitly point out the conflict and trust P0-FACT.",
+            "3) When using workspace database context, clearly distinguish current paper vs other papers.",
+            "4) Do not fabricate facts not grounded in provided context.",
+            "5) If evidence is insufficient, say what is uncertain.",
+            "",
+            "Output format:",
+            "- 回答: <direct answer>",
+            "- 依据: <which part(s) support the answer: Abstract / Paper Full Text / Metadata / Summary / Workspace DB>",
+            "- 一致性检查: <whether summary-like fields are faithful to facts, if asked>",
+            "- 不确定性: <what cannot be confirmed>",
+            "",
+            f"User Question: {q}",
+            "",
+            current_context,
+        ]
+
+        if workspace_context:
+            prompt_parts.extend(["", workspace_context])
+        if related_context:
+            prompt_parts.extend(["", related_context])
+
+        prompt = "\n".join(prompt_parts)
+        resp = self._call_api(prompt, max_tokens=900)
+        return resp.strip() if resp else ""
+
+    def generate_field(self, paper: Paper, field: str, paper_text: str = "", current_user_idea: str = "") -> str:
         """通用单字段生成"""
         if not self.is_available(): return ""
         
         category_name = self.config_loader.get_category_field(paper.category.split('|')[0], 'name') if paper.category else "General"
         
+        user_prompt_block = self._build_user_prompt_block(current_user_idea)
+
         base_prompt = f"""Paper: {paper.title}
 Category: {category_name}
 Abstract: {paper.abstract}
@@ -217,9 +409,19 @@ Context: {paper_text[:20000]}
 Req: Generate content for field '{field}'.
 Constraint: 
 1. Bilingual (English then Chinese), separated by '{self.translation_separator}'.
-2. Maintain academic rigor while ensuring readability
-3. Concise (under 100 words).
-4. Fields marked with {self.ai_generate_mark} in the prompt are AI-generated and unreviewed by humans, please refer to them cautiously
+2. The output will be lightly edited and directly used as final manuscript sentences in an AI survey paper.
+3. Follow AI academic survey writing conventions: concise, factual, and precise.
+4. Do not copy original text; prioritize faithful facts over rhetorical interpretation.
+5. Prefer short, citation-ready expressions that can be freely combined into the survey text.
+6. If uncertain or inconsistent, correct it before output.
+7. Concise (under 100 words).
+8. Fields marked with {self.ai_generate_mark} in the prompt are AI-generated and unreviewed by humans, please refer to them cautiously.
+9. Strict boundary:
+   - Factual content MUST be grounded only in the current paper shown above (title/abstract/context).
+   - Vibe papers and writing-paper context MUST NOT contribute factual claims.
+   - Vibe papers and writing-paper context are allowed ONLY to guide writing style, focus, and organization.
+
+    {user_prompt_block}
 """
         # 针对特定字段优化 Prompt
         if field == 'title_translation':
@@ -229,6 +431,15 @@ Constraint:
             E.g., Speculative decision-making: Guess while waiting, great gain if correct, no loss if wrong {self.translation_separator} 推测决策：边等边猜，猜对血赚，猜错不亏
             ;Wisdom of the crowd: Decision-making team model {self.translation_separator} 群体智慧：决策小组模式
             ;A closed ABM simulation system for news dissemination, simulates fake news formation with four role-playing elements {self.translation_separator} 一个封闭的新闻传播仿真 ABM 系统，扮演四种角色，模拟假新闻形成过程"""
+        elif field == 'summary_citable_paragraph':
+            prompt = f"""{base_prompt}
+Generate a compact citation-ready paragraph exactly in the style used when citing a main paper in survey/related-work body text.
+Length constraint is strict: one concise sentence per language (EN + ZH), each no more than 45 English words / 60 Chinese characters.
+Do NOT write long explanation, bullet points, or background expansion.
+It must still cover: motivation, innovation, method, conclusion/effect, and limitation/future outlook (can be compressed into short clauses).
+Write as if it will be pasted directly as a main-body citation sentence in a survey.
+If one element is missing from the paper, mention uncertainty briefly instead of fabricating.
+"""
         else:
             # 通过 ConfigLoader 在运行时获取该字段的描述（避免直接导入配置模块）
             try:
@@ -317,12 +528,19 @@ Constraint:
             print(f"Gemini API Error: {e}")
             return None
 
-    def enhance_paper_with_ai(self, paper: Paper, paper_text: str = "", fields_to_gen: List[str] = None) -> Tuple[Paper, bool]:
+    def enhance_paper_with_ai(
+        self,
+        paper: Paper,
+        paper_text: str = "",
+        fields_to_gen: Optional[List[str]] = None,
+        field_user_ideas: Optional[Dict[str, str]] = None
+    ) -> Tuple[Paper, bool]:
         is_enhanced = False
         new_paper = Paper.from_dict(asdict(paper))
         
         all_ai_fields = ['title_translation', 'analogy_summary', 'summary_motivation', 
-                  'summary_innovation', 'summary_method', 'summary_conclusion', 'summary_limitation']
+                  'summary_innovation', 'summary_method', 'summary_conclusion', 'summary_limitation',
+                  'summary_citable_paragraph']
         
         target_fields = fields_to_gen if fields_to_gen else all_ai_fields
         
@@ -330,7 +548,10 @@ Constraint:
             # 如果指定了字段，强制生成；否则仅生成空的或Deprecated的
             curr = getattr(new_paper, f)
             if fields_to_gen or (not curr or self.value_deprecation_mark in str(curr)):
-                val = self.generate_field(new_paper, f, paper_text)
+                user_idea = ''
+                if isinstance(field_user_ideas, dict):
+                    user_idea = str(field_user_ideas.get(f, '') or '').strip()
+                val = self.generate_field(new_paper, f, paper_text, current_user_idea=user_idea)
                 if val:
                     setattr(new_paper, f, val)
                     is_enhanced = True

@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "active_layout_profile": "default",
+  "layout_profiles": {
+    "1": {
+      "main_ratio": 0.4666666666666667,
+      "category_sidebar_visible": false,
+      "category_sidebar_ratio": 0.4,
+      "column_states": {
+        "ID": true,
+        "Title": true,
+        "Status": true,
+        "Authors": false,
+        "Date": false,
+        "Contributor": false,
+        "Conference": false,
+        "ReadStatus": false,
+        "Placeholder": false
+      },
+      "column_widths": {
+        "ID": 44,
+        "Title": 467,
+        "Status": 72,
+        "Authors": 111,
+        "Date": 166,
+        "Contributor": 155,
+        "Conference": 144,
+        "ReadStatus": 188,
+        "Placeholder": 188
+      }
+    }
+  },
+  "last_workspace_state": {}
+}

@@ -20,6 +20,7 @@ from config import tag_config, categories_config
 class ConfigLoader:
     """配置加载器，读取所有配置文件"""
     INLINE_COMMENT_PREFIXES = ('//', ';', '#')  # 配置文件注释前缀，为健壮性，除#外，也支持 //和; 作为行注释前缀
+    USER_PROMPTS_FILE = 'user_prompts.json'
     def __init__(self):
         if getattr(sys, 'frozen', False):
             # 如果是打包后的可执行文件，使用可执行文件所在目录作为项目根
@@ -177,7 +178,7 @@ class ConfigLoader:
         
         return list(profiles_dict.values())
 
-    def resolve_api_key(self, profile_index: int = 0, source_override: str = None) -> Optional[str]:
+    def resolve_api_key(self, profile_index: int = 0, source_override: Optional[str] = None) -> Optional[str]:
         """
         解析 API Key
         逻辑：
@@ -211,7 +212,7 @@ class ConfigLoader:
         
         return None
 
-    def save_ai_settings(self, enable_ai: bool, active_profile_name: str, profiles_list: List[Dict], key_path: str = None):
+    def save_ai_settings(self, enable_ai: bool, active_profile_name: str, profiles_list: List[Dict], key_path: Optional[str] = None):
         """保存 AI 设置到 config.ini"""
         config = configparser.ConfigParser()
         user_path = self.config_path / 'config.ini'
@@ -246,6 +247,68 @@ class ConfigLoader:
         """获取 Provider 的默认值"""
         # (此处由 AIGenerator.get_provider_defaults 实现，保持空实现避免循环)
         return {} 
+
+    def _default_user_prompts_payload(self) -> Dict[str, Any]:
+        """默认用户 Prompt 配置。"""
+        return {
+            'vibe_papers': [],
+            'writing_paper_context': '',
+            'other_user_prompt': ''
+        }
+
+    def get_user_prompts_file_path(self) -> Path:
+        """用户 Prompt 配置文件路径。"""
+        return (self.config_path / self.USER_PROMPTS_FILE).resolve()
+
+    def load_user_prompts(self) -> Dict[str, Any]:
+        """读取用户 Prompt 配置；缺失或损坏时返回默认值。"""
+        default_payload = self._default_user_prompts_payload()
+        file_path = self.get_user_prompts_file_path()
+        if not file_path.exists():
+            return dict(default_payload)
+
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                payload = json.load(f)
+        except Exception:
+            return dict(default_payload)
+
+        if not isinstance(payload, dict):
+            return dict(default_payload)
+
+        vibe_raw = payload.get('vibe_papers', [])
+        if isinstance(vibe_raw, list):
+            vibe_papers = [str(item).strip() for item in vibe_raw if str(item).strip()]
+        else:
+            vibe_papers = []
+
+        return {
+            'vibe_papers': vibe_papers,
+            'writing_paper_context': str(payload.get('writing_paper_context', '') or '').strip(),
+            'other_user_prompt': str(payload.get('other_user_prompt', '') or '').strip(),
+        }
+
+    def save_user_prompts(self, prompts_payload: Dict[str, Any]) -> None:
+        """保存用户 Prompt 配置到 config 目录下 JSON 文件。"""
+        payload = self._default_user_prompts_payload()
+        payload.update(prompts_payload or {})
+
+        vibe_raw = payload.get('vibe_papers', [])
+        if isinstance(vibe_raw, list):
+            vibe_papers = [str(item).strip() for item in vibe_raw if str(item).strip()]
+        else:
+            vibe_papers = []
+
+        normalized = {
+            'vibe_papers': vibe_papers,
+            'writing_paper_context': str(payload.get('writing_paper_context', '') or '').strip(),
+            'other_user_prompt': str(payload.get('other_user_prompt', '') or '').strip(),
+        }
+
+        file_path = self.get_user_prompts_file_path()
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(normalized, f, ensure_ascii=False, indent=2)
     
     def _load_tags_config(self) -> Dict[str, Any]:
         """加载标签配置"""

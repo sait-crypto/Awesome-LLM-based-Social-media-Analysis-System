@@ -241,7 +241,8 @@ class ReadmeGenerator:
             'summary_innovation': 'innovation',
             'summary_method': 'method',
             'summary_conclusion': 'conclusion',
-            'summary_limitation': 'limitation'
+            'summary_limitation': 'limitation',
+            'summary_citable_paragraph': 'citable paragraph'
         }
         
         for k, name in tags_map.items():

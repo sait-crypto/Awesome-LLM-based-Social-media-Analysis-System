@@ -179,6 +179,15 @@ class DatabaseManager:
                 non_conflict_papers.append((new_paper, []))
                 added_papers.append(new_paper)
                 print(f"论文: {new_paper.title[:30]}... ——新论文添加")
+
+        # 4.5 最终规范化：确保同 identity 仅一个基论文，
+        # 与基论文完全相同的条目删除，其余统一标记为冲突论文。
+        non_conflict_papers, dropped_exact_duplicates, promoted_conflicts = self._canonicalize_identity_groups(non_conflict_papers)
+        if dropped_exact_duplicates > 0:
+            print(f"规范化：删除与基论文完全相同条目 {dropped_exact_duplicates} 条")
+        if promoted_conflicts:
+            print(f"规范化：将 {len(promoted_conflicts)} 条同 identity 基论文转为冲突论文")
+            conflict_papers.extend(promoted_conflicts)
         
         # 5. 排序与展平
         # 按category分组
@@ -219,6 +228,13 @@ class DatabaseManager:
                     sorted_all_papers.extend(conflict_list)
                 
                 sorted_all_papers.append(main_paper)
+
+        try:
+            repaired = self.update_utils.repair_related_paper_references(sorted_all_papers)
+            if repaired > 0:
+                print(f"相关论文双向引用修正: {repaired} 篇论文已更新")
+        except Exception as ex:
+            print(f"相关论文引用修正失败（database）: {ex}")
         
         # 6. 保存
         success = self.save_database(sorted_all_papers)
@@ -227,6 +243,85 @@ class DatabaseManager:
             return added_papers, conflict_papers, invalid_msg
         else:
             return [], new_papers, invalid_msg
+
+    def _canonicalize_identity_groups(
+        self,
+        groups: List[Tuple[Paper, List[Paper]]]
+    ) -> Tuple[List[Tuple[Paper, List[Paper]]], int, List[Paper]]:
+        """
+        统一规范化 identity 分组：
+        1) 每个 identity 仅保留一个基论文（conflict_marker=False）；
+        2) 与基论文完全相同的条目直接移除；
+        3) 其余同 identity 条目均标记为冲突论文（conflict_marker=True）。
+        """
+        flat_papers: List[Paper] = []
+        for main_paper, conflict_list in groups:
+            flat_papers.append(main_paper)
+            flat_papers.extend(conflict_list)
+
+        if not flat_papers:
+            return [], 0, []
+
+        identity_groups: List[List[Paper]] = []
+        for paper in flat_papers:
+            matched_group_indices = []
+            for idx, existing_group in enumerate(identity_groups):
+                if any(is_same_identity(paper, existing_p) for existing_p in existing_group):
+                    matched_group_indices.append(idx)
+
+            if not matched_group_indices:
+                identity_groups.append([paper])
+                continue
+
+            first_idx = matched_group_indices[0]
+            identity_groups[first_idx].append(paper)
+            # 合并多个命中的组（处理链式 identity）
+            for extra_idx in sorted(matched_group_indices[1:], reverse=True):
+                identity_groups[first_idx].extend(identity_groups[extra_idx])
+                del identity_groups[extra_idx]
+
+        normalized_groups: List[Tuple[Paper, List[Paper]]] = []
+        dropped_exact_duplicates = 0
+        promoted_conflicts: List[Paper] = []
+        paper_position_map = {id(p): idx for idx, p in enumerate(flat_papers)}
+
+        for identity_group in identity_groups:
+            if not identity_group:
+                continue
+
+            # 基论文统一规则：序号越靠后代表越早提交，选组内序号最靠后的作为最终基论文。
+            base_idx = max(
+                range(len(identity_group)),
+                key=lambda i: paper_position_map.get(id(identity_group[i]), -1)
+            )
+
+            base_paper = identity_group[base_idx]
+            base_paper.conflict_marker = False
+
+            conflict_list: List[Paper] = []
+            for i, p in enumerate(identity_group):
+                if i == base_idx:
+                    continue
+
+                # 严格完全相同判定：不忽略任何字段。
+                is_exact_duplicate, _ = is_duplicate_paper(
+                    [base_paper],
+                    p,
+                    ignore_fields=[],
+                    complete_compare=True,
+                )
+                if is_exact_duplicate:
+                    dropped_exact_duplicates += 1
+                    continue
+
+                if not p.conflict_marker:
+                    promoted_conflicts.append(p)
+                p.conflict_marker = True
+                conflict_list.append(p)
+
+            normalized_groups.append((base_paper, conflict_list))
+
+        return normalized_groups, dropped_exact_duplicates, promoted_conflicts
     
     def update_paper(self, target_paper: Paper, updates: Dict[str, Any]) -> bool:
         """更新单篇论文"""
