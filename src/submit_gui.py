@@ -4498,8 +4498,8 @@ class PaperSubmissionGUI:
             return "break"
 
         for widget in text_widgets:
-            widget.bind("<Control-Return>", _on_ctrl_enter)
-            widget.bind("<Control-KP_Enter>", _on_ctrl_enter)
+            for sequence in self._get_submit_text_shortcut_bindings():
+                widget.bind(sequence, _on_ctrl_enter)
 
     def _collect_related_context_papers(self, current_real_idx: int, variable: str = 'related_papers') -> List[Paper]:
         if current_real_idx < 0 or current_real_idx >= len(self.logic.papers):
@@ -5930,6 +5930,12 @@ class PaperSubmissionGUI:
             ('<Control-y>', self._on_text_redo),
         ]
 
+    def _get_submit_text_shortcut_bindings(self) -> List[str]:
+        return [
+            '<Control-Return>',
+            '<Control-KP_Enter>',
+        ]
+
     def _bind_text_widget_shortcuts(self, text_widget):
         for sequence, handler in self._get_text_widget_shortcut_bindings():
             text_widget.bind(sequence, handler)
@@ -5960,6 +5966,11 @@ class PaperSubmissionGUI:
                 'combo': 'Ctrl+Y',
                 'action': '重做（Redo）',
                 'available': '仅当焦点在多行 text 文本框时可用',
+            },
+            {
+                'combo': 'Ctrl+Enter',
+                'action': '在输入型文本对话框中提交并执行确认按钮（如论文提问、字段生成用户想法、用户 Prompt 保存）',
+                'available': '仅在带“文本输入 + 确认按钮”的相关弹窗中可用',
             },
         ]
 
