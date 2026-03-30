@@ -4390,6 +4390,67 @@ class PaperSubmissionGUI:
                 fields.append(field_name)
         return fields
 
+    def _create_dialog_scrollable_content(
+        self,
+        parent: tk.Misc,
+        padding: int = 10,
+        wheel_scope: Optional[tk.Misc] = None,
+        canvas_bg: Optional[str] = None,
+    ) -> ttk.Frame:
+        """创建可滚动内容区，可用于整窗或局部区域。"""
+        wrapper = ttk.Frame(parent, padding=padding)
+        wrapper.pack(fill=tk.BOTH, expand=True)
+
+        canvas = tk.Canvas(wrapper, highlightthickness=0)
+        if canvas_bg is not None:
+            canvas.configure(bg=canvas_bg)
+        scrollbar = ttk.Scrollbar(wrapper, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        content = ttk.Frame(canvas)
+        content_window = canvas.create_window((0, 0), window=content, anchor='nw')
+
+        def _on_content_configure(_event=None):
+            canvas.configure(scrollregion=canvas.bbox('all'))
+
+        def _on_canvas_configure(event):
+            canvas.itemconfigure(content_window, width=event.width)
+
+        content.bind('<Configure>', _on_content_configure)
+        canvas.bind('<Configure>', _on_canvas_configure)
+
+        wheel_target = wheel_scope or parent
+
+        def _on_mousewheel(event):
+            try:
+                widget_under_mouse = wheel_target.winfo_containing(event.x_root, event.y_root)
+                if widget_under_mouse and widget_under_mouse.winfo_class().lower() in {'text', 'treeview', 'listbox'}:
+                    return None
+            except Exception:
+                pass
+
+            if hasattr(event, 'delta') and event.delta:
+                step = -1 if event.delta > 0 else 1
+            elif getattr(event, 'num', None) == 4:
+                step = -1
+            elif getattr(event, 'num', None) == 5:
+                step = 1
+            else:
+                return None
+
+            canvas.yview_scroll(step, 'units')
+            return 'break'
+
+        for target in (wheel_target, wrapper, canvas, content, scrollbar):
+            target.bind('<MouseWheel>', _on_mousewheel, add='+')
+            target.bind('<Button-4>', _on_mousewheel, add='+')
+            target.bind('<Button-5>', _on_mousewheel, add='+')
+
+        return content
+
     def _prompt_user_ideas_for_ai_fields(self, fields: List[str]) -> Optional[Dict[str, str]]:
         if not fields:
             return {}
@@ -4399,8 +4460,7 @@ class PaperSubmissionGUI:
         dialog.geometry("720x520" if len(fields) > 1 else "680x320")
         self._set_window_ontop(dialog)
 
-        main = ttk.Frame(dialog, padding=10)
-        main.pack(fill=tk.BOTH, expand=True)
+        main = self._create_dialog_scrollable_content(dialog, padding=10)
 
         if len(fields) == 1:
             intro_text = "请填写本次该字段生成的用户想法（可留空）："
@@ -4411,7 +4471,7 @@ class PaperSubmissionGUI:
         inputs: Dict[str, scrolledtext.ScrolledText] = {}
         for field_name in fields:
             block = ttk.LabelFrame(main, text=f"{self._get_ai_field_display_name(field_name)} ({field_name})", padding=6)
-            block.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+            block.pack(fill=tk.BOTH, pady=(0, 6))
             txt = scrolledtext.ScrolledText(block, height=4, wrap=tk.WORD)
             txt.pack(fill=tk.BOTH, expand=True)
             inputs[field_name] = txt
@@ -4717,8 +4777,7 @@ class PaperSubmissionGUI:
         dialog.geometry("860x700")
         self._set_window_ontop(dialog)
 
-        main = ttk.Frame(dialog, padding=10)
-        main.pack(fill=tk.BOTH, expand=True)
+        main = self._create_dialog_scrollable_content(dialog, padding=10)
 
         ttk.Label(
             main,
@@ -4736,7 +4795,7 @@ class PaperSubmissionGUI:
                 text=f"{self._get_ai_field_display_name(field_name)} ({field_name})",
                 padding=6,
             )
-            block.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+            block.pack(fill=tk.BOTH, pady=(0, 6))
 
             txt = scrolledtext.ScrolledText(block, height=5, wrap=tk.WORD)
             txt.pack(fill=tk.BOTH, expand=True)
@@ -5073,8 +5132,7 @@ class PaperSubmissionGUI:
         gen = AIGenerator()
         payload = gen.get_user_prompts()
 
-        main = ttk.Frame(win, padding=10)
-        main.pack(fill=tk.BOTH, expand=True)
+        main = self._create_dialog_scrollable_content(win, padding=10)
 
         ttk.Label(main, text="1) vibe 论文（每行一条，仅用于模仿语言风格与表达组织）").pack(anchor='w')
         vibe_text = scrolledtext.ScrolledText(main, height=8, wrap=tk.WORD)
@@ -5558,35 +5616,14 @@ class PaperSubmissionGUI:
         # 2. 滚动区域
         canvas_frame = ttk.Frame(win)
         canvas_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        canvas = tk.Canvas(canvas_frame, bg="#f0f0f0", highlightthickness=0)
-        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
-        scroll_frame = ttk.Frame(canvas)
+        scroll_frame = self._create_dialog_scrollable_content(
+            canvas_frame,
+            padding=0,
+            wheel_scope=win,
+            canvas_bg="#f0f0f0",
+        )
         scroll_frame.columnconfigure(2, weight=1)
         scroll_frame.columnconfigure(5, weight=1) # Widget Col is 5
-
-        canvas_window = canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
-
-        def configure_scroll_region(event):
-            canvas.configure(scrollregion=canvas.bbox("all"))
-            canvas.itemconfig(canvas_window, width=event.width)
-
-        scroll_frame.bind("<Configure>", configure_scroll_region)
-        canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_window, width=e.width))
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-        # 智能滚动
-        def _smart_mousewheel(event):
-            try:
-                widget_under_mouse = win.winfo_containing(event.x_root, event.y_root)
-                if widget_under_mouse and "text" in widget_under_mouse.winfo_class().lower():
-                    return 
-            except: pass
-            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-
-        win.bind_all("<MouseWheel>", _smart_mousewheel)
-        win.bind("<Destroy>", lambda e: win.unbind_all("<MouseWheel>"))
 
         # 3. 字段生成
         self.conflict_ui_data = {} 
