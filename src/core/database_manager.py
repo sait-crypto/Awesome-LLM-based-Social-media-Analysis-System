@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
 from src.core.config_loader import get_config_instance
 from src.core.database_model import Paper, is_same_identity, is_duplicate_paper
 from src.core.update_file_utils import get_update_file_utils
+from src.utils import backup_file
 
 class DatabaseManager:
     """数据库管理器"""
@@ -41,14 +42,18 @@ class DatabaseManager:
     def save_database(self, papers: List[Paper]) -> bool:
         """保存数据库 (带备份 & 资源规范化)"""
         try:
-            # 1. 规范化 Assets (确保所有资源的 UID 对应且文件在 assets/{uid} 下)
+            # 1. 备份
+            if os.path.exists(self.database_path):
+                backup_file(self.database_path, self.backup_dir)
+            
+            # 2. 规范化 Assets (确保所有资源的 UID 对应且文件在 assets/{uid} 下)
             # 这一步会移动文件，副作用
             normalized_papers = []
             for p in papers:
                 p = self.update_utils.normalize_assets(p)
                 normalized_papers.append(p)
 
-            # 2. 写入（write_data 内部会先调用统一 backup_file）
+            # 3. 写入
             return self.update_utils.write_data(self.database_path, normalized_papers)
             
         except Exception as e:
