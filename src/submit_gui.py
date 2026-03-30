@@ -65,7 +65,7 @@ class PaperSubmissionGUI:
         self.style.configure('SearchHit.TLabel', foreground="#B54708")
         self.style.configure('SystemField.TLabel', foreground="#1E6BD6")
 
-        self._default_status_values = ['unread', 'reading', 'skimmed', 'done', 'other person','adopted', 'rejected']
+        self._default_status_values = ['unread', 'reading', 'skimmed', 'done', 'other person','adopted','mention','rejected']
         self._search_hit_fields_by_real_idx: Dict[int, set] = {}
 
         try:
