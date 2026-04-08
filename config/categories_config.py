@@ -249,6 +249,14 @@ CATEGORIES_CONFIG = {
             "description": "[四级分类]（Discourse and Pragmatic Analysis） — 吹牛识别",
         },
         {
+            "unique_name": "Macro-level Discourse Analysis",
+            "order": 6,
+            "name": "Macro-level Discourse Analysis",
+            "predecessor_category": "Discourse and Pragmatic Analysis",
+            "enabled": True,
+            "description": "[四级分类]（Discourse and Pragmatic Analysis） — 宏观语篇分析",
+        },
+        {
             "unique_name": "User-level Perception",
             "order": 7,
             "name": "User-level Perception",

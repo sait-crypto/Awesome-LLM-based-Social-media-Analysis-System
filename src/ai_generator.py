@@ -229,7 +229,7 @@ Reasoning: ...
             "Role Boundary (strict):",
             "- Current paper (the one being processed now) is the ONLY source of factual content.",
             "- Vibe papers are ONLY for language style imitation and sentence-level expression patterns.",
-            "- Writing paper context is ONLY for focus selection 、discourse and sentence-level organization.",
+            "- Writing paper context is ONLY for focus selection, discourse, paragraph details/length, and sentence-level organization.",
             "- Never mix facts, methods, results, or claims from vibe/writing papers into the current paper summary.",
         ])
 
