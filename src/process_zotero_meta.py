@@ -65,6 +65,7 @@ class ZoteroProcessor:
         date = item.get("date", "")
         paper_url = item.get("url", "")
         abstract = item.get("abstractNote", "")
+        citation_key = str(item.get("citationKey", "") or "").strip()
         
         # 2. Authors (Creators)
         # 格式化为: FirstName LastName, FirstName LastName
@@ -126,7 +127,7 @@ class ZoteroProcessor:
 
         # 6.5 Zotero 唯一条目引用（libraryID:key）
         zotero_item_ref = ""
-        zotero_key = str(item.get("key", "") or "").strip()
+        zotero_key = str(item.get("itemKey", "") or item.get("key", "") or "").strip()
         if zotero_key:
             try:
                 library_id = int(item.get("libraryID", 1) or 1)
@@ -139,6 +140,7 @@ class ZoteroProcessor:
         paper = Paper(
             doi=doi,
             title=title,
+            citation_key=citation_key,
             authors=authors,
             date=date,
             paper_url=paper_url,

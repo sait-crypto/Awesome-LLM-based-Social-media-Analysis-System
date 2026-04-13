@@ -40,6 +40,7 @@ class PaperSubmissionGUI:
         
         # 初始化业务逻辑控制器
         self.logic = SubmitLogic()
+        self._is_packaged_exe = bool(getattr(sys, 'frozen', False))
         
         # 快捷引用
         self.config = self.logic.config
@@ -819,7 +820,8 @@ class PaperSubmissionGUI:
 
         # 管理员切换按钮
         self.admin_btn = ttk.Button(header_frame, text="🔒 管理员模式", command=self._toggle_admin_mode, width=15)
-        self.admin_btn.pack(side=tk.RIGHT)
+        if not self._is_packaged_exe:
+            self.admin_btn.pack(side=tk.RIGHT)
 
         # === 主分割窗口 ===
         self.paned_window = self._create_standard_horizontal_paned(main_frame)
@@ -1168,6 +1170,7 @@ class PaperSubmissionGUI:
             
             label.grid(row=row, column=0, sticky=label_sticky, pady=(2, 2))
             self.field_labels[variable] = label
+            label.bind("<Button-1>", lambda e, v=variable, n=display_name: self.copy_field_value_by_label(v, n, event=e))
             if description: self.create_tooltip(label, description)
             
             # === 1. Category Field (Complex) ===
@@ -1278,6 +1281,27 @@ class PaperSubmissionGUI:
         if self.current_paper_index >= len(self.filtered_indices):
             return -1
         return self.filtered_indices[self.current_paper_index]
+
+    def _get_selected_real_indices(self) -> List[int]:
+        result: List[int] = []
+        seen = set()
+
+        if hasattr(self, 'paper_tree') and self.paper_tree is not None:
+            for item_id in self.paper_tree.selection():
+                _, real_index = self._resolve_tree_target_indices(item_id)
+                if real_index < 0:
+                    continue
+                if real_index in seen:
+                    continue
+                seen.add(real_index)
+                result.append(real_index)
+
+        if not result:
+            current_real_index = self._get_current_real_index()
+            if current_real_index >= 0:
+                result.append(current_real_index)
+
+        return result
 
     def _get_current_paper(self):
         ridx = self._get_current_real_index()
@@ -2450,19 +2474,22 @@ class PaperSubmissionGUI:
         script_frame.grid(row=0, column=0, padx=5, sticky="ns")
         self.update_btn_var = tk.StringVar(value="🔄 运行更新 ▾")
         self.update_btn = ttk.Button(script_frame, textvariable=self.update_btn_var, width=14)
-        self.update_btn.pack(side=tk.LEFT, padx=5, pady=5)
+        if not self._is_packaged_exe:
+            self.update_btn.pack(side=tk.LEFT, padx=5, pady=5)
         self.update_menu = tk.Menu(self.root, tearoff=0)
         self.update_menu.add_command(label="🔄 正常更新", command=lambda: self.run_update_script(update_mode='normal'))
         self.update_menu.add_command(label="🗂️ 只更新 database", command=lambda: self.run_update_script(update_mode='database-only'))
-        self.update_btn.bind("<ButtonPress-1>", self._on_update_menu_button_press)
-        ttk.Button(script_frame, text="✅ 运行验证", command=self.run_validate_script, width=12).pack(side=tk.LEFT, padx=5, pady=5)
+        if not self._is_packaged_exe:
+            self.update_btn.bind("<ButtonPress-1>", self._on_update_menu_button_press)
+            ttk.Button(script_frame, text="✅ 运行验证", command=self.run_validate_script, width=12).pack(side=tk.LEFT, padx=5, pady=5)
         ttk.Button(script_frame, text="🧹 清除冗余资源", command=self.cleanup_redundant_assets, width=14).pack(side=tk.LEFT, padx=5, pady=5)
 
         # Group 2: File Operations (增加加载数据库)
         file_frame = ttk.LabelFrame(buttons_frame, text="File Operations")
         file_frame.grid(row=0, column=1, padx=5, sticky="ns")
         
-        ttk.Button(file_frame, text="💾 加载数据库", command=self._open_database_action, width=12).pack(side=tk.LEFT, padx=5, pady=5)
+        if not self._is_packaged_exe:
+            ttk.Button(file_frame, text="💾 加载数据库", command=self._open_database_action, width=12).pack(side=tk.LEFT, padx=5, pady=5)
 
         self.save_btn_var = tk.StringVar(value="📤 保存文件 ▾")
         self.save_btn = ttk.Button(file_frame, textvariable=self.save_btn_var, width=14)
@@ -4643,9 +4670,14 @@ class PaperSubmissionGUI:
                 return
 
             self.save_current_ui_to_paper()
-            real_idx = self._get_current_real_index()
-            if real_idx < 0 or real_idx >= len(self.logic.papers):
-                messagebox.showwarning("提示", "当前选中论文无效", parent=win)
+            selected_real_indices = self._get_selected_real_indices()
+            if not selected_real_indices:
+                messagebox.showwarning("提示", "当前未选中论文", parent=win)
+                return
+
+            invalid_indices = [idx for idx in selected_real_indices if idx < 0 or idx >= len(self.logic.papers)]
+            if invalid_indices:
+                messagebox.showwarning("提示", "选中的论文包含无效项，请重试", parent=win)
                 return
 
             include_workspace = bool(include_workspace_var.get())
@@ -4656,21 +4688,59 @@ class PaperSubmissionGUI:
 
             def worker():
                 try:
-                    paper = self.logic.papers[real_idx]
-                    paper_text = ""
-                    if paper.paper_file:
-                        abs_path = os.path.join(BASE_DIR, paper.paper_file)
-                        paper_text = AIGenerator().read_paper_file(abs_path)
+                    selected_papers = [self.logic.papers[idx] for idx in selected_real_indices]
+                    primary_paper = selected_papers[0]
+                    reader = AIGenerator()
+
+                    selected_paper_texts: Dict[str, str] = {}
+                    for selected_paper in selected_papers:
+                        uid = str(getattr(selected_paper, 'uid', '') or '').strip()
+                        rel_path = str(getattr(selected_paper, 'paper_file', '') or '').strip()
+                        if not uid or not rel_path:
+                            continue
+                        abs_path = os.path.join(BASE_DIR, rel_path)
+                        selected_paper_texts[uid] = reader.read_paper_file(abs_path)
+
+                    paper_text = selected_paper_texts.get(str(getattr(primary_paper, 'uid', '') or '').strip(), "")
 
                     workspace_papers = self.logic.papers if include_workspace else None
-                    related_context_papers = self._collect_related_context_papers(real_idx) if include_related else None
+                    related_context_papers = None
+                    if include_related:
+                        related_context_by_key: Dict[str, Paper] = {}
+                        for selected_real_index in selected_real_indices:
+                            related_list = self._collect_related_context_papers(selected_real_index)
+                            for related_paper in related_list:
+                                uid = str(getattr(related_paper, 'uid', '') or '').strip()
+                                doi = str(getattr(related_paper, 'doi', '') or '').strip().lower()
+                                title = str(getattr(related_paper, 'title', '') or '').strip().lower()
+                                dedupe_key = uid or doi or title
+                                if not dedupe_key:
+                                    continue
+                                if dedupe_key in related_context_by_key:
+                                    continue
+                                related_context_by_key[dedupe_key] = related_paper
+                        related_context_papers = list(related_context_by_key.values())
+
+                    related_paper_texts: Dict[str, str] = {}
+                    if related_context_papers:
+                        for rp in related_context_papers:
+                            uid = str(getattr(rp, 'uid', '') or '').strip()
+                            rel_path = str(getattr(rp, 'paper_file', '') or '').strip()
+                            if not uid or not rel_path:
+                                continue
+                            abs_related_path = os.path.join(BASE_DIR, rel_path)
+                            related_paper_texts[uid] = reader.read_paper_file(abs_related_path)
+
                     gen = AIGenerator()
                     resp = gen.answer_question_with_paper_context(
-                        paper=paper,
+                        paper=primary_paper,
                         question=question,
                         paper_text=paper_text,
                         workspace_papers=workspace_papers,
                         related_context_papers=related_context_papers,
+                        related_paper_texts=related_paper_texts,
+                        selected_papers=selected_papers,
+                        selected_paper_texts=selected_paper_texts,
                     )
 
                     def on_done():
@@ -6011,29 +6081,75 @@ class PaperSubmissionGUI:
             },
         ]
 
-    def copy_current_paper_title(self, event=None):
+    def _copy_text_to_clipboard(self, text: str, success_message: str, failure_message: str) -> bool:
+        """统一复制逻辑：成功写状态栏；失败弹窗。"""
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.update_status(success_message)
+            return True
+        except Exception as ex:
+            self.update_status(failure_message)
+            messagebox.showerror("复制失败", f"{failure_message}\n\n错误详情:\n{ex}")
+            return False
+
+    def _get_form_field_value_for_copy(self, variable: str) -> str:
+        if variable == 'category':
+            return '|'.join(self._gui_get_category_values())
+
+        if variable in self._file_field_states:
+            state = self._file_field_states.get(variable, {})
+            sv = state.get('var')
+            if isinstance(sv, tk.StringVar):
+                return str(sv.get() or '')
+
+        if variable in self._related_papers_ui_state:
+            state = self._related_papers_ui_state.get(variable, {}) or {}
+            rows = state.get('rows', []) or []
+            values = []
+            for row in rows:
+                val = str(row.get('value', '') or '').strip()
+                if val:
+                    values.append(val)
+            if values:
+                return '|'.join(values)
+
+        widget = self.form_fields.get(variable) if hasattr(self, 'form_fields') else None
+        if isinstance(widget, tk.Entry):
+            return str(widget.get() or '')
+        if isinstance(widget, scrolledtext.ScrolledText):
+            return str(widget.get('1.0', 'end-1c') or '')
+        if isinstance(widget, ttk.Combobox):
+            return str(widget.get() or '')
+        if isinstance(widget, tk.BooleanVar):
+            return str(widget.get())
+
         paper = self._get_current_paper()
-        title_text = ''
+        if paper is None:
+            return ''
+        return str(getattr(paper, variable, '') or '')
 
-        title_widget = self.form_fields.get('title') if hasattr(self, 'form_fields') else None
-        if isinstance(title_widget, tk.Entry):
-            title_text = (title_widget.get() or '').strip()
-
-        if not title_text and paper is not None:
-            title_text = str(getattr(paper, 'title', '') or '').strip()
-
-        if not title_text:
-            self.update_status("复制标题失败：当前未选中论文或标题为空")
+    def copy_field_value_by_label(self, variable: str, display_name: str, event=None):
+        value = self._get_form_field_value_for_copy(variable).strip()
+        if not value:
+            msg = f"复制 {display_name} 失败：字段为空"
+            self.update_status(msg)
+            messagebox.showwarning("复制失败", msg)
             if event is not None:
                 return "break"
             return False
 
-        self.root.clipboard_clear()
-        self.root.clipboard_append(title_text)
-        self.update_status("已复制当前论文标题")
+        success = self._copy_text_to_clipboard(
+            value,
+            success_message=f"已复制字段：{display_name}",
+            failure_message=f"复制 {display_name} 失败",
+        )
         if event is not None:
             return "break"
-        return True
+        return success
+
+    def copy_current_paper_title(self, event=None):
+        return self.copy_field_value_by_label('title', 'title', event=event)
 
     def add_from_zotero_meta(self):
         s = self._show_zotero_input_dialog("从Zotero Meta新建论文")

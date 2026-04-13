@@ -32,6 +32,7 @@ class Paper:
     # 基础信息
     doi: str = ""
     title: str = ""
+    citation_key: str = ""
     authors: str = ""
     date: str = ""
     category: str = ""

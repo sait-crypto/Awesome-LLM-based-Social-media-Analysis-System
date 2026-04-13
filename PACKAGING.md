@@ -13,12 +13,12 @@ pip install pyinstaller
 - 在仓库根目录下运行：
 
 ```bash
-pyinstaller --noconfirm --onefile --windowed --name SurveyPaperSubmitGUI src/submit_gui.py --add-data "config/config.ini;config" --add-data "src/update.py;src" --add-data "src/validate.py;src" 
+pyinstaller --noconfirm --onefile --windowed --name SurveyPaperSubmitGUI src/submit_gui.py --add-data "config/config.ini;config/config_default.ini" --add-data "src/update.py;src" --add-data "src/validate.py;src" 
 # 打包后，准备分发目录（假设dist为输出目录，当前目录为项目根）
 # 复制必要文件到dist目录
 copy submit_template.csv dist\
 copy submit_template.json dist\
-xcopy config\config.ini dist\config\ /E /I /Y
+xcopy config\config.ini dist\config_default\ /E /I /Y
 mkdir dist\figures
 mkdir dist\papers
 ```

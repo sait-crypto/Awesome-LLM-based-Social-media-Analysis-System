@@ -47,6 +47,20 @@ TAGS_CONFIG = {
             "system_var": False,            #控制字段，为真时只在数据库中显示               
         },
         {
+            "variable": "citation_key",
+            "order": 1.5,
+            "table_name": "citation key",
+            "display_name": "citation key",
+            "description": "引用键（如 Zotero 的 citationKey），用于手动引用与文献管理工具联动。",
+            "type": "string",
+            "validation": None,
+            "show_in_readme": False,
+            "enabled": True,
+            "immutable": False,
+            "required": False,
+            "system_var": False,
+        },
+        {
             "variable": "title_translation",
             "order": 13,
             "table_name": "title translation",

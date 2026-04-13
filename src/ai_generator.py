@@ -318,15 +318,24 @@ Reasoning: ...
         ]
         return "\n".join(context_lines)
 
-    def _build_question_related_papers_context(self, papers: List[Paper], current_uid: str = "") -> str:
+    def _build_question_related_papers_context(
+        self,
+        papers: List[Paper],
+        current_uid: str = "",
+        related_paper_texts: Optional[Dict[str, str]] = None,
+    ) -> str:
         """构建当前论文 related_papers 对应论文上下文。"""
         rows: List[Dict[str, Any]] = []
+        related_paper_texts = related_paper_texts or {}
         for idx, p in enumerate(papers):
             payload = asdict(p)
+            uid = str(payload.get('uid', '') or '').strip()
+            full_text = str(related_paper_texts.get(uid, '') or '').strip()
             rows.append({
                 'related_index': idx,
                 'is_current_paper': bool(current_uid and payload.get('uid', '') == current_uid),
                 'related_paper_item': payload,
+                'related_paper_full_text_excerpt': full_text,
             })
 
         context_lines = [
@@ -337,6 +346,30 @@ Reasoning: ...
         ]
         return "\n".join(context_lines)
 
+    def _build_question_selected_papers_context(
+        self,
+        papers: List[Paper],
+        selected_paper_texts: Optional[Dict[str, str]] = None,
+    ) -> str:
+        """构建多选提问上下文：按单篇论文格式拼接为列表。"""
+        selected_paper_texts = selected_paper_texts or {}
+        context_lines: List[str] = [
+            "[Selected Papers Context | Multi-Selection]",
+            "The following papers are all selected by user and should be treated as primary context list.",
+        ]
+
+        for idx, p in enumerate(papers, start=1):
+            uid = str(getattr(p, 'uid', '') or '').strip()
+            paper_text = str(selected_paper_texts.get(uid, '') or '').strip()
+            one_paper_context = self._build_question_current_paper_context(p, paper_text)
+            context_lines.extend([
+                "",
+                f"[Selected Paper #{idx} | uid={uid or 'N/A'}]",
+                one_paper_context,
+            ])
+
+        return "\n".join(context_lines)
+
     def answer_question_with_paper_context(
         self,
         paper: Paper,
@@ -344,6 +377,9 @@ Reasoning: ...
         paper_text: str = "",
         workspace_papers: Optional[List[Paper]] = None,
         related_context_papers: Optional[List[Paper]] = None,
+        related_paper_texts: Optional[Dict[str, str]] = None,
+        selected_papers: Optional[List[Paper]] = None,
+        selected_paper_texts: Optional[Dict[str, str]] = None,
     ) -> str:
         """使用当前论文 item 上下文回答问题，可选附带整个工作区数据库上下文。"""
         if not self.is_available():
@@ -353,17 +389,35 @@ Reasoning: ...
         if not q:
             return ""
 
-        current_context = self._build_question_current_paper_context(paper, paper_text)
+        multi_selection_mode = bool(selected_papers and len(selected_papers) > 1)
+        current_uid = str(getattr(paper, 'uid', '') or '').strip()
+
+        if multi_selection_mode:
+            assert selected_papers is not None
+            current_context = self._build_question_selected_papers_context(
+                selected_papers,
+                selected_paper_texts=selected_paper_texts,
+            )
+            current_uid = str(getattr(selected_papers[0], 'uid', '') or '').strip()
+        else:
+            current_context = self._build_question_current_paper_context(paper, paper_text)
+
         workspace_context = ""
         if workspace_papers:
-            workspace_context = self._build_question_workspace_context(workspace_papers, current_uid=paper.uid)
+            workspace_context = self._build_question_workspace_context(workspace_papers, current_uid=current_uid)
 
         related_context = ""
         if related_context_papers:
-            related_context = self._build_question_related_papers_context(related_context_papers, current_uid=paper.uid)
+            related_context = self._build_question_related_papers_context(
+                related_context_papers,
+                current_uid=current_uid,
+                related_paper_texts=related_paper_texts,
+            )
+
+        task_line = "Task: Answer the user's question about the selected papers accurately." if multi_selection_mode else "Task: Answer the user's question about the current paper accurately."
 
         prompt_parts = [
-            "Task: Answer the user's question about the current paper accurately.",
+            task_line,
             "Language: Chinese.",
             "",
             "Hard Rules:",
