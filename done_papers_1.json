@@ -1,9 +1,10 @@
 {
   "meta": {
-    "generated_at": "2026-03-24 19:43:24",
+    "generated_at": "2026-04-13 22:05:59",
     "column_ids": [
       "doi",
       "title",
+      "citation_key",
       "authors",
       "date",
       "category",
@@ -12,6 +13,7 @@
       "summary_method",
       "summary_conclusion",
       "summary_limitation",
+      "summary_citable_paragraph",
       "paper_url",
       "project_url",
       "conference",
@@ -29,7 +31,8 @@
       "paper_file",
       "uid",
       "conflict_marker",
-      "invalid_fields"
+      "invalid_fields",
+      "zotero_item_ref"
     ],
     "paper_count": 12
   },
@@ -37,6 +40,7 @@
     {
       "doi": "10.48550/arXiv.2411.11581",
       "title": "OASIS: Open agent social interaction simulations with one million agents",
+      "citation_key": "",
       "authors": "Ziyi Yang, Zaibin Zhang, Zirui Zheng, Yuxian Jiang, Ziyue Gan, Zhiyu Wang, Zijian Ling, Jinsong Chen, Martz Ma, Bowen Dong, Prateek Gupta, ...",
       "date": "2025-03-23",
       "category": [
@@ -47,14 +51,15 @@
         "Social Simulation for Social Media"
       ],
       "summary_motivation": "[AI generated] OASIS addresses the limitations of existing LLM-based agent-based models (ABMs) for social media simulation, which are often scenario-specific and limited in scale. It aims to provide a generalizable and scalable simulator that mirrors real-world platforms, enabling the study of large-scale social phenomena with up to one million agents.\n\n[翻译]\nOASIS针对现有基于大语言模型（LLM）的社交媒体智能体模拟器（ABMs）的局限性而提出，这些模拟器通常针对特定场景且规模有限。其目标是提供一个通用且可扩展的模拟器，能够模拟真实社交平台，以支持对多达百万级智能体的大规模社会现象进行研究。",
-      "summary_innovation": "",
-      "summary_method": "",
-      "summary_conclusion": "",
-      "summary_limitation": "",
+      "summary_innovation": "[AI generated] OASIS introduces a generalizable and scalable agent-based social media simulator, designed to overcome the limitations of prior scenario-specific and small-scale LLM-ABMs. Its key innovations include a platform-inspired architecture with dynamic environments and diverse actions, and the capability to simulate up to one million agents, enabling the study of large-scale social phenomena like information spreading and group polarization.\n\n[翻译]\nOASIS 提出了一种通用且可扩展的基于智能体的社交媒体模拟器，旨在克服先前特定场景、小规模LLM-ABM的局限。其核心创新在于一个受真实平台启发的架构，包含动态环境和多样化行动空间，以及模拟多达一百万智能体的能力，从而支持对信息传播、群体极化等大规模社会现象的研究。",
+      "summary_method": "[AI generated] OASIS is a generalizable and scalable agent-based social media simulator. It incorporates dynamically updated environments (social networks and posts), diverse action spaces (e.g., following, commenting), and recommendation systems (interest-based and hot-score-based). Its architecture supports large-scale simulations of up to one million LLM-powered agents, enabling the study of phenomena like information spreading and group polarization across platforms like X and Reddit.\n\n[翻译]\nOASIS 是一个通用且可扩展的基于代理的社交媒体模拟器。它包含动态更新的环境（社交网络和帖子）、多样化的行动空间（例如关注、评论）以及推荐系统（基于兴趣和热度评分）。其架构支持多达一百万个由大语言模型驱动的代理进行大规模模拟，从而能够在 X 和 Reddit 等平台上研究信息传播和群体极化等现象。",
+      "summary_conclusion": "[AI generated] OASIS demonstrates that a generalizable and scalable LLM-based agent framework can effectively simulate large-scale social media dynamics, replicating phenomena like information spreading and group polarization across platforms. Its ability to model up to one million agents reveals that larger agent populations enhance group dynamics and opinion diversity. [翻译] OASIS 证明了一个通用、可扩展的基于大语言模型的智能体框架能够有效模拟大规模社交媒体动态，并在不同平台上复现信息传播、群体极化等现象。其模拟百万级用户的能力表明，更大的智能体规模会增强群体动态和观点多样性。",
+      "summary_limitation": "[AI generated] OASIS demonstrates strong generalizability and scalability, but its reliance on LLM agents introduces computational costs and potential biases from the underlying language models. The simulation's realism, while improved, may still diverge from the nuanced, long-term dynamics of real-world social platforms. [翻译] OASIS展现了强大的通用性和可扩展性，但其对LLM智能体的依赖带来了较高的计算成本，且底层语言模型可能引入潜在偏见。该模拟的真实性虽有所提升，但仍可能与现实社交平台长期、细微的动态演化存在差距。",
+      "summary_citable_paragraph": "[AI generated] OASIS introduces a generalizable and scalable social media simulator that supports up to one million LLM agents, enabling the study of large-scale phenomena like information spreading and group polarization across platforms such as X and Reddit. [翻译] OASIS 提出了一个可泛化、可扩展的社交媒体模拟器，支持多达一百万个基于大语言模型的智能体，从而能够在 X 和 Reddit 等平台上研究信息传播和群体极化等大规模社会现象。",
       "paper_url": "http://arxiv.org/abs/2411.11581",
       "project_url": "",
       "conference": "",
-      "title_translation": "",
+      "title_translation": "[AI generated] OASIS：开放智能体社交互动模拟，百万智能体共演",
       "analogy_summary": "TLDR: OASIS is a generalizable and scalable social media simulator that replicates various social phenomena, including information spreading, group polarization, and herd effects across X and Reddit platforms, and demonstrates OASIS's potential as a powerful tool for studying complex systems in digital environments.",
       "pipeline_image": [
         "assets/3ebf35ac/OASIS.png"
@@ -70,11 +75,13 @@
       "paper_file": "",
       "uid": "3ebf35ac",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": [],
+      "zotero_item_ref": ""
     },
     {
       "doi": "10.0000/placeholder-Social-agents:",
       "title": "Social agents: Collective intelligence improves LLM predictions",
+      "citation_key": "",
       "authors": "Aanisha Bhattacharyya, Abhilekh Borah, Yaman Kumar Singla, Rajiv Ratn Shah, Changyou Chen, Balaji Krishnamurthy",
       "date": "2025-10-08",
       "category": [
@@ -84,16 +91,17 @@
         "Micro Social Simulation",
         "Social Simulation for Social Media"
       ],
-      "summary_motivation": "",
-      "summary_innovation": "",
-      "summary_method": "",
-      "summary_conclusion": "",
-      "summary_limitation": "",
+      "summary_motivation": "[AI generated] The paper aims to improve the accuracy and realism of LLM-based behavioral predictions by simulating a diverse crowd of synthetic personas, moving beyond single, definitive LLM outputs to better capture the heterogeneity of human judgment. [翻译] 该论文旨在通过模拟一个多样化的合成人物群体，超越单一、确定的LLM输出，以更好地捕捉人类判断的异质性，从而提高基于LLM的行为预测的准确性和真实性。",
+      "summary_innovation": "[AI generated] The paper introduces Social Agents, a multi-agent framework that simulates a synthetic society of diverse human-like personas to improve LLM predictions. By aggregating independent judgments from these agents, it applies the \"Wisdom of Crowds\" principle to behavioral forecasting, outperforming single-LLM baselines across multiple tasks and achieving higher alignment with human judgments.\n\n[翻译]\n该论文提出了Social Agents，一个多智能体框架，通过模拟一个由多样化类人角色组成的合成社会来改进LLM预测。通过聚合这些智能体的独立判断，它将“群体智慧”原则应用于行为预测，在多项任务上超越了单LLM基线，并实现了与人类判断更高的对齐性。",
+      "summary_method": "[AI generated] The paper introduces Social Agents, a multi-agent framework that simulates a synthetic society of human-like personas with diverse demographic and psychographic attributes. Each persona independently evaluates a stimulus (e.g., an advertisement, video, webpage) and provides a quantitative score and qualitative rationale. The final prediction is obtained by aggregating the individual opinions from this simulated crowd, leveraging the \"Wisdom of Crowds\" principle to improve accuracy and better mirror real human preference distributions.\n\n[翻译]\n该论文提出了Social Agents，一个多智能体框架，用于模拟一个由具有多样化人口统计学和心理统计学特征的人类化角色组成的合成社会。每个角色独立评估一个刺激物（如广告、视频、网页），并提供量化评分和定性理由。最终预测通过聚合这个模拟群体的个体意见得出，利用“群体智慧”原则来提高准确性，并更好地反映真实的人类偏好分布。",
+      "summary_conclusion": "[AI generated] The paper introduces Social Agents, a multi-agent framework that simulates a synthetic society of diverse personas to improve LLM predictions. By aggregating independent judgments from these agents, it achieves significant performance gains across various behavioral prediction tasks, demonstrating that computational crowd simulation can effectively mirror human collective intelligence.\n\n[翻译]\n该论文提出了Social Agents，一个模拟多样化角色合成社会的多智能体框架，旨在提升大语言模型的预测能力。通过聚合这些智能体的独立判断，该框架在多种行为预测任务上取得了显著的性能提升，证明了计算群体模拟能够有效反映人类集体智慧。",
+      "summary_limitation": "[AI generated] The framework's reliance on LLMs inherits their inherent biases, which may skew the simulated crowd's demographic and psychographic diversity. Its computational cost scales with the number of agents, and the synthetic personas' behaviors, while correlated with human judgments, are not fully validated against real-world, long-term social dynamics.\n\n[翻译]\n该框架对LLM的依赖继承了其固有偏见，可能扭曲模拟人群的人口统计学和心理特征多样性。其计算成本随智能体数量增加而增加，且合成角色的行为虽与人类判断相关，但未在真实世界的长期社会动态中得到充分验证。",
+      "summary_citable_paragraph": "[AI generated] Social Agents introduces a multi-agent framework simulating diverse human personas to aggregate independent judgments, improving LLM prediction accuracy across behavioral tasks by leveraging collective intelligence principles. [翻译] Social Agents 提出一个多智能体框架，通过模拟多样化人类角色并聚合独立判断，利用集体智慧原理提升了LLM在多种行为预测任务中的准确性。",
       "paper_url": "https://openreview.net/forum?id=73J3hsato3",
       "project_url": "",
       "conference": "The Fourteenth International Conference on Learning Representations",
-      "title_translation": "",
-      "analogy_summary": "",
+      "title_translation": "[AI generated] 社交智能体：集体智慧提升大语言模型预测能力",
+      "analogy_summary": "[AI generated] Social Agents: Simulating a diverse synthetic society to aggregate opinions, improving LLM predictions via collective intelligence. [翻译] 社会智能体：通过模拟多样化的合成社会来聚合观点，借助集体智慧提升大语言模型的预测能力。",
       "pipeline_image": [
         "assets/7d44cfb3/COLLECTIVE INTELLIGENCE.png"
       ],
@@ -108,11 +116,13 @@
       "paper_file": "assets/7d44cfb3/Bhattacharyya 等 - 2025 - Social agents Collective intelligence improves LLM predictions.pdf",
       "uid": "7d44cfb3",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": [],
+      "zotero_item_ref": ""
     },
     {
       "doi": "10.0000/placeholder-Social-interactions-as",
       "title": "Social interactions as recursive MDPs",
+      "citation_key": "",
       "authors": "Ravi Tejwani, Yen-Ling Kuo, Tianmin Shu, Boris Katz, Andrei Barbu",
       "date": "2022-01-11",
       "category": [
@@ -121,16 +131,17 @@
         "Individual-oriented Social Simulation",
         "Micro Social Simulation"
       ],
-      "summary_motivation": "",
-      "summary_innovation": "",
-      "summary_method": "",
-      "summary_conclusion": "",
-      "summary_limitation": "",
+      "summary_motivation": "[AI generated] The paper aims to formalize social reasoning within the framework of Markov decision processes (MDPs) by introducing recursive reasoning about other agents' goals. It seeks to bridge the gap between well-defined physical tasks and the pre-theoretic nature of social interactions, providing a mathematical model to specify social behaviors like helping or hindering others through reward functions that incorporate estimates of other agents' goals. This enables zero-shot social inferences and offers a foundation for developing socially aware AI systems.\n\n[翻译]\n本文旨在通过引入对其他智能体目标的递归推理，将社会性推理形式化地纳入马尔可夫决策过程框架。它试图弥合明确定义的物理任务与社会互动的前理论性质之间的差距，提供一个数学模型，通过融入对其他智能体目标估计的奖励函数来指定帮助或阻碍他人等社会行为。这使得零样本社会推理成为可能，并为开发具有社会意识的AI系统奠定了基础。",
+      "summary_innovation": "[AI generated] The paper introduces Social MDPs, a novel framework that extends traditional Markov Decision Processes (MDPs) by incorporating recursive reasoning about other agents' goals. Its core innovation lies in defining a reward function that combines an agent's physical goals with social goals, which are functions of other agents' estimated reward structures. This allows for the explicit modeling of complex social interactions—such as helping, hindering, or polite/aggressive variants thereof—within a precise mathematical model, enabling zero-shot social inferences and providing a foundation for socially aware AI agents.\n\n[翻译]\n该论文提出了Social MDPs，这是一个新颖的框架，它通过引入对其他智能体目标的递归推理，扩展了传统的马尔可夫决策过程（MDP）。其核心创新在于定义了一个奖励函数，该函数将智能体的物理目标与社会目标相结合，而社会目标是其他智能体估计的奖励结构的函数。这使得能够在精确的数学模型内显式地建模复杂的社会互动（如帮助、阻碍或其礼貌",
+      "summary_method": "[AI generated] The paper proposes Social MDPs, a framework that extends Markov Decision Processes (MDPs) by incorporating recursive reasoning about other agents' goals. The core method involves augmenting the traditional reward function to include both physical goals (related to the configuration space) and social goals (defined relative to the estimated reward functions of other agents). This allows an agent to model interactions such as helping or hindering others by maximizing or minimizing their estimated rewards, while balancing these social objectives with its own physical goals. The formulation supports arbitrary functions over other agents' reward structures, enabling complex social behaviors.\n\n[翻译]\n该论文提出了Social MDPs框架，通过引入对其他智能体目标的递归推理来扩展马尔可夫决策过程（MDP）。其核心方法在于扩展传统的奖励函数，使其同时包含物理目标（与配置空间相关）和社会目标（相对于其他智能体的估计奖励函数来定义）。这使得智能体能够通过最大化或最小化其他智能体的估计奖励来建模诸如帮助或",
+      "summary_conclusion": "[AI generated] The paper proposes Social MDPs, a novel framework that extends traditional Markov Decision Processes (MDPs) by incorporating recursive reasoning about other agents' goals. This allows agents to balance physical objectives with social goals, such as helping or hindering others, enabling zero-shot social inferences and providing a mathematical model for studying social interactions.\n\n[翻译]\n该论文提出了社会性马尔可夫决策过程（Social MDPs），这是一个新颖的框架，通过引入对其他智能体目标的递归推理，扩展了传统的马尔可夫决策过程。这使得智能体能够平衡物理目标与社会性目标（如帮助或阻碍他人），实现了零样本社会推理，并为研究社会互动提供了一个数学模型。",
+      "summary_limitation": "[AI generated] The paper does not explicitly list limitations. Based on the abstract, a key limitation is the unknown scope of the proposed Social MDPs and their potential POMDP variants in accounting for all possible social interactions. The framework's effectiveness for highly complex, multi-agent, or partially observable social scenarios remains to be fully explored. [翻译] 该论文未明确列出局限性。基于摘要，一个关键局限在于所提出的Social MDPs及其潜在的POMDP变体在多大程度上能涵盖所有可能的社会互动仍是未知的。该框架对于高度复杂、多智能体或部分可观察的社会场景的有效性尚待充分探索。",
+      "summary_citable_paragraph": "[AI generated] This paper proposes Social MDPs, a framework that extends Markov decision processes by incorporating recursive reasoning about other agents' goals, enabling the modeling of complex social interactions such as helping or hindering through a combined reward function of physical and social objectives. [翻译] 该论文提出了社会马尔可夫决策过程，该框架通过引入对其他智能体目标的递归推理来扩展传统马尔可夫决策过程，使其能够通过结合物理目标与社会目标的奖励函数，对诸如帮助或阻碍等复杂社会交互进行建模。",
       "paper_url": "https://proceedings.mlr.press/v164/tejwani22a.html",
       "project_url": "",
       "conference": "Conference on Robot Learning",
-      "title_translation": "",
-      "analogy_summary": "",
+      "title_translation": "[AI generated] 社交互动作为递归马尔可夫决策过程",
+      "analogy_summary": "[AI generated] Social MDPs: Extending traditional MDPs by incorporating recursive reasoning about other agents' goals to model social interactions like helping or hindering. [翻译] 社会性MDP：通过纳入对其他智能体目标的递归推理来扩展传统MDP，以建模如帮助或阻碍等社会交互。",
       "pipeline_image": [
         "assets/e588ac3d/Social MDP-[1].png"
       ],
@@ -148,11 +159,13 @@
       "paper_file": "",
       "uid": "e588ac3d",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": [],
+      "zotero_item_ref": ""
     },
     {
       "doi": "10.1109/ICRA46639.2022.9811991",
       "title": "Incorporating rich social interactions into MDPs",
+      "citation_key": "",
       "authors": "Ravi Tejwani, Yen-Ling Kuo, Tianmin Shu, Bennett Stankovits, Dan Gutfreund, Joshua B. Tenenbaum, Boris Katz, Andrei Barbu",
       "date": "2022-05-23",
       "category": [
@@ -161,16 +174,17 @@
         "Individual-oriented Social Simulation",
         "Micro Social Simulation"
       ],
-      "summary_motivation": "",
-      "summary_innovation": "",
-      "summary_method": "",
-      "summary_conclusion": "",
-      "summary_limitation": "",
+      "summary_motivation": "[AI generated] The paper aims to formalize rich social interactions from microsociology and economics within a Markov Decision Process (MDP) framework for robotics. Its core motivation is to enable robots to engage in complex, zero-shot social interactions—such as cooperation, conflict, coercion, competition, and exchange—in novel environments, mirroring human social capabilities. This approach also seeks to provide concrete mathematical definitions for social phenomena and align computational judgments with human perceptions of social situations.\n\n[翻译]\n该论文旨在将微观社会学和经济学中的丰富社会互动形式化，纳入机器人学的马尔可夫决策过程框架。其核心动机是使机器人能够在新的环境中进行复杂的、零样本的社会互动（如合作、冲突、强制、竞争和交换），以模仿人类的社会能力。该方法还试图为社会现象提供具体的数学定义，并使计算判断与人类对社会情境的感知保持一致。",
+      "summary_innovation": "[AI generated] The work formalizes five fundamental social interactions (cooperation, conflict, coercion, competition, exchange) from microsociology and economics into a unified mathematical framework by extending nested Markov Decision Processes (MDPs). This Social MDP allows agents to reason about each other's hidden rewards, enabling zero-shot execution of rich social interactions in novel environments without prior examples. [翻译] 该研究将微观社会学和经济学中的五种基本社会互动（合作、冲突、强制、竞争、交换）形式化，通过扩展嵌套马尔可夫决策过程（MDPs）将其纳入统一的数学框架。这种社会MDP使智能体能够推理彼此的隐藏奖励，从而能在没有先验示例的新环境中零样本执行复杂的社会互动。",
+      "summary_method": "[AI generated] The method extends a nested Markov Decision Process (MDP) framework to formalize social interactions. It enables agents to reason about arbitrary functions of each other's hidden rewards, thereby encoding five fundamental social interaction types from microsociology: cooperation, conflict, coercion, competition, and exchange. This Social MDP allows for zero-shot execution of social interactions in novel environments.\n\n[翻译]\n该方法扩展了嵌套马尔可夫决策过程（MDP）框架以形式化社会交互。它使智能体能够推理彼此隐藏奖励的任意函数，从而编码微观社会学中的五种基本社会交互类型：合作、冲突、强制、竞争和交换。这种社会MDP允许在全新环境中零样本执行社会交互。",
+      "summary_conclusion": "[AI generated] This work formalizes core social interactions from microsociology into a Social MDP framework, enabling zero-shot execution of social behaviors by robotic agents and demonstrating alignment with human judgments. [翻译] 该研究将微观社会学中的核心社会互动形式化到一个社会MDP框架中，使机器人智能体能够零样本执行社会行为，并证明了其与人类判断的一致性。",
+      "summary_limitation": "[AI generated] The proposed Social MDP framework, while providing a formal mathematical basis for social interactions, relies on reasoning about hidden rewards, which may be computationally intensive and require strong assumptions about agent knowledge. Its zero-shot capability, though promising, has not been empirically validated in complex, large-scale, or long-horizon real-world social scenarios.\n\n[翻译]\n所提出的社会MDP框架虽然为社会互动提供了形式化的数学基础，但其依赖于对隐藏奖励的推理，这可能带来较高的计算复杂度，且需要对智能体的知识做出较强假设。其零样本能力尽管前景广阔，但尚未在复杂、大规模或长周期的真实世界社会场景中得到实证验证。",
+      "summary_citable_paragraph": "[AI generated] This work formalizes microsociological interactions within a Social MDP framework, enabling zero-shot social reasoning for robots and aligning with human judgments of social scenarios. [翻译]该研究将微观社会学中的五种基本互动形式编码于一个扩展的Social MDP框架中，使机器人能够进行零样本社会推理，其对社会互动的判断与人类高度一致。",
       "paper_url": "https://ieeexplore.ieee.org/document/9811991/",
       "project_url": "",
       "conference": "2022 IEEE International Conference on Robotics and Automation (ICRA)",
-      "title_translation": "",
-      "analogy_summary": "",
+      "title_translation": "[AI generated] 将丰富的社会互动融入马尔可夫决策过程",
+      "analogy_summary": "[AI generated] Social MDPs: A formal framework for robots to reason about and execute complex social interactions zero-shot, akin to a \"social interaction grammar\" for machines. [翻译] 社会MDP：一种形式化框架，使机器人能够零样本地推理和执行复杂的社会互动，类似于机器的“社会互动语法”。",
       "pipeline_image": [
         "assets/6e88c8a1/Social MDP-[2].png"
       ],
@@ -188,11 +202,13 @@
       "paper_file": "assets/6e88c8a1/Tejwani 等 - 2022 - Incorporating rich social interactions into MDPs.pdf",
       "uid": "6e88c8a1",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": [],
+      "zotero_item_ref": ""
     },
     {
       "doi": "10.1609/aaai.v37i1.25080",
       "title": "Zero-Shot Linear Combinations of Grounded Social Interactions with Linear Social MDPs",
+      "citation_key": "",
       "authors": "Ravi Tejwani, Yen-Ling Kuo, Tianmin Shu, Bennett Stankovits, Dan Gutfreund, Joshua B. Tenenbaum, Boris Katz, Andrei Barbu",
       "date": "2023-06-26",
       "category": [
@@ -201,15 +217,16 @@
         "Individual-oriented Social Simulation",
         "Micro Social Simulation"
       ],
-      "summary_motivation": "",
-      "summary_innovation": "",
-      "summary_method": "",
-      "summary_conclusion": "",
-      "summary_limitation": "",
+      "summary_motivation": "[AI generated] This paper proposes the Linear Social MDP, a computational model that enables zero-shot reasoning about complex social interactions by dynamically combining basic social interactions based on the estimated goals of other agents. It aims to provide a mathematical foundation for the composition of social behaviors, which is crucial for developing socially intelligent robotic applications.\n\n[翻译]\n本文提出了线性社会MDP模型，该模型能够根据对其他智能体目标的动态估计，组合基本社会交互，从而实现对复杂社会交互的零样本推理。其研究目标是为社会行为的组合提供数学基础，这对于开发具有社会智能的机器人应用至关重要。",
+      "summary_innovation": "[AI generated] The paper introduces Linear Social MDPs, a novel computational framework that enables zero-shot composition of basic social interactions through linear combinations, grounded in the estimated goals of other agents. This provides a mathematical foundation for the intuitive theory that complex social behaviors emerge from simpler components. [翻译] 该论文提出了线性社会MDPs，这是一个新颖的计算框架，它通过对基本社会交互进行线性组合，并基于对其他智能体目标的实时估计，实现了复杂社会交互的零样本组合。这为“复杂社会行为由简单组件涌现”的直觉理论提供了数学基础。",
+      "summary_method": "[AI generated] The paper proposes the Linear Social MDP, which extends the Social MDP framework. Its core method involves computing linear combinations of basic social interactions. The weights for these combinations are dynamically determined based on the agent's real-time estimation of other agents' goals, enabling zero-shot reasoning about complex, composite social behaviors.\n\n[翻译]\n该论文提出了线性社会MDP，它扩展了社会MDP框架。其核心方法在于计算基本社会交互的线性组合。这些组合的权重根据智能体对其他智能体目标的实时估计动态确定，从而实现了对复杂、复合社会行为的零样本推理。",
+      "summary_conclusion": "[AI generated] The paper proposes Linear Social MDPs, a computational model enabling zero-shot composition of basic social interactions. It provides a mathematical framework for complex social reasoning in agents, validated by human evaluation. [翻译] 该论文提出了线性社会MDP模型，实现了基础社会交互的零样本组合。它为智能体进行复杂社会推理提供了数学框架，并通过人类评估验证了其有效性。",
+      "summary_limitation": "[AI generated] The model's theoretical contribution is significant, but its practical validation remains limited to controlled simulations and human observer studies, lacking real-world deployment or large-scale empirical testing. [翻译] 该模型的理论贡献显著，但其实际验证仍局限于受控模拟和人类观察者研究，缺乏真实世界部署或大规模实证测试。",
+      "summary_citable_paragraph": "[AI generated] The paper introduces Linear Social MDPs, a framework enabling zero-shot composition of grounded social interactions by dynamically weighting them based on inferred agent goals, which validates the composability of social behaviors through human evaluation. [翻译] 该论文提出了线性社会MDP框架，通过基于推断的智能体目标动态加权组合已建模的社会交互，实现了社会行为的零样本组合，并通过人类评估验证了社会行为的可组合性。",
       "paper_url": "https://ojs.aaai.org/index.php/AAAI/article/view/25080",
       "project_url": "",
       "conference": "AAAI",
-      "title_translation": "",
+      "title_translation": "[AI generated] 基于线性社会MDP的零样本组合式社会交互建模",
       "analogy_summary": "TLDR: A new model, the Linear Social MDP, enables zero-shot reasoning about complex social interactions, provides a mathematical basis for the long-standing intuition that social interactions should compose, and leads to interesting new behaviors that are validated using human observers.",
       "pipeline_image": [
         "assets/473fbb19/Social MDP-[3].png"
@@ -228,26 +245,29 @@
       "paper_file": "",
       "uid": "473fbb19",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": [],
+      "zotero_item_ref": ""
     },
     {
       "doi": "10.18653/v1/2024.emnlp-main.260",
       "title": "Outcome-Constrained Large Language Models for Countering Hate Speech",
+      "citation_key": "",
       "authors": "Lingzi Hong, Pengcheng Luo, Eduardo Blanco, Xiaoying Song",
       "date": "2024",
       "category": [
         "Counter-Hate Speech Generation"
       ],
-      "summary_motivation": "",
-      "summary_innovation": "",
-      "summary_method": "",
-      "summary_conclusion": "",
-      "summary_limitation": "",
+      "summary_motivation": "[AI generated] This paper addresses a key limitation in automatic counterspeech generation: the neglect of real-world conversational outcomes. It proposes to steer large language models (LLM) towards generating counterspeech that achieves specific, desirable conversation-level impacts, such as reducing overall incivility and preventing the hater from re-entering with hateful speech.\n\n[翻译]\n本文指出了自动反仇恨言论生成领域的一个关键局限：忽视了现实世界的对话结果。它提出引导大语言模型（LLM）生成能够达成特定、理想的对话层面影响的反仇恨言论，例如降低整体对话的不文明程度，以及阻止仇恨言论发布者再次发表仇恨言论。",
+      "summary_innovation": "[AI generated] This paper innovatively proposes generating counterspeech constrained by real-world conversation outcomes, specifically low incivility and non-hateful hater reentry, moving beyond traditional linguistic attribute-focused methods. It explores and compares three LLM-based technical approaches—instruction prompting, fine-tuning, and reinforcement learning—to achieve this outcome-oriented generation.\n\n[翻译]\n本文创新性地提出根据现实对话结果（具体为低不文明性和非仇恨性的仇恨者回归）来生成反仇恨言论，超越了传统专注于语言属性的方法。它探索并比较了三种基于大语言模型的技术路径——指令提示、微调和强化学习——以实现这种以结果为导向的生成。",
+      "summary_method": "[AI generated] The study employs three LLM-based methods to generate outcome-constrained counterspeech: instruction prompting, model fine-tuning, and reinforcement learning (RL). These methods are designed to steer generation towards two specific conversation outcomes: low incivility and non-hateful hater reentry. [翻译] 该研究采用了三种基于大语言模型的方法来生成受结果约束的反驳言论：指令提示、模型微调和强化学习。这些方法旨在引导生成过程朝向两个特定的对话结果：低不文明性和非仇恨性的仇恨者重新参与。",
+      "summary_conclusion": "[AI generated] This study demonstrates that LLMs can be effectively steered to generate counterspeech constrained by desired conversation outcomes, such as low incivility and non-hateful hater reentry, using methods like instruction prompting, fine-tuning, and reinforcement learning. However, the quality and style of the generated counterspeech vary depending on the specific model and method employed.\n\n[翻译]\n本研究证明，通过指令提示、微调和强化学习等方法，可以有效地引导大语言模型生成受期望对话结果（如低不文明性和非仇恨性仇恨者回归）约束的反仇恨言论。然而，生成的反仇恨言论的质量和风格会因具体使用的模型和方法而有所不同。",
+      "summary_limitation": "[AI generated] The study's primary limitation is its reliance on LLMs, which can generate counterspeech with varying quality and style depending on the specific model used, potentially affecting consistency and reliability in real-world deployment. [翻译] 该研究的主要局限在于其依赖大语言模型，不同模型生成的对抗性言论在质量和风格上存在差异，这可能影响实际部署的一致性和可靠性。",
+      "summary_citable_paragraph": "[AI generated] This study proposes outcome-constrained LLM methods for counterspeech generation, employing instruction prompting, fine-tuning, and RL to steer conversations toward low incivility and non-hateful reentry, with effectiveness validated but quality varying by model. [翻译] 该研究提出了面向结果约束的大语言模型反仇恨言论生成方法，通过指令提示、微调和强化学习引导对话趋向低不文明度和非仇恨性回归，验证了其有效性，但生成质量因模型而异。",
       "paper_url": "https://aclanthology.org/2024.emnlp-main.260",
       "project_url": "",
       "conference": "EMNLP 2024",
-      "title_translation": "",
-      "analogy_summary": "",
+      "title_translation": "[AI generated] 基于结果约束的大型语言模型在抵制仇恨言论中的应用",
+      "analogy_summary": "[AI generated] Outcome-Constrained LLMs for Counterspeech: Steering generation toward desired conversation outcomes like reduced incivility. [翻译] 面向结果的约束性大语言模型用于反仇恨言论生成：引导生成朝向降低对话不文明度等期望的对话结果。",
       "pipeline_image": [
         "assets/4ffaaf71/Outcome-Constrained.png"
       ],
@@ -262,26 +282,29 @@
       "paper_file": "",
       "uid": "4ffaaf71",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": [],
+      "zotero_item_ref": ""
     },
     {
       "doi": "10.18653/v1/2025.findings-acl.667",
       "title": "Towards Explainable Hate Speech Detection",
+      "citation_key": "",
       "authors": "Happy Khairunnisa Sariyanto, Diclehan Ulucan, Oguzhan Ulucan, Marc Ebner",
       "date": "2025",
       "category": [
         "Hate Speech Analysis"
       ],
-      "summary_motivation": "",
-      "summary_innovation": "",
-      "summary_method": "",
-      "summary_conclusion": "",
-      "summary_limitation": "",
+      "summary_motivation": "[AI generated] This paper addresses the need for cost-efficient and explainable hate speech detection models. It proposes a lightweight alternative to computationally expensive deep learning architectures by leveraging weighted Valence, Arousal, and Dominance (VAD) scores for classification, aiming to balance performance with transparency and reduced resource demands. [翻译] 本文旨在解决对高效、可解释的仇恨言论检测模型的需求。它通过利用加权效价、唤醒度和支配度（VAD）分数进行分类，提出了一种轻量级方案，以替代计算成本高昂的深度学习架构，旨在平衡性能、可解释性与降低的资源需求。",
+      "summary_innovation": "[AI generated] The paper introduces a lightweight, explainable hate speech detection model based on weighted Valence, Arousal, and Dominance (VAD) scores. This approach demonstrates competitive performance against complex neural networks, including GPT-based models, while offering significant advantages in computational efficiency and model transparency. [翻译] 该论文提出了一种基于加权效价、唤醒度和支配度（VAD）分数的轻量级、可解释的仇恨言论检测模型。该方法在保持与复杂神经网络（包括GPT类模型）相竞争的性能的同时，在计算效率和模型透明度方面具有显著优势。",
+      "summary_method": "[AI generated] The paper introduces a method for hate speech detection based on a weighted sum of Valence, Arousal, and Dominance (VAD) scores. It analyzes hate and non-hate speech words to determine optimal weights and classification strategies, aiming for a simple, computationally efficient, and explainable model.\n\n[翻译]\n该论文提出了一种基于效价、唤醒度和支配度（VAD）分数加权和的仇恨言论检测方法。该方法通过分析仇恨与非仇恨言论词汇来确定最优权重和分类策略，旨在构建一个简单、计算高效且可解释的模型。",
+      "summary_conclusion": "[AI generated] The paper proposes a lightweight, explainable hate speech detection model based on weighted Valence, Arousal, and Dominance (VAD) scores. This simple approach demonstrates competitive performance against state-of-the-art neural networks, including GPT-based models, offering a cost-effective and interpretable alternative for the task.\n\n[翻译]\n该论文提出了一种基于加权效价、唤醒度和支配度（VAD）分数的轻量级、可解释的仇恨言论检测模型。这种简单的方法在性能上可与包括GPT模型在内的先进神经网络模型竞争，为该任务提供了一种成本效益高且可解释的替代方案。",
+      "summary_limitation": "[AI generated] The proposed method relies on psychological lexicons (VAD), limiting its applicability to languages or domains where such resources are scarce or unavailable. Its performance may degrade for implicit hate speech that lacks overt emotional markers. [翻译] 该方法依赖于心理学词典（VAD），这限制了其在相关资源稀缺或不可用的语言或领域中的适用性。对于缺乏明显情感标记的隐晦仇恨言论，其性能可能会下降。",
+      "summary_citable_paragraph": "[AI generated] This paper proposes a lightweight, explainable hate speech detection model using weighted Valence, Arousal, and Dominance (VAD) scores, demonstrating competitive performance against complex neural networks while offering computational efficiency and transparency. [翻译] 该论文提出了一种使用加权效价、唤醒度和支配度（VAD）分数的轻量级、可解释的仇恨言论检测模型，在提供计算效率和透明度的同时，其性能可与复杂的神经网络模型相媲美。",
       "paper_url": "https://aclanthology.org/2025.findings-acl.667",
       "project_url": "",
       "conference": "Findings 2025",
-      "title_translation": "",
-      "analogy_summary": "",
+      "title_translation": "[AI generated] 迈向可解释的仇恨言论检测",
+      "analogy_summary": "[AI generated] A lightweight psychological model using weighted VAD scores achieves competitive hate speech detection, offering an explainable and computationally efficient alternative to complex neural networks. [翻译] 一种使用加权VAD分数的轻量级心理学模型实现了有竞争力的仇恨言论检测，为复杂的神经网络提供了一种可解释且计算高效的替代方案。",
       "pipeline_image": [],
       "abstract": "Recent advancements in deep learning have significantly enhanced the efficiency and accuracy of natural language processing (NLP) tasks. However, these models often require substantial computational resources, which remains a major drawback. Reducing the complexity of deep learning architectures, and exploring simpler yet effective approaches can lead to cost-efficient NLP solutions. This is also a step towards explainable AI, i.e., uncovering how a particular task is carried out. For this analysis, we chose the task of hate speech detection. We address hate speech detection by introducing a model that employs a weighted sum of valence, arousal, and dominance (VAD) scores for classification. To determine the optimal weights and classification strategies, we analyze hate speech and non-hate speech words based on both their individual and summed VAD-values. Our experimental results demonstrate that this straightforward approach can compete with state-of-the-art neural network methods, including GPT-based models, in detecting hate speech.",
       "contributor": "me",
@@ -294,11 +317,13 @@
       "paper_file": "",
       "uid": "d756f316",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": [],
+      "zotero_item_ref": ""
     },
     {
       "doi": "10.1145/3746027.3754828",
       "title": "From individuals to crowds: Dual-level public response prediction in social media",
+      "citation_key": "",
       "authors": "Jinghui Zhang, Kaiyang Wan, Longwei Xu, Ao Li, Zongfang Liu, Xiuying Chen",
       "date": "2025-10-27",
       "category": [
@@ -307,15 +332,16 @@
         "Macro Social Simulation",
         "Social Simulation for Social Media"
       ],
-      "summary_motivation": "",
-      "summary_innovation": "",
-      "summary_method": "",
-      "summary_conclusion": "",
-      "summary_limitation": "",
+      "summary_motivation": "[AI generated] The paper aims to address the limitations of existing public response prediction methods, which lack micro-level personalization and macro-level sentiment distribution analysis. It proposes a unified framework to predict responses at both individual and group levels for better crisis management and social trend analysis.\n\n[翻译]\n本文旨在解决现有公众反应预测方法的局限性，这些方法缺乏微观层面的个性化分析和宏观层面的情感分布建模。它提出了一个统一的框架，旨在同时预测个体和群体层面的反应，以提升危机管理和社会趋势分析的效果。",
+      "summary_innovation": "[AI generated] SocialAlign introduces a unified framework for dual-level public response prediction, addressing the limitations of existing methods by simultaneously generating personalized user comments at the micro level and modeling group sentiment distributions at the macro level. Its key innovations include a SocialLLM with a Personalized Analyze-Compose LoRA (PAC-LoRA) structure for tailored content generation and the introduction of the SentiWeibo dataset for real-world evaluation. [翻译] SocialAlign提出了一个用于双层级公众反应预测的统一框架，通过同时在微观层面生成个性化用户评论和在宏观层面建模群体情感分布，解决了现有方法的局限性。其核心创新包括用于定制化内容生成的、带有个性化分析-组合LoRA（PAC-LoRA）结构的SocialLLM，以及为现实世界评估而引入的SentiWeibo数据集。",
+      "summary_method": "[AI generated] SocialAlign employs a dual-level framework: at the micro level, it uses SocialLLM with a Personalized Analyze-Compose LoRA (PAC-LoRA) structure to generate personalized user comments and sentiments; at the macro level, it models group sentiment distributions and aligns them with real-world social media trends. [翻译] SocialAlign采用了一个双层框架：在微观层面，它使用带有个性化分析-组合LoRA（PAC-LoRA）结构的SocialLLM来生成个性化的用户评论和情感；在宏观层面，它建模群体情感分布并将其与现实世界的社交媒体趋势对齐。",
+      "summary_conclusion": "[AI generated] SocialAlign introduces a unified framework for dual-level public response prediction, addressing micro-level personalization and macro-level sentiment distribution. It employs a specialized SocialLLM with PAC-LoRA for personalized comment generation and models group sentiment trends. Evaluated on the new SentiWeibo dataset and LaMP benchmark, it demonstrates superior accuracy, interpretability, and generalization.\n\n[翻译]\nSocialAlign提出了一个用于双层级公众反应预测的统一框架，解决了微观个性化与宏观情感分布的难题。它采用带有PAC-LoRA的专用SocialLLM生成个性化评论，并建模群体情感趋势。在新构建的SentiWeibo数据集和LaMP基准上的评估表明，其在准确性、可解释性和泛化性方面表现优异。",
+      "summary_limitation": "[AI generated] SocialAlign's reliance on a single social media platform (Weibo) for its primary dataset may limit its generalizability to other platforms with different user demographics and interaction norms. Its macro-level modeling, while innovative, focuses on sentiment distribution and may not fully capture other complex group dynamics like information diffusion or community formation. [翻译] SocialAlign 对其主要数据集（微博）的依赖可能限制其推广到其他具有不同用户群体和互动规范平台的能力。其宏观层面的建模虽然创新，但侧重于情感分布，可能无法完全捕捉信息扩散或社区形成等其他复杂的群体动态。",
+      "summary_citable_paragraph": "[AI generated] SocialAlign addresses the limitations of generic and individual-level predictions by proposing a unified framework that generates personalized user comments at the micro level and aligns with real-world sentiment distributions at the macro level, demonstrating improved accuracy and generalization on a new Weibo dataset. [翻译] SocialAlign 通过提出一个统一框架来解决通用和个体层面预测的局限性，该框架在微观层面生成个性化用户评论，在宏观层面与现实世界情感分布对齐，并在新的微博数据集上展示了更高的准确性和泛化能力。",
       "paper_url": "https://dl.acm.org/doi/10.1145/3746027.3754828",
       "project_url": "",
       "conference": "Proceedings of the 33rd ACM International Conference on Multimedia",
-      "title_translation": "",
+      "title_translation": "[AI generated] 从个体到群体：社交媒体中的双层次公众反应预测",
       "analogy_summary": "TLDR: Experimental results on SentiWeibo and related LaMP benchmark demonstrate that SocialAlign surpasses strong baselines, showing improved accuracy, interpretability, and generalization in public response prediction.",
       "pipeline_image": [
         "assets/9e6ef8d8/SocialAlign.png"
@@ -331,25 +357,28 @@
       "paper_file": "",
       "uid": "9e6ef8d8",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": [],
+      "zotero_item_ref": ""
     },
     {
       "doi": "10.1145/3543873.3587605",
       "title": "LLMs to the Moon? Reddit Market Sentiment Analysis with Large Language Models",
+      "citation_key": "",
       "authors": "Xiang Deng, Vasilisa Bashlovkina, Feng Han, Simon Baumgartner, Michael Bendersky",
       "date": "2023-04-30",
       "category": [
         "Sentiment Analysis"
       ],
-      "summary_motivation": "",
-      "summary_innovation": "",
-      "summary_method": "",
-      "summary_conclusion": "",
-      "summary_limitation": "",
+      "summary_motivation": "[AI generated] This work addresses the challenge of market sentiment analysis on social media, which is hindered by the scarcity of high-quality labeled data due to the specialized knowledge required. It proposes a semi-supervised pipeline using an LLM to generate weak labels for Reddit posts, subsequently distilling this knowledge into a smaller, production-ready model.\n\n[翻译]\n本研究旨在解决社交媒体市场情绪分析面临的挑战，该挑战因需要专业知识而导致高质量标注数据稀缺。论文提出了一种利用大语言模型为Reddit帖子生成弱标签的半监督流程，随后将这些知识提炼到一个更小、可用于生产环境的模型中。",
+      "summary_innovation": "[AI generated] The paper introduces a semi-supervised pipeline that leverages an LLM to generate weak financial sentiment labels for Reddit posts, addressing the scarcity of high-quality annotated data. Its key innovation lies in using Chain-of-Thought prompting and multiple reasoning paths to enhance label stability and accuracy, followed by distilling this knowledge into a small, production-suitable model via a regression loss, achieving performance competitive with supervised models.\n\n[翻译]\n该论文提出了一种半监督流程，利用大语言模型为Reddit帖子生成弱金融情感标签，以解决高质量标注数据稀缺的问题。其核心创新在于使用思维链提示和多推理路径来提升标签的稳定性和准确性，随后通过回归损失将知识蒸馏到一个适用于生产环境的小型模型中，取得了与监督模型相媲美的性能。",
+      "summary_method": "[AI generated] The method employs a semi-supervised pipeline. It first uses an LLM with Chain-of-Thought prompting and multiple reasoning paths to generate weak financial sentiment labels for Reddit posts. These labels are then used to train a smaller student model via a regression loss for efficient production deployment.\n\n[翻译]\n该方法采用半监督流程。首先使用具备思维链提示和多推理路径的大语言模型为Reddit帖子生成弱金融情感标签。随后，这些标签通过回归损失被用于训练一个更小的学生模型，以实现高效的生产部署。",
+      "summary_conclusion": "[AI generated] This work demonstrates the feasibility of using LLMs for semi-supervised financial sentiment analysis on Reddit. By employing Chain-of-Thought prompting and multi-path reasoning to generate weak labels, and subsequently distilling this knowledge into a smaller model via regression loss, the approach achieves performance competitive with supervised models. This highlights the potential of LLMs to alleviate the need for extensive skill-intensive manual annotation in specialized domains like market sentiment analysis.\n\n[翻译]\n本研究证明了使用大语言模型对Reddit进行半监督金融情感分析的可行性。该方法通过思维链提示和多路径推理生成弱标签，并利用回归损失将知识蒸馏到一个小型模型中，最终达到了与监督模型相当的性能。这凸显了大语言模型在减轻如市场情绪分析等专业领域对大量技能密集型人工标注需求的潜力。",
+      "summary_limitation": "[AI generated] The study's primary limitation lies in its reliance on LLM-generated weak labels, which may inherit the model's biases and lack the nuanced financial expertise of human experts, potentially limiting the model's accuracy in complex market sentiment scenarios. Furthermore, the ethical considerations surrounding the use of automated sentiment analysis for financial markets are acknowledged as a significant constraint for direct production deployment.\n\n[翻译]\n该研究的主要局限在于其依赖LLM生成的弱标签，这些标签可能继承模型的偏见且缺乏人类专家的细致金融知识，这可能在复杂的市场情绪场景中限制模型的准确性。此外，围绕将自动化情绪分析用于金融市场的伦理考量，被认为是阻碍其直接投入生产应用的一个重要制约因素。",
+      "summary_citable_paragraph": "[AI generated] This work addresses the challenge of labeling financial sentiment on Reddit by employing an LLM for weak supervision, using Chain-of-Thought prompting and multi-path reasoning to generate stable labels for training a small, production-ready model that matches supervised performance. [翻译] 该研究通过使用大语言模型进行弱监督来解决Reddit金融情感标注的挑战，利用思维链提示和多路径推理生成稳定标签来训练一个性能媲美监督模型的小型生产就绪模型。",
       "paper_url": "https://dl.acm.org/doi/10.1145/3543873.3587605",
       "project_url": "",
       "conference": "Companion Proceedings of the ACM Web Conference 2023",
-      "title_translation": "",
+      "title_translation": "[AI generated] 大语言模型能否一飞冲天？基于大型语言模型的Reddit市场情绪分析",
       "analogy_summary": "TLDR: This case study conducts a case study approaching market sentiment analysis on social media content with semi-supervised learning using a large language model (LLM), finding that prompting the LLM to produce Chain-of-Thought summaries and forcing it through several reasoning paths helps generate more stable and accurate labels.",
       "pipeline_image": [
         "assets/adfb2fb1/LLMs to the Moon.png"
@@ -365,11 +394,13 @@
       "paper_file": "",
       "uid": "adfb2fb1",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": [],
+      "zotero_item_ref": ""
     },
     {
       "doi": "10.18653/v1/2025.emnlp-main.619",
       "title": "A symbolic adversarial learning framework for evolving fake news generation and detection",
+      "citation_key": "",
       "authors": "Chong Tian, Qirong Ho, Xiuying Chen",
       "date": "2025-11",
       "category": [
@@ -381,16 +412,17 @@
         "Misinformation Analysis",
         "Misinformation Generation"
       ],
-      "summary_motivation": "",
-      "summary_innovation": "",
-      "summary_method": "",
-      "summary_conclusion": "",
-      "summary_limitation": "",
+      "summary_motivation": "[AI generated] The rapid advancement of LLMs has significantly increased the risk of sophisticated fake news generation, posing a major challenge to existing detection methods that struggle with its dynamically evolving nature. This work proposes a novel adversarial learning framework to address this challenge by simultaneously improving fake news generation and detection through iterative symbolic optimization.\n\n[翻译]\n大型语言模型（LLM）的快速发展显著增加了生成复杂虚假新闻的风险，这对现有检测方法构成了重大挑战，这些方法难以应对其动态演变的特性。本研究提出了一种新颖的对抗学习框架，通过迭代的符号化优化过程，同时改进虚假新闻的生成与检测，以应对这一挑战。",
+      "summary_innovation": "[AI generated] The paper introduces a Symbolic Adversarial Learning Framework (SALF) that innovates by using agent symbolic learning to simulate adversarial training for fake news generation and detection. It replaces traditional neural network weight updates with operations on natural language representations of prompts, gradients, and loss, enabling iterative refinement through structured debates between generation and detection agents.\n\n[翻译]\n该论文提出的符号对抗学习框架（SALF）的创新之处在于，它利用智能体符号学习来模拟假新闻生成与检测的对抗训练。该框架用对提示词、梯度和损失的自然语言表示进行操作，取代了传统的神经网络权重更新，使得生成智能体与检测智能体能够通过结构化辩论进行迭代优化。",
+      "summary_method": "[AI generated] The Symbolic Adversarial Learning Framework (SALF) employs an agent-based adversarial training paradigm. It uses a generation agent to craft deceptive narratives and a detection agent that employs structured debates to identify logical and factual flaws. The agents are represented via agent symbolic learning, where learnable weights are defined by prompts, and optimization is simulated by operating on natural language representations of weights, loss, and gradients, rather than traditional numerical updates.\n\n[翻译]\n符号对抗学习框架（SALF）采用了一种基于智能体的对抗训练范式。它使用一个生成智能体来制作欺骗性叙事，以及一个检测智能体，该智能体通过结构化辩论来识别逻辑和事实缺陷。智能体通过智能体符号学习来表示，其中可学习的权重由提示定义，优化过程通过对权重、损失和梯度的自然语言表示进行操作来模拟，而非传统的数值更新。",
+      "summary_conclusion": "[AI generated] The proposed Symbolic Adversarial Learning Framework (SALF) introduces a novel agent-based adversarial training paradigm for fake news generation and detection. It replaces traditional neural updates with agent symbolic learning, where prompts define learnable weights, and operations on natural language representations simulate back-propagation. Experiments show SALF effectively generates sophisticated fake news that degrades state-of-the-art detectors and can also refine them through adversarial interactions.\n\n[翻译]\n所提出的符号对抗学习框架（SALF）引入了一种新颖的、基于智能体的对抗训练范式，用于虚假新闻的生成与检测。它用智能体符号学习替代了传统的神经更新，其中可学习的权重由提示词定义，并通过自然语言表征上的操作来模拟反向传播。实验表明，SALF能有效生成复杂的虚假新闻以降低最先进检测器的性能，并能通过对抗性交互来优化这些检测器。",
+      "summary_limitation": "[AI generated] The proposed symbolic adversarial learning framework relies on agent prompts to define learnable weights, which may limit its scalability and adaptability to more complex, multi-turn adversarial scenarios beyond the structured debate format. Its effectiveness is demonstrated primarily on multilingual fake news benchmarks, leaving its generalizability to other evolving misinformation domains (e.g., multimodal or highly contextual) unverified.\n\n[翻译]\n所提出的符号对抗学习框架依赖智能体提示来定义可学习权重，这可能限制了其在结构化辩论格式之外、更复杂的多轮对抗场景中的可扩展性和适应性。其有效性主要在多语言假新闻基准数据集上得到验证，其在其他动态演化的虚假信息领域（如多模态或高语境领域）的泛化能力尚未得到检验。",
+      "summary_citable_paragraph": "[AI generated] The Symbolic Adversarial Learning Framework (SALF) introduces an agent-based adversarial training paradigm using symbolic learning, where generation and detection agents iteratively refine through structured debates, effectively creating sophisticated fake news that challenges state-of-the-art detectors while also improving their robustness. [翻译] 符号对抗学习框架（SALF）引入了一种基于智能体的对抗训练范式，它利用符号学习让生成和检测智能体通过结构化辩论进行迭代优化，能有效生成挑战先进检测器的复杂虚假新闻，同时提升检测器鲁棒性。",
       "paper_url": "https://aclanthology.org/2025.emnlp-main.619/",
       "project_url": "",
       "conference": "EMNLP 2025",
-      "title_translation": "",
-      "analogy_summary": "",
+      "title_translation": "[AI generated] 一种符号对抗学习框架用于演化虚假新闻生成与检测",
+      "analogy_summary": "[AI generated] SALF simulates an adversarial arms race between fake news generators and detectors through symbolic agent learning, evolving both sides without neural updates. [翻译] SALF 通过符号化智能体学习模拟假新闻生成器与检测器之间的对抗性军备竞赛，无需神经更新即可实现双方共同进化。",
       "pipeline_image": [
         "assets/0769fb9d/SALF.png"
       ],
@@ -405,11 +437,13 @@
       "paper_file": "",
       "uid": "0769fb9d",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": [],
+      "zotero_item_ref": ""
     },
     {
       "doi": "10.18653/v1/2025.emnlp-main.1330",
       "title": "The stepwise deception: Simulating the evolution from true news to fake news with LLM agents",
+      "citation_key": "",
       "authors": "Yuhan Liu, Zirui Song, Juntian Zhang, Xiaoqing Zhang, Xiuying Chen, Rui Yan",
       "date": "2025",
       "category": [
@@ -420,15 +454,16 @@
         "Social Simulation for Social Media",
         "Misinformation Generation"
       ],
-      "summary_motivation": "",
-      "summary_innovation": "",
-      "summary_method": "",
-      "summary_conclusion": "",
-      "summary_limitation": "",
+      "summary_motivation": "[AI generated] This paper proposes FUSE, a novel LLM-based agent simulation framework, to address the critical gap in understanding the gradual evolutionary process from true news to fake news within social networks, rather than assuming fake news as a pre-existing entity. [翻译] 本文提出FUSE，一个新颖的基于大语言模型的智能体仿真框架，旨在解决理解真实新闻在社交网络中如何逐步演变为虚假新闻这一关键研究空白，而非将虚假新闻视为预先存在的实体。",
+      "summary_innovation": "[AI generated] The paper introduces FUSE, a novel LLM-based agent simulation framework that explicitly models the stepwise evolution of fake news from true news, rather than assuming its pre-existence. It innovates by designing a social network with four distinct LLM agent types (spreaders, commentators, verifiers, bystanders) to simulate realistic daily interactions that progressively distort information. A key contribution is the development of FUSE-EVAL, a comprehensive evaluation framework to quantify truth deviation across multiple linguistic and semantic dimensions.\n\n[翻译]\n该论文提出了FUSE，一个新颖的基于LLM的智能体仿真框架，其创新在于明确模拟了假新闻从真实新闻逐步演变的过程，而非假定其预先存在。它通过设计一个包含四种不同类型LLM智能体（传播者、评论者、验证者、旁观者）的社交网络来模拟导致信息逐步失真的日常互动。一个核心贡献是开发了FUSE-EVAL，一个用于从多维度语言和语义层面",
+      "summary_method": "[AI generated] The FUSE framework employs an LLM-based agent simulation to model the evolution of fake news. It constructs a social network with four distinct LLM agent types (spreaders, commentators, verifiers, bystanders) to simulate daily interactions that progressively distort true information. The framework quantifies this distortion using FUSE-EVAL, a multi-dimensional evaluation metric for truth deviation.\n\n[翻译]\nFUSE框架采用基于大语言模型的智能体模拟来建模虚假新闻的演化过程。它构建了一个包含四种不同类型智能体（传播者、评论者、验证者、旁观者）的社交网络，以模拟逐步扭曲真实信息的日常互动。该框架使用FUSE-EVAL（一个衡量真实性偏离的多维度评估指标）来量化这种信息扭曲。",
+      "summary_conclusion": "[AI generated] The FUSE framework demonstrates that LLM-based agent simulation can effectively model the gradual evolution of true news into fake news within a social network, highlighting the critical importance of early intervention to prevent misinformation spread. [翻译] FUSE框架表明，基于大语言模型的智能体模拟能够有效建模真实新闻在社交网络中逐步演变为虚假新闻的过程，凸显了早期干预对于防止错误信息传播的关键重要性。",
+      "summary_limitation": "[AI generated] The FUSE framework relies on LLM agents whose behaviors are simulated rather than empirically validated against real human data, potentially limiting the realism of the simulated evolution process. Its evaluation, while comprehensive, is primarily based on reproducing known fake news scenarios and may not fully capture the complexity of novel, emergent misinformation in dynamic online environments.\n\n[翻译]\nFUSE框架依赖于LLM智能体，其行为是模拟而非基于真实人类数据进行实证验证的，这可能限制了模拟演化过程的真实性。其评估虽然全面，但主要基于复现已知的虚假新闻场景，可能无法完全捕捉动态在线环境中新颖、涌现的错误信息的复杂性。",
+      "summary_citable_paragraph": "[AI generated] FUSE introduces an LLM-based agent simulation framework to model the gradual evolution of true news into fake news within a social network, employing distinct agent roles and a novel evaluation metric, FUSE-EVAL, to quantify distortion and highlight the importance of early intervention. [翻译] FUSE提出了一个基于大语言模型的智能体仿真框架，用于模拟真实新闻在社交网络中逐步演变为虚假新闻的过程，它通过定义不同的智能体角色和开发新的评估指标FUSE-EVAL来量化信息失真，并强调了早期干预的重要性。",
       "paper_url": "http://arxiv.org/abs/2410.19064",
       "project_url": "",
       "conference": "Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing",
-      "title_translation": "",
+      "title_translation": "[AI generated] 逐步欺骗：利用LLM智能体模拟从真实新闻到虚假新闻的演化过程",
       "analogy_summary": "TLDR: A novel Large Language Model-based simulation approach explicitly focusing on fake news evolution from real news, which effectively captures fake news evolution patterns and accurately reproduces known fake news, aligning closely with human evaluations.",
       "pipeline_image": [
         "assets/67ebdd0a/FUSE.png"
@@ -444,11 +479,13 @@
       "paper_file": "",
       "uid": "67ebdd0a",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": [],
+      "zotero_item_ref": ""
     },
     {
       "doi": "10.18653/v1/2025.findings-acl.468",
       "title": "GA-S^3: Comprehensive social network simulation with group agents",
+      "citation_key": "",
       "authors": "Yunyao Zhang, Zikai Song, Hang Zhou, Wenfeng Ren, Yi-Ping Phoebe Chen, Junqing Yu, Wei Yang",
       "date": "2025-07",
       "category": [
@@ -457,16 +494,17 @@
         "Group-oriented Social Simulation",
         "Social Simulation for Social Media"
       ],
-      "summary_motivation": "",
-      "summary_innovation": "",
-      "summary_method": "",
-      "summary_conclusion": "",
-      "summary_limitation": "",
+      "summary_motivation": "[AI generated] The paper proposes a comprehensive social network simulation system (GA-S^3) to address the challenge of modeling large-scale, complex social networks with billions of interacting individuals. Its core motivation is to enable accurate and realistic simulations of online social phenomena at a manageable computational cost by introducing a novel abstraction: group agents that model collections of individuals with similar behaviors, rather than simulating each individual separately.\n\n[翻译]\n该论文提出一个全面的社交网络模拟系统（GA-S^3），旨在解决对包含数十亿交互个体的大规模复杂社交网络进行建模的挑战。其核心动机是通过引入一种新颖的抽象——对具有相似行为的个体集合进行建模的群体智能体，而非单独模拟每个个体——从而以可控的计算成本实现对在线社交现象的准确且高度真实的模拟。",
+      "summary_innovation": "[AI generated] The paper introduces a novel agent-based social simulation system (GA-S^3) that employs \"Group Agents\" to model collections of individuals with similar behaviors, enabling large-scale, realistic social network simulations at a reduced computational cost compared to individual-level agent models. It also contributes a new social network benchmark dataset derived from 2024 online events for evaluation.\n\n[翻译]\n该论文提出了一种新颖的基于智能体的社会模拟系统（GA-S^3），该系统采用“群体智能体”来建模具有相似行为的个体集合，与个体级智能体模型相比，能以更低计算成本实现大规模、高真实性的社交网络模拟。同时，论文贡献了一个基于2024年在线事件构建的新社交网络基准数据集用于评估。",
+      "summary_method": "[AI generated] GA-S³ employs a group agent-based simulation approach, where each agent models a collection of individuals with similar behaviors rather than a single entity. This design enables the simulation of large-scale social network phenomena with complex interactions at a manageable computational cost. The system leverages these agents to make intelligent decisions regarding various online events, facilitating accurate and realistic predictions.\n\n[翻译]\nGA-S³采用了一种基于群体智能体的模拟方法，其中每个智能体模拟的是一组具有相似行为的个体集合，而非单一实体。这种设计使得系统能够以可控的计算成本模拟具有复杂交互的大规模社交网络现象。该系统利用这些智能体对各种在线事件做出智能决策，从而实现准确且高度真实的预测。",
+      "summary_conclusion": "[AI generated] GA-S^3 introduces a group agent paradigm for large-scale social network simulation, achieving accurate predictions of online event dynamics with manageable computational cost. [翻译] GA-S^3 提出了用于大规模社交网络仿真的群体智能体范式，以可控的计算成本实现了对在线事件动态的准确预测。",
+      "summary_limitation": "[AI generated] The proposed group agent abstraction, while reducing computational cost, may oversimplify individual heterogeneity within groups, potentially limiting the simulation's fidelity to fine-grained, individual-level social dynamics. [翻译] 所提出的群体智能体抽象虽然降低了计算成本，但可能过度简化了群体内部的个体异质性，这可能限制了模拟对细粒度、个体层面社会动态的保真度。",
+      "summary_citable_paragraph": "[AI generated] GA-S³ introduces group agents to simulate large-scale social networks efficiently, achieving realistic predictions of online event dynamics with a benchmark built from 2024 traffic data. [翻译] GA-S³ 通过引入群体智能体来高效模拟大规模社交网络，并基于2024年流量数据构建的基准测试，实现了对在线事件动态的高度真实预测。",
       "paper_url": "https://aclanthology.org/2025.findings-acl.468/",
       "project_url": "",
       "conference": "ACL Findings 2025",
-      "title_translation": "",
-      "analogy_summary": "",
+      "title_translation": "[AI generated] GA-S^3：基于群体代理的综合性社交网络模拟",
+      "analogy_summary": "[AI generated] GA-S^3 employs group agents as computational units to simulate large-scale social networks, analogous to using representative samples to model population dynamics. [翻译] GA-S^3 采用群体智能体作为计算单元来模拟大规模社交网络，类似于使用代表性样本来建模群体动态。",
       "pipeline_image": [],
       "abstract": "Social network simulation is developed to provide a comprehensive understanding of social networks in the real world, which can be leveraged for a wide range of applications such as group behavior emergence, policy optimization, and business strategy development. However, billions of individuals and their evolving interactions involved in social networks pose challenges in accurately reflecting real-world complexities. In this study, we propose a comprehensive Social network Simulation System (GA\\text-S^3) that leverages newly designed Group Agents to make intelligent decisions regarding various online events. Unlike other intelligent agents that represent an individual entity, our group agents model a collection of individuals exhibiting similar behaviors, facilitating the simulation of large-scale network phenomena with complex interactions at a manageable computational cost. Additionally, we have constructed a social network benchmark from 2024 popular online events that contains fine-grained information on Internet traffic variations. The experiment demonstrates that our approach is capable of achieving accurate and highly realistic prediction results.",
       "contributor": "",
@@ -479,7 +517,8 @@
       "paper_file": "",
       "uid": "79eb878f",
       "conflict_marker": false,
-      "invalid_fields": []
+      "invalid_fields": [],
+      "zotero_item_ref": ""
     }
   ]
 }

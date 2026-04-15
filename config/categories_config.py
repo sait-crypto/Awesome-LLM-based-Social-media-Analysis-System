@@ -75,6 +75,10 @@ CATEGORIES_CHANGE_LIST = [
         "old_unique_name": "Social Media Security",   # 旧的唯一标识符（被替换）
         "new_unique_name": "Ethics and Safety",   # 新的唯一标识符（替换目标）
     },
+    {
+        "old_unique_name": "Dialogue and Conversational Systems",   # 旧的唯一标识符（被替换）
+        "new_unique_name": "Socially-Aware Dialogue Generation",   # 新的唯一标识符（替换目标）
+    },
 ]
 
 # =========================================分类配置=========================================
@@ -387,6 +391,15 @@ CATEGORIES_CONFIG = {
             "enabled": True,
             "description": "[二级分类]（Generation） — 社交内容生成",
         },
+        
+        {
+            "unique_name": "Comment Generation",
+            "order": 21,
+            "name": "Comment Generation",
+            "predecessor_category": "Social Content Generation",
+            "enabled": True,
+            "description": "[三级分类]（Social Content Generation） —  评论生成（社媒环境中生成热门评论）",
+        },
         {
             "unique_name": "Hashtag and Caption Generation",
             "order": 21,
@@ -395,6 +408,7 @@ CATEGORIES_CONFIG = {
             "enabled": True,
             "description": "[三级分类]（Social Content Generation） — 标签与标题生成",
         },
+
         {
             "unique_name": "Social Summarization",
             "order": 21,
@@ -402,14 +416,6 @@ CATEGORIES_CONFIG = {
             "predecessor_category": "Social Content Generation",
             "enabled": True,
             "description": "[三级分类]（Social Content Generation） — 社交摘要生成",
-        },
-        {
-            "unique_name": "Comment Generation",
-            "order": 21,
-            "name": "Comment Generation",
-            "predecessor_category": "Social Content Generation",
-            "enabled": True,
-            "description": "[三级分类]（Social Content Generation） —  评论生成",
         },
         # {
         #     "unique_name": "Debate Generation",
@@ -419,14 +425,7 @@ CATEGORIES_CONFIG = {
         #     "enabled": True,
         #     "description": "[三级分类]（Social Content Generation） —  辩论生成",
         # },
-        {
-            "unique_name": "Dialogue and Conversational Systems",
-            "order": 21,
-            "name": "Dialogue and Conversational Systems",
-            "predecessor_category": "Social Content Generation",
-            "enabled": True,
-            "description": "[三级分类]（Social Content Generation） — 对话与会话系统",
-        },
+
         {
             "unique_name": "Humorous and Creative Content Generation",
             "order": 22,
@@ -450,6 +449,14 @@ CATEGORIES_CONFIG = {
             "predecessor_category": "Humorous and Creative Content Generation",
             "enabled": True,
             "description": "[四级分类]（Humorous and Creative Content Generation） —  幽默生成",
+        },
+        {
+            "unique_name": "Socially-Aware Dialogue Generation",
+            "order": 23,
+            "name": "Socially-Aware Dialogue Generation",
+            "predecessor_category": "Generation",
+            "enabled": True,
+            "description": "[三级分类]（Generation） — 社交感知对话生成",
         },
         {
             "unique_name": "Social Impact and Intervention Generation",
@@ -498,7 +505,7 @@ CATEGORIES_CONFIG = {
             "name": "Social Simulation",
             "predecessor_category": "Simulation and Deduction",
             "enabled": True,
-            "description": "[二级分类]（Simulation and Deduction） —  社会仿真",
+            "description": "[二级分类]（Simulation and Deduction） —  社会仿真，研究主体是进行社会结构和属性仿真系统",
         },
         {
             "unique_name": "Micro Social Simulation",
@@ -530,7 +537,7 @@ CATEGORIES_CONFIG = {
             "name": "Dynamic Social Simulation",
             "predecessor_category": "Social Simulation",
             "enabled": True,
-            "description": "[三级分类]（Social Simulation） —  交叉分类-维度2-时间动态；动态社会仿真，关注系统随时间演化的过程，如个体行为变化、群体互动模式/整体表现演变",
+            "description": "[三级分类]（Social Simulation） —  交叉分类-维度2-时间动态；动态社会仿真，关注系统随时间演化的过程，有时间动态维度，如个体行为变化、群体互动模式/整体表现演变",
 
         },
         {
@@ -612,6 +619,14 @@ CATEGORIES_CONFIG = {
             "predecessor_category": "Social Simulation",
             "enabled": True,
             "description": "[三级分类]（Social Simulation） —  交叉分类-维度5-应用领域；游戏应用社会仿真：用于游戏场景和需求的社会仿真",
+        },     
+        {
+            "unique_name": "Social Simulation for Embodied Intelligence",
+            "order": 28,
+            "name": "Social Simulation for Embodied Intelligence",
+            "predecessor_category": "Social Simulation",
+            "enabled": True,
+            "description": "[三级分类]（Social Simulation） —  交叉分类-维度5-应用领域；体现智能体的社会仿真：用于体现智能体行为和交互的社会仿真",
         },        
         {
             "unique_name": "Social Simulation for Sociology",
@@ -627,7 +642,7 @@ CATEGORIES_CONFIG = {
             "name": "Social Simulation for Social Media",
             "predecessor_category": "Social Simulation",
             "enabled": True,
-            "description": "[三级分类]（Social Simulation） —  交叉分类-维度5-应用领域；社交媒体应用社会仿真：用于社交媒体模拟场景的社会仿真",
+            "description": "[三级分类]（Social Simulation） —  交叉分类-维度5-应用领域；社交媒体应用社会仿真：用于社交媒体模拟场景的社会仿真（因为和前述分类重复，重点讨论simulation方法带来范式转变的社交媒体分析领域研究）",
         },      
         {
             "unique_name": "Social Simulation for Other Fields",
@@ -636,6 +651,14 @@ CATEGORIES_CONFIG = {
             "predecessor_category": "Social Simulation",
             "enabled": True,
             "description": "[三级分类]（Social Simulation） —  交叉分类-维度5-应用领域；不属于以上应用场景的用于下游应用的社会仿真",
+        },
+        {
+            "unique_name": "Social Value and Bias for Social Simulation",
+            "order": 28,
+            "name": "Social Value and Bias for Social Simulation",
+            "predecessor_category": "Social Simulation",
+            "enabled": True,
+            "description": "[三级分类]（Social Simulation） —  研究社会仿真社会价值与偏见",
         },
 
 

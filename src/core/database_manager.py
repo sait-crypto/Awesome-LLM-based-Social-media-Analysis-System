@@ -357,31 +357,3 @@ class DatabaseManager:
             if hasattr(paper, k):
                 setattr(paper, k, v)
 
-    def delete_paper(self, target_paper: Paper) -> bool:
-        """删除单篇论文"""
-        success,papers = self.load_database()
-        if not success:            
-            print(f"加载数据库失败: {self.database_path}")
-            return False
-        original_len = len(papers)
-        
-        new_papers = []
-        deleted = False
-        
-        for p in papers:
-            if not deleted:
-                # 尝试匹配
-                if p.uid and target_paper.uid and p.uid == target_paper.uid:
-                    deleted = True
-                    continue
-                elif is_same_identity(p, target_paper):
-                    # 只有当非系统字段也一致时才认为是同一篇（防止删错冲突组里的其他论文）
-                    # 简化：假设 GUI 传来的 paper 具有唯一性
-                    deleted = True
-                    continue
-            new_papers.append(p)
-
-        if len(new_papers) < original_len:
-            return self.save_database(new_papers)
-        
-        return False
