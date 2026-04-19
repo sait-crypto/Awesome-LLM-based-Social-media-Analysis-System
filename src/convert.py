@@ -248,6 +248,7 @@ class ReadmeGenerator:
             val = getattr(paper, k, "")
             if val:
                 disp = self.config.get_tag_field(k, 'display_name') or name
+                disp = str(disp).replace('\r', '').replace('\n', '')
                 fields.append(f"**[{disp}]** {self._sanitize_field(val)}")
         
         full_html = "<br>".join(fields)
